@@ -1099,6 +1099,10 @@ function Modal() {
   var currentProductsCollectionId = currentProductsCollectionIdState[0];
   var setCurrentProductsCollectionId = currentProductsCollectionIdState[1];
 
+  var productsCacheState = useState({});
+  var productsCache = productsCacheState[0];
+  var setProductsCache = productsCacheState[1];
+
   var lastCartActionStatusState = useState('idle');
   var lastCartActionStatus = lastCartActionStatusState[0];
   var setLastCartActionStatus = lastCartActionStatusState[1];
@@ -1319,12 +1323,25 @@ function Modal() {
     if (!collectionId) {
       return;
     }
+    if (productsCache[collectionId] && Array.isArray(productsCache[collectionId])) {
+      setCurrentProductsCollectionId(collectionId);
+      setCurrentProducts(productsCache[collectionId]);
+      setProductListLoading(false);
+      return;
+    }
     setProductListLoading(true);
-    setCurrentProducts([]);
+    setCurrentProducts(currentProductsCollectionId === collectionId ? currentProducts : []);
     setCurrentProductsCollectionId(collectionId);
     try {
       var products = await fetchProductsForCollection(collectionId);
       setCurrentProducts(products);
+      var nextCache = {};
+      var cacheKeys = Object.keys(productsCache);
+      for (var k = 0; k < cacheKeys.length; k += 1) {
+        nextCache[cacheKeys[k]] = productsCache[cacheKeys[k]];
+      }
+      nextCache[collectionId] = products;
+      setProductsCache(nextCache);
     } catch (err) {
       setErrorMessage(err && err.message ? err.message : String(err));
       setCurrentProducts([]);
@@ -1762,6 +1779,14 @@ function Modal() {
       setScreen('products');
       return;
     }
+    if (club.collectionId && productsCache[club.collectionId] && Array.isArray(productsCache[club.collectionId])) {
+      setCurrentProducts(productsCache[club.collectionId]);
+      setProductListLoading(false);
+    } else {
+      setCurrentProducts([]);
+      setProductListLoading(true);
+    }
+    setCurrentProductsCollectionId(club.collectionId ? club.collectionId : club.name);
     setScreen('products');
     await loadProductsForCollection(club.collectionId);
   }
@@ -1778,6 +1803,14 @@ function Modal() {
       setScreen('products');
       return;
     }
+    if (subsection.collectionId && productsCache[subsection.collectionId] && Array.isArray(productsCache[subsection.collectionId])) {
+      setCurrentProducts(productsCache[subsection.collectionId]);
+      setProductListLoading(false);
+    } else {
+      setCurrentProducts([]);
+      setProductListLoading(true);
+    }
+    setCurrentProductsCollectionId(subsection.collectionId ? subsection.collectionId : subsection.label);
     setScreen('products');
     await loadProductsForCollection(subsection.collectionId);
   }
@@ -2299,34 +2332,34 @@ function Modal() {
 
   function renderLiveDebugPanel() {
     return (
-      <s-section heading="Live data status">
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px;">
         <s-stack direction="block" gap="micro">
-          <s-text>Live fetch started: {liveFetchStarted ? 'yes' : 'no'}</s-text>
-          <s-text>Live fetch succeeded: {liveFetchSucceeded ? 'yes' : 'no'}</s-text>
-          <s-text>Live fetch failed: {liveFetchFailed ? 'yes' : 'no'}</s-text>
-          <s-text>Live source stage: {liveSourceStage}</s-text>
-          <s-text>Pages fetched: {pagesFetched}</s-text>
-          <s-text>Raw collections fetched: {rawCollectionsCount}</s-text>
-          <s-text>Collections returned: {liveCollectionsCount}</s-text>
-          <s-text>Usable clubs built: {liveUsableClubCount}</s-text>
-          <s-text>Direct clubs: {directClubsCount}</s-text>
-          <s-text>Subsection clubs: {subsectionClubsCount}</s-text>
-          <s-text>Orphan child collections ignored: {orphanChildIgnored}</s-text>
-          <s-text>Data source in use: {dataSource}</s-text>
-          <s-text>Error: {liveFetchErrorMessage === '' ? 'none' : liveFetchErrorMessage}</s-text>
+          <s-text size="small" appearance="subdued">Live fetch started: {liveFetchStarted ? 'yes' : 'no'}</s-text>
+          <s-text size="small" appearance="subdued">Live fetch succeeded: {liveFetchSucceeded ? 'yes' : 'no'}</s-text>
+          <s-text size="small" appearance="subdued">Live fetch failed: {liveFetchFailed ? 'yes' : 'no'}</s-text>
+          <s-text size="small" appearance="subdued">Live source stage: {liveSourceStage}</s-text>
+          <s-text size="small" appearance="subdued">Pages fetched: {pagesFetched}</s-text>
+          <s-text size="small" appearance="subdued">Raw collections fetched: {rawCollectionsCount}</s-text>
+          <s-text size="small" appearance="subdued">Collections returned: {liveCollectionsCount}</s-text>
+          <s-text size="small" appearance="subdued">Usable clubs built: {liveUsableClubCount}</s-text>
+          <s-text size="small" appearance="subdued">Direct clubs: {directClubsCount}</s-text>
+          <s-text size="small" appearance="subdued">Subsection clubs: {subsectionClubsCount}</s-text>
+          <s-text size="small" appearance="subdued">Orphan child collections ignored: {orphanChildIgnored}</s-text>
+          <s-text size="small" appearance="subdued">Data source in use: {dataSource}</s-text>
+          <s-text size="small" appearance={liveFetchErrorMessage === '' ? 'subdued' : 'critical'}>Error: {liveFetchErrorMessage === '' ? 'none' : liveFetchErrorMessage}</s-text>
         </s-stack>
-      </s-section>
+      </div>
     );
   }
   function renderDebugHeader() {
     return (
-      <s-section heading="Debug (for diagnostics)">
+      <s-section heading="Diagnostics">
         <s-stack direction="block" gap="micro">
-          <s-text appearance="subdued">DEBUG VERSION: PRODUCT DETAIL V1</s-text>
-          <s-text appearance="subdued">Screen: {screen}</s-text>
-          <s-text appearance="subdued">{dataSource}</s-text>
-          {loading ? <s-text>Loading…</s-text> : null}
-          {errorMessage ? <s-text appearance="critical">{errorMessage}</s-text> : null}
+          <s-text size="small" appearance="subdued">DEBUG VERSION: PRODUCT DETAIL V1</s-text>
+          <s-text size="small" appearance="subdued">Screen: {screen}</s-text>
+          <s-text size="small" appearance="subdued">{dataSource}</s-text>
+          {loading ? <s-text size="small" appearance="subdued">Loading…</s-text> : null}
+          {errorMessage ? <s-text size="small" appearance="critical">{errorMessage}</s-text> : null}
         </s-stack>
         {renderLiveDebugPanel()}
       </s-section>
@@ -2372,7 +2405,8 @@ function Modal() {
     }
     return (
       <s-section heading="Bundle debug">
-        <s-stack direction="block" gap="micro">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px; opacity: 0.88;">
+          <s-stack direction="block" gap="micro">
           <s-text>bundle parent: {product.title}</s-text>
           <s-text>parent variant: {selectedVariant ? selectedVariant.title : 'none'}</s-text>
           <s-text>isBundle: {meta.isBundle ? 'true' : 'false'}</s-text>
@@ -2389,8 +2423,9 @@ function Modal() {
           <s-text>bundle add error: {bundleAddError === '' ? 'none' : bundleAddError}</s-text>
           <s-text>bundle properties preview: {bundlePreview.length === 0 ? 'none' : ('Bundle:' + product.title + ' | ' + bundlePreview.join(' | '))}</s-text>
           <s-text>bundle fetch errors: {bundleDebugFetchErrors.length === 0 ? 'none' : bundleDebugFetchErrors.join(' | ')}</s-text>
-          {names.length > 0 ? <s-text>components: {names.join(', ')}</s-text> : null}
-        </s-stack>
+            {names.length > 0 ? <s-text>components: {names.join(', ')}</s-text> : null}
+          </s-stack>
+        </div>
       </s-section>
     );
   }
@@ -2405,7 +2440,8 @@ function Modal() {
     var summary = hasAnyPersonalisation(meta) ? 'yes' : 'no';
     return (
       <s-section heading="Personalisation debug">
-        <s-stack direction="block" gap="micro">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px; opacity: 0.88;">
+          <s-stack direction="block" gap="micro">
           <s-text>Product supports personalisation: {summary}</s-text>
           <s-text>Parsed max chars: {parsedMax === null ? 'none' : parsedMax}</s-text>
           <s-text>Parsed fee: {feeDisplay === '' ? 'none' : feeDisplay}</s-text>
@@ -2423,8 +2459,9 @@ function Modal() {
           <s-text>enableFileUpload: {meta.enableFileUpload ? 'true' : 'false'}</s-text>
           <s-text>fileUploadLabel: {meta.fileUploadLabel}</s-text>
           <s-text>fileUploadHelpText: {meta.fileUploadHelpText}</s-text>
-          <s-text>fileUploadRequired: {meta.fileUploadRequired ? 'true' : 'false'}</s-text>
-        </s-stack>
+            <s-text>fileUploadRequired: {meta.fileUploadRequired ? 'true' : 'false'}</s-text>
+          </s-stack>
+        </div>
       </s-section>
     );
   }
@@ -2433,7 +2470,8 @@ function Modal() {
     var variantId = selectedVariant ? selectedVariant.id : '';
     return (
       <s-section heading="Cart debug">
-        <s-stack direction="block" gap="micro">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px; opacity: 0.88;">
+          <s-stack direction="block" gap="micro">
           <s-text>Selected product: {selectedProduct ? selectedProduct.title : ''}</s-text>
           <s-text>Selected variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
           <s-text>Variant id: {variantId}</s-text>
@@ -2483,8 +2521,9 @@ function Modal() {
                   })
                   .join(', ')
               : 'none'}
-          </s-text>
-        </s-stack>
+            </s-text>
+          </s-stack>
+        </div>
       </s-section>
     );
   }
@@ -2492,22 +2531,29 @@ function Modal() {
   function renderProductDebug() {
     return (
       <s-section heading="Product debug">
-        <s-stack direction="block" gap="micro">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px; opacity: 0.88;">
+          <s-stack direction="block" gap="micro">
           <s-text>Selected club: {selectedClub ? selectedClub.name : ''}</s-text>
           <s-text>Selected subsection: {selectedSubsection ? selectedSubsection.label : ''}</s-text>
           <s-text>Current collection id: {currentProductsCollectionId ? currentProductsCollectionId : ''}</s-text>
           <s-text>Product list loading: {productListLoading ? 'yes' : 'no'}</s-text>
-          <s-text>Current products count: {currentProducts ? currentProducts.length : 0}</s-text>
-        </s-stack>
+            <s-text>Current products count: {currentProducts ? currentProducts.length : 0}</s-text>
+          </s-stack>
+        </div>
       </s-section>
     );
   }
 
   function renderScreenIntro(title, subtitle) {
+    var showBack = screen !== 'clubs';
     return (
-      <s-section heading={title}>
+      <s-section>
         <s-stack direction="block" gap="small">
-          <s-text>{subtitle}</s-text>
+          <s-stack direction="inline" gap="small" alignment="center">
+            {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
+            <div style="font-weight: 700;"><s-text>{title}</s-text></div>
+          </s-stack>
+          <s-text appearance="subdued">{subtitle}</s-text>
         </s-stack>
       </s-section>
     );
@@ -2531,13 +2577,15 @@ function Modal() {
 
   function renderTapCard(item) {
     return (
-      <s-button key={item.key} variant="secondary" onClick={item.onPress}>
-        <s-stack direction="block" gap="small">
-          {renderImageThumb(item.imageUrl, item.title, item.thumbHeight)}
-          <s-text>{item.title}</s-text>
-          {item.subtitle ? <s-text appearance="subdued">{item.subtitle}</s-text> : null}
-        </s-stack>
-      </s-button>
+      <div key={item.key} style="border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff; padding: 8px;">
+        <s-button variant="tertiary" onClick={item.onPress}>
+          <s-stack direction="block" gap="small">
+            {renderImageThumb(item.imageUrl, item.title, item.thumbHeight)}
+            <div style="font-weight: 700;"><s-text>{item.title}</s-text></div>
+            {item.subtitle ? <s-text appearance="subdued">{item.subtitle}</s-text> : null}
+          </s-stack>
+        </s-button>
+      </div>
     );
   }
 
@@ -2555,7 +2603,7 @@ function Modal() {
                   title: club.name,
                   subtitle: club.type === 'subsections' ? 'Opens subsections' : 'Opens products',
                   imageUrl: club.imageUrl,
-                  thumbHeight: '96px',
+                  thumbHeight: '124px',
                   onPress: function () { handleClubPress(club); },
                 });
               })}
@@ -2583,11 +2631,10 @@ function Modal() {
                   title: sub.label,
                   subtitle: 'View products',
                   imageUrl: sub.imageUrl,
-                  thumbHeight: '92px',
+                  thumbHeight: '118px',
                   onPress: function () { handleSubsectionPress(sub); },
                 });
               })}
-              <s-button variant="primary" onClick={handleBack}>Back</s-button>
             </s-stack>
           </s-section>
           {renderDebugHeader()}
@@ -2612,7 +2659,13 @@ function Modal() {
           {renderScreenIntro(heading, 'Tap a product to view details.')}
           <s-section heading="Products">
             <s-stack direction="block" gap="small">
-              {productListLoading ? <s-text>Loading products…</s-text> : null}
+              {productListLoading ? (
+                <s-stack direction="block" gap="small">
+                  <s-text appearance="subdued">Loading products…</s-text>
+                  <div style="height: 90px; border-radius: 12px; background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);" />
+                  <div style="height: 90px; border-radius: 12px; background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);" />
+                </s-stack>
+              ) : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
               {products.map(function (product) {
                 return renderTapCard({
@@ -2620,11 +2673,10 @@ function Modal() {
                   title: product.title,
                   subtitle: 'View details',
                   imageUrl: product.imageUrl,
-                  thumbHeight: '88px',
+                  thumbHeight: '136px',
                   onPress: function () { handleProductPress(product); },
                 });
               })}
-              <s-button variant="primary" onClick={handleBack}>Back</s-button>
             </s-stack>
           </s-section>
           {renderProductDebug()}
@@ -2685,7 +2737,7 @@ function Modal() {
           <s-section heading="Product detail">
             <s-stack direction="block" gap="small">
               {renderImageThumb(selectedProduct.imageUrl, selectedProduct.title, '130px')}
-              <s-text>{selectedProduct.title}</s-text>
+              <div style="font-weight: 700;"><s-text>{selectedProduct.title}</s-text></div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
                 <s-text appearance="subdued">Testing live cart add for standard products</s-text>
               ) : null}
@@ -2713,7 +2765,6 @@ function Modal() {
                       Continue to personalisation
                     </s-button>
                   ) : null)}
-                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
                 </s-stack>
               </s-section>
             </s-stack>
@@ -2904,7 +2955,7 @@ function Modal() {
         <ScreenScroll>
           <s-section heading="Personalisation">
             <s-stack direction="block" gap="small">
-              <s-text>{selectedProduct.title}</s-text>
+              <div style="font-weight: 700;"><s-text>{selectedProduct.title}</s-text></div>
               <s-text appearance="subdued">Variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
 
               {meta.enablePersonalisation ? (
@@ -2952,7 +3003,6 @@ function Modal() {
                   <s-button variant="primary" onClick={submitPersonalisation}>
                     Add to cart
                   </s-button>
-                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
                 </s-stack>
               </s-section>
             </s-stack>
