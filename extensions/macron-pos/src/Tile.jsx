@@ -6,12 +6,10 @@ export default async () => {
 }
 
 function Extension() {
-  const {i18n} = shopify;
-  
   return (
     <s-tile
-      heading={i18n.translate('tile_heading')}
-      subheading={i18n.translate('tile_subheading', {flavor: 'preact'})}
+      heading="Macron POS"
+      subheading="Club order flow"
       onClick={() => shopify.action.presentModal()}
     />
   );
