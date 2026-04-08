@@ -283,6 +283,31 @@ function parseFeeDisplay(raw) {
   return '+£' + fee.toFixed(2);
 }
 
+function parseFeeAmount(raw) {
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  if (typeof raw === 'object') {
+    if (raw.amount !== undefined) {
+      var numObj = parseFloat(toStr(raw.amount).replace(/[^0-9.\-]/g, ''));
+      if (!isNaN(numObj) && numObj > 0) {
+        return numObj;
+      }
+    }
+    return null;
+  }
+  var text = toStr(raw);
+  if (text === '') {
+    return null;
+  }
+  var cleaned = text.replace(/[^0-9.\-]/g, '');
+  var fee = parseFloat(cleaned);
+  if (isNaN(fee) || fee <= 0) {
+    return null;
+  }
+  return fee;
+}
+
 function parseMaxChars(raw) {
   var text = toStr(raw);
   if (text === '') {
@@ -888,6 +913,34 @@ function Modal() {
   var lastPropertiesAttachStatus = lastPropertiesAttachStatusState[0];
   var setLastPropertiesAttachStatus = lastPropertiesAttachStatusState[1];
 
+  var lastFeeAmountState = useState(null);
+  var lastFeeAmount = lastFeeAmountState[0];
+  var setLastFeeAmount = lastFeeAmountState[1];
+
+  var lastFeeRequiredState = useState(false);
+  var lastFeeRequired = lastFeeRequiredState[0];
+  var setLastFeeRequired = lastFeeRequiredState[1];
+
+  var lastFeeVariantIdState = useState('');
+  var lastFeeVariantId = lastFeeVariantIdState[0];
+  var setLastFeeVariantId = lastFeeVariantIdState[1];
+
+  var lastFeeVariantStatusState = useState('idle');
+  var lastFeeVariantStatus = lastFeeVariantStatusState[0];
+  var setLastFeeVariantStatus = lastFeeVariantStatusState[1];
+
+  var lastFeeErrorMessageState = useState('');
+  var lastFeeErrorMessage = lastFeeErrorMessageState[0];
+  var setLastFeeErrorMessage = lastFeeErrorMessageState[1];
+
+  var lastFeeLineItemUuidState = useState('');
+  var lastFeeLineItemUuid = lastFeeLineItemUuidState[0];
+  var setLastFeeLineItemUuid = lastFeeLineItemUuidState[1];
+
+  var lastFeePropertiesAttachStatusState = useState('idle');
+  var lastFeePropertiesAttachStatus = lastFeePropertiesAttachStatusState[0];
+  var setLastFeePropertiesAttachStatus = lastFeePropertiesAttachStatusState[1];
+
   var loadingState = useState(false);
   var loading = loadingState[0];
   var setLoading = loadingState[1];
@@ -1139,12 +1192,102 @@ function Modal() {
     return lines.length;
   }
 
-  async function addSelectedProductToCart(product, variant, lineItemProperties) {
+  async function fetchPersonalisationFeeVariant(feeAmount) {
+    if (feeAmount === null || feeAmount === undefined) {
+      return null;
+    }
+    var numericFee = parseFloat(feeAmount);
+    if (isNaN(numericFee) || numericFee <= 0) {
+      return null;
+    }
+    if (typeof fetch === 'undefined') {
+      throw new Error('Admin API fetch unavailable for fee lookup');
+    }
+    var query = 'personalisation fee';
+    var gql = 'query FeeVariants($query: String, $cursor: String) { products(first: 20, after: $cursor, query: $query) { edges { cursor node { id title handle variants(first: 50) { edges { node { id title price { amount currencyCode } } } } } } pageInfo { hasNextPage endCursor } } }';
+    var cursor = null;
+    var pageSafetyLimit = 10;
+    var pages = 0;
+    var foundVariantId = null;
+    while (pages < pageSafetyLimit) {
+      pages += 1;
+      var response = await fetch('shopify:admin/api/graphql.json', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: gql, variables: { query: query, cursor: cursor } }),
+      });
+      if (!response || !response.ok) {
+        var statusCode = response && response.status ? response.status : 'unknown';
+        var statusText = response && response.statusText ? response.statusText : 'unknown';
+        var bodyText = '';
+        try {
+          bodyText = await response.text();
+        } catch (e) {
+          bodyText = '';
+        }
+        throw new Error('Fee variant fetch HTTP error: ' + statusCode + ' ' + statusText + (bodyText ? ' ' + bodyText : ''));
+      }
+      var json;
+      try {
+        json = await response.json();
+      } catch (err) {
+        throw new Error('Fee variant JSON parse error: ' + (err && err.message ? err.message : String(err)));
+      }
+      if (json && json.errors && Array.isArray(json.errors) && json.errors.length > 0) {
+        throw new Error('Fee variant GraphQL error: ' + (json.errors[0] && json.errors[0].message ? json.errors[0].message : 'unknown error'));
+      }
+      if (!json || !json.data || !json.data.products || !json.data.products.edges) {
+        break;
+      }
+      var edges = json.data.products.edges;
+      for (var i = 0; i < edges.length; i += 1) {
+        var edge = edges[i];
+        if (!edge || !edge.node || !edge.node.variants || !edge.node.variants.edges) {
+          continue;
+        }
+        var variantEdges = edge.node.variants.edges;
+        for (var v = 0; v < variantEdges.length; v += 1) {
+          var variantNode = variantEdges[v] && variantEdges[v].node ? variantEdges[v].node : null;
+          if (!variantNode || !variantNode.price) {
+            continue;
+          }
+          var priceAmount = parseFloat(toStr(variantNode.price.amount).replace(/[^0-9.\\-]/g, ''));
+          if (!isNaN(priceAmount) && Math.abs(priceAmount - numericFee) < 0.001) {
+            foundVariantId = variantNode.id;
+            break;
+          }
+        }
+        if (foundVariantId) {
+          break;
+        }
+      }
+      if (foundVariantId) {
+        return foundVariantId;
+      }
+      var pageInfo = json.data.products.pageInfo;
+      if (pageInfo && pageInfo.hasNextPage) {
+        cursor = pageInfo.endCursor;
+      } else {
+        break;
+      }
+    }
+    return null;
+  }
+
+  async function addSelectedProductToCart(product, variant, lineItemProperties, feeAmount) {
     setLastCartActionStatus('idle');
     setLastCartErrorMessage('');
     setLastCartLineItemUuid('');
     setLastPropertiesAttachStatus('idle');
     setLastLineItemProperties(lineItemProperties || {});
+    setLastFeeAmount(null);
+    setLastFeeRequired(false);
+    setLastFeeVariantId('');
+    setLastFeeVariantStatus('idle');
+    setLastFeeErrorMessage('');
+    setLastFeeLineItemUuid('');
+    setLastFeePropertiesAttachStatus('idle');
+
     if (!product || !variant) {
       toast('Select a size first');
       setLastCartActionStatus('failed');
@@ -1172,9 +1315,25 @@ function Modal() {
       setLastCartErrorMessage('Cart API unavailable');
       return false;
     }
+
     var beforeCount = cartLineCount();
     setLastCartBeforeCount(beforeCount);
     setLastCartAfterCount(beforeCount);
+
+    var feeRequired = false;
+    var numericFee = null;
+    if (feeAmount !== null && feeAmount !== undefined) {
+      var parsedFee = parseFloat(feeAmount);
+      if (!isNaN(parsedFee) && parsedFee > 0) {
+        feeRequired = true;
+        numericFee = parsedFee;
+      }
+    }
+    setLastFeeRequired(feeRequired);
+    setLastFeeAmount(feeRequired ? numericFee : null);
+
+    var expectedIncrease = 1 + (feeRequired ? 1 : 0);
+
     try {
       var uuid = await shopify.cart.addLineItem(normalized.value, 1);
       setLastCartLineItemUuid(uuid ? String(uuid) : '');
@@ -1204,9 +1363,103 @@ function Modal() {
       } else {
         setLastPropertiesAttachStatus('skipped');
       }
+
+      if (feeRequired) {
+        var feeVariantId = null;
+        try {
+          feeVariantId = await fetchPersonalisationFeeVariant(numericFee);
+          setLastFeeVariantId(feeVariantId ? String(feeVariantId) : '');
+          setLastFeeVariantStatus(feeVariantId ? 'found' : 'not_found');
+        } catch (feeErr) {
+          setLastFeeVariantStatus('failed');
+          setLastFeeErrorMessage(feeErr && feeErr.message ? feeErr.message : 'Fee variant lookup failed');
+          setLastCartActionStatus('failed');
+          toast('Personalisation fee could not be added.');
+          return false;
+        }
+        if (!feeVariantId) {
+          setLastFeeErrorMessage('Fee variant not found for amount');
+          setLastFeeVariantStatus('not_found');
+          setLastCartActionStatus('failed');
+          toast('Personalisation fee variant not found.');
+          return false;
+        }
+
+        var feeNormalized = normalizeVariantId(feeVariantId);
+        if (!feeNormalized.valid || feeNormalized.value === null) {
+          setLastFeeVariantStatus('failed');
+          setLastFeeErrorMessage('Fee variant id invalid');
+          setLastCartActionStatus('failed');
+          toast('Fee variant id invalid.');
+          return false;
+        }
+
+        var feeUuid = null;
+        try {
+          feeUuid = await shopify.cart.addLineItem(feeNormalized.value, 1);
+          setLastFeeLineItemUuid(feeUuid ? String(feeUuid) : '');
+          if (!feeUuid) {
+            setLastFeeVariantStatus('failed');
+            setLastFeeErrorMessage('Fee cart add returned no uuid');
+            setLastCartActionStatus('failed');
+            toast('Fee line could not be added.');
+            return false;
+          }
+        } catch (feeAddErr) {
+          setLastFeeVariantStatus('failed');
+          setLastFeeErrorMessage(feeAddErr && feeAddErr.message ? feeAddErr.message : 'Fee cart add failed');
+          setLastCartActionStatus('failed');
+          toast('Fee line could not be added.');
+          return false;
+        }
+
+        var feeProps = {
+          'Fee For Product': product.title,
+          'Linked Product Variant Id': String(normalized.value),
+          'Personalisation Fee': '£' + numericFee.toFixed(2),
+        };
+        if (shopify.cart && shopify.cart.addLineItemProperties) {
+          try {
+            await shopify.cart.addLineItemProperties(feeUuid, feeProps);
+            setLastFeePropertiesAttachStatus('success');
+            setLastFeeVariantStatus('success');
+          } catch (feePropErr) {
+            setLastFeePropertiesAttachStatus('failed');
+            setLastFeeVariantStatus('failed');
+            setLastFeeErrorMessage(feePropErr && feePropErr.message ? feePropErr.message : 'Fee properties attach failed');
+            setLastCartActionStatus('failed');
+            toast('Fee line added without properties.');
+            return false;
+          }
+        } else {
+          setLastFeePropertiesAttachStatus('failed');
+          setLastFeeVariantStatus('failed');
+          setLastFeeErrorMessage('Cart API missing addLineItemProperties for fee');
+          setLastCartActionStatus('failed');
+          toast('Fee properties could not be attached.');
+          return false;
+        }
+
+        if (shopify.cart && shopify.cart.addLineItemProperties) {
+          try {
+            await shopify.cart.addLineItemProperties(uuid, {
+              'Linked Fee Variant Id': String(feeNormalized.value),
+            });
+          } catch (linkErr) {
+            setLastCartActionStatus('failed');
+            setLastFeeErrorMessage(linkErr && linkErr.message ? linkErr.message : 'Failed to link fee to product line');
+            toast('Fee added but linking failed.');
+            return false;
+          }
+        }
+      } else {
+        setLastFeeVariantStatus('skipped');
+        setLastFeePropertiesAttachStatus('skipped');
+      }
+
       var afterCount = cartLineCount();
       setLastCartAfterCount(afterCount);
-      if (afterCount > beforeCount) {
+      if (afterCount >= beforeCount + expectedIncrease) {
         toast('Added to cart. Cart lines: ' + afterCount);
         setLastCartActionStatus('success');
         setLastCartErrorMessage('');
@@ -1363,8 +1616,15 @@ function Modal() {
           <s-text>Last cart after: {lastCartAfterCount}</s-text>
           <s-text>Last line item uuid: {lastCartLineItemUuid}</s-text>
           <s-text>Properties attach: {lastPropertiesAttachStatus}</s-text>
+          <s-text>Fee amount: {lastFeeAmount === null ? 'none' : '£' + Number(lastFeeAmount).toFixed(2)}</s-text>
+          <s-text>Fee required: {lastFeeRequired ? 'yes' : 'no'}</s-text>
+          <s-text>Fee variant status: {lastFeeVariantStatus}</s-text>
+          <s-text>Fee variant id: {lastFeeVariantId}</s-text>
+          <s-text>Fee line uuid: {lastFeeLineItemUuid}</s-text>
+          <s-text>Fee properties attach: {lastFeePropertiesAttachStatus}</s-text>
           <s-text>Last cart status: {lastCartActionStatus}</s-text>
           <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
+          <s-text>Last fee error: {lastFeeErrorMessage === '' ? 'none' : lastFeeErrorMessage}</s-text>
           <s-text>
             Line item properties preview:{' '}
             {lastLineItemProperties && Object.keys(lastLineItemProperties).length > 0
@@ -1534,7 +1794,7 @@ function Modal() {
                 <s-button
                   variant="primary"
                   onClick={function () {
-                    addSelectedProductToCart(selectedProduct, selectedVariant, {});
+                    addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
                   }}
                 >
                   Add to cart
@@ -1598,6 +1858,7 @@ function Modal() {
       if (!validate()) {
         return;
       }
+      var feeAmount = parseFeeAmount(meta.personalisationFeeRaw);
       var props = {};
       if (meta.enablePersonalisation && toStr(primaryFieldValue) !== '') {
         props[meta.personalisationLabel || 'Personalisation'] = toStr(primaryFieldValue);
@@ -1608,6 +1869,9 @@ function Modal() {
       if (meta.extraField2Enabled && toStr(extraField2Value) !== '') {
         props[meta.extraField2Label || 'Additional information 2'] = toStr(extraField2Value);
       }
+      if (feeAmount !== null && feeAmount > 0) {
+        props['Personalisation Fee'] = '£' + feeAmount.toFixed(2);
+      }
       if (Object.keys(props).length > 0) {
         var summaryParts = [];
         var keys = Object.keys(props);
@@ -1616,7 +1880,7 @@ function Modal() {
         }
         props['Personalisation Summary'] = summaryParts.join(' | ');
       }
-      addSelectedProductToCart(selectedProduct, selectedVariant, props).then(function (ok) {
+      addSelectedProductToCart(selectedProduct, selectedVariant, props, feeAmount).then(function (ok) {
         if (ok) {
           setPrimaryFieldValue('');
           setExtraField1Value('');
