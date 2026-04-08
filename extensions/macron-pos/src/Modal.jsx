@@ -475,7 +475,7 @@ function mapCollections(collectionNodes) {
         continue;
       }
       var title = toStr(node.title);
-      var products = mapProducts(node.products ? node.products.edges : []);
+      var productsCount = node.productsCount && node.productsCount.count ? node.productsCount.count : 0;
       var splitIndex = title.indexOf(' - ');
       if (splitIndex > -1) {
         var parentName = title.substring(0, splitIndex);
@@ -484,15 +484,19 @@ function mapCollections(collectionNodes) {
           children.push({
             parentName: parentName,
             label: subsectionLabel,
-            products: products,
+            collectionId: node.id,
+            collectionTitle: title,
+            productsCount: productsCount,
           });
         }
       } else {
         if (!parents[title]) {
-          parents[title] = {products: products};
+          parents[title] = {collectionId: node.id, productsCount: productsCount, collectionTitle: title};
           parentNames.push(title);
         } else {
-          parents[title].products = products;
+          parents[title].productsCount = productsCount;
+          parents[title].collectionId = node.id;
+          parents[title].collectionTitle = title;
         }
       }
     }
@@ -506,7 +510,8 @@ function mapCollections(collectionNodes) {
 
   for (var p = 0; p < parentNames.length; p += 1) {
     var name = parentNames[p];
-    var parentProducts = parents[name] ? parents[name].products : [];
+    var parentInfo = parents[name];
+    var parentProductsCount = parentInfo ? parentInfo.productsCount : 0;
     var matchingChildren = [];
     for (var c = 0; c < children.length; c += 1) {
       if (children[c].parentName === name) {
@@ -519,12 +524,14 @@ function mapCollections(collectionNodes) {
       return 0;
     });
 
-    if (parentProducts && parentProducts.length > 0) {
+    if (parentProductsCount > 0) {
       clubs.push({
         name: name,
         type: 'products',
         subsections: [],
-        products: parentProducts,
+        products: null,
+        collectionId: parentInfo.collectionId,
+        collectionTitle: parentInfo.collectionTitle,
       });
       directClubsCount += 1;
       continue;
@@ -535,14 +542,17 @@ function mapCollections(collectionNodes) {
       for (var m = 0; m < matchingChildren.length; m += 1) {
         subsections.push({
           label: matchingChildren[m].label,
-          products: matchingChildren[m].products,
+          collectionId: matchingChildren[m].collectionId,
+          collectionTitle: matchingChildren[m].collectionTitle,
         });
       }
       clubs.push({
         name: name,
         type: 'subsections',
         subsections: subsections,
-        products: [],
+        products: null,
+        collectionId: parentInfo ? parentInfo.collectionId : null,
+        collectionTitle: parentInfo ? parentInfo.collectionTitle : name,
       });
       subsectionClubsCount += 1;
     }
@@ -569,7 +579,21 @@ async function fetchLiveClubs() {
     throw new Error('Admin API fetch unavailable');
   }
 
-  var query = "query Collections($cursor: String) {\n    collections(first: 100, after: $cursor) {\n      edges {\n        cursor\n        node {\n          id\n          title\n          products(first: 50) {\n            edges {\n              node {\n                id\n                title\n                variants(first: 20) {\n                  edges {\n                    node { id title }\n                  }\n                }\n                enablePersonalisation: metafield(namespace: \\\"custom\\\", key: \\\"enable_personalisation\\\") { value }\n                personalisationLabel: metafield(namespace: \\\"custom\\\", key: \\\"personalisation_label\\\") { value }\n                personalisationFee: metafield(namespace: \\\"custom\\\", key: \\\"personalisation_fee\\\") { value }\n                personalisationMaxChars: metafield(namespace: \\\"custom\\\", key: \\\"personalisation_max_chars\\\") { value }\n                personalisationRequired: metafield(namespace: \\\"custom\\\", key: \\\"personalisation_required\\\") { value }\n                extraField1Enabled: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_1_enabled\\\") { value }\n                extraField1Label: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_1_label\\\") { value }\n                extraField1Required: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_1_required\\\") { value }\n                extraField2Enabled: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_2_enabled\\\") { value }\n                extraField2Label: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_2_label\\\") { value }\n                extraField2Required: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_2_required\\\") { value }\n                enableFileUpload: metafield(namespace: \\\"custom\\\", key: \\\"enable_file_upload\\\") { value }\n                fileUploadLabel: metafield(namespace: \\\"custom\\\", key: \\\"file_upload_label\\\") { value }\n                fileUploadHelpText: metafield(namespace: \\\"custom\\\", key: \\\"file_upload_help_text\\\") { value }\n                fileUploadRequired: metafield(namespace: \\\"custom\\\", key: \\\"file_upload_required\\\") { value }\n                bundleComponents: metafield(namespace: \\\"custom\\\", key: \\\"bundle_components\\\") { value }\n              }\n            }\n          }\n        }\n      }\n      pageInfo { hasNextPage endCursor }\n    }\n  }";
+  var query = `query Collections($cursor: String) {
+    collections(first: 100, after: $cursor) {
+      edges {
+        cursor
+        node {
+          id
+          title
+          productsCount {
+            count
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }`;
 
   var allCollections = [];
   var cursor = null;
@@ -599,7 +623,13 @@ async function fetchLiveClubs() {
     if (!response || !response.ok) {
       var statusCode = response && response.status ? response.status : 'unknown';
       var statusText = response && response.statusText ? response.statusText : 'unknown';
-      throw new Error('Admin API HTTP error: ' + statusCode + ' ' + statusText);
+      var bodyText = '';
+      try {
+        bodyText = await response.text();
+      } catch (e) {
+        bodyText = '';
+      }
+      throw new Error('Admin API HTTP error: ' + statusCode + ' ' + statusText + (bodyText ? ' ' + bodyText : ''));
     }
 
     var json;
@@ -642,17 +672,104 @@ async function fetchLiveClubs() {
     pagesFetched: pagesFetched,
   };
 }
+
+async function fetchProductsForCollection(collectionId) {
+  if (!collectionId) {
+    return [];
+  }
+  var query = `query ProductsByCollection($id: ID!, $cursor: String) {
+    collection(id: $id) {
+      id
+      title
+      products(first: 50, after: $cursor) {
+        edges {
+          cursor
+          node {
+            id
+            title
+            variants(first: 20) {
+              edges {
+                node { id title }
+              }
+            }
+            enablePersonalisation: metafield(namespace: "custom", key: "enable_personalisation") { value }
+            personalisationLabel: metafield(namespace: "custom", key: "personalisation_label") { value }
+            personalisationFee: metafield(namespace: "custom", key: "personalisation_fee") { value }
+            personalisationMaxChars: metafield(namespace: "custom", key: "personalisation_max_chars") { value }
+            personalisationRequired: metafield(namespace: "custom", key: "personalisation_required") { value }
+            extraField1Enabled: metafield(namespace: "custom", key: "extra_field_1_enabled") { value }
+            extraField1Label: metafield(namespace: "custom", key: "extra_field_1_label") { value }
+            extraField1Required: metafield(namespace: "custom", key: "extra_field_1_required") { value }
+            extraField2Enabled: metafield(namespace: "custom", key: "extra_field_2_enabled") { value }
+            extraField2Label: metafield(namespace: "custom", key: "extra_field_2_label") { value }
+            extraField2Required: metafield(namespace: "custom", key: "extra_field_2_required") { value }
+            enableFileUpload: metafield(namespace: "custom", key: "enable_file_upload") { value }
+            fileUploadLabel: metafield(namespace: "custom", key: "file_upload_label") { value }
+            fileUploadHelpText: metafield(namespace: "custom", key: "file_upload_help_text") { value }
+            fileUploadRequired: metafield(namespace: "custom", key: "file_upload_required") { value }
+            bundleComponents: metafield(namespace: "custom", key: "bundle_components") { value }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }`;
+
+  var products = [];
+  var cursor = null;
+  var hasNextPage = true;
+  var pageSafetyLimit = 10;
+  var pagesFetched = 0;
+
+  while (hasNextPage && pagesFetched < pageSafetyLimit) {
+    pagesFetched += 1;
+    var response = await fetch('shopify:admin/api/graphql.json', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: query,
+        variables: {id: collectionId, cursor: cursor},
+      }),
+    });
+    if (!response || !response.ok) {
+      var statusCode = response && response.status ? response.status : 'unknown';
+      var statusText = response && response.statusText ? response.statusText : 'unknown';
+      var bodyText = '';
+      try {
+        bodyText = await response.text();
+      } catch (e) {
+        bodyText = '';
+      }
+      throw new Error('Product fetch error: ' + statusCode + ' ' + statusText + (bodyText ? ' ' + bodyText : ''));
+    }
+    var json = await response.json();
+    if (!json || !json.data || !json.data.collection || !json.data.collection.products) {
+      break;
+    }
+    var edges = json.data.collection.products.edges || [];
+    for (var i = 0; i < edges.length; i += 1) {
+      if (edges[i] && edges[i].node) {
+        products.push({
+          id: edges[i].node.id,
+          title: edges[i].node.title,
+          variants: mapVariants(edges[i].node.variants ? edges[i].node.variants.edges : []),
+          personalisationMeta: mapPersonalisationMeta(edges[i].node),
+          bundleMeta: mapBundleMeta(edges[i].node.bundleComponents),
+        });
+      }
+    }
+    var pageInfo = json.data.collection.products.pageInfo;
+    hasNextPage = pageInfo && pageInfo.hasNextPage === true;
+    cursor = hasNextPage ? pageInfo.endCursor : null;
+  }
+
+  return products;
+}
 // ---------------- UI ----------------
 export default async function () {
   render(<Modal />, document.body);
-}
-
-function ScrollContainer(props) {
-  return (
-    <div style="max-height: 100vh; overflow-y: auto; padding: 0 0 12px 0;">
-      {props.children}
-    </div>
-  );
 }
 
 function Modal() {
@@ -719,6 +836,18 @@ function Modal() {
   var errorMessage = errorState[0];
   var setErrorMessage = errorState[1];
 
+  var productListLoadingState = useState(false);
+  var productListLoading = productListLoadingState[0];
+  var setProductListLoading = productListLoadingState[1];
+
+  var currentProductsState = useState([]);
+  var currentProducts = currentProductsState[0];
+  var setCurrentProducts = currentProductsState[1];
+
+  var currentProductsCollectionIdState = useState(null);
+  var currentProductsCollectionId = currentProductsCollectionIdState[0];
+  var setCurrentProductsCollectionId = currentProductsCollectionIdState[1];
+
   var loadingState = useState(false);
   var loading = loadingState[0];
   var setLoading = loadingState[1];
@@ -750,6 +879,23 @@ function Modal() {
   var extra2State = useState('');
   var extraField2Value = extra2State[0];
   var setExtraField2Value = extra2State[1];
+
+  async function loadProductsForCollection(collectionId) {
+    if (!collectionId) {
+      return;
+    }
+    setProductListLoading(true);
+    setCurrentProducts([]);
+    setCurrentProductsCollectionId(collectionId);
+    try {
+      var products = await fetchProductsForCollection(collectionId);
+      setCurrentProducts(products);
+    } catch (err) {
+      setErrorMessage(err && err.message ? err.message : String(err));
+      setCurrentProducts([]);
+    }
+    setProductListLoading(false);
+  }
 
   useEffect(function () {
     var cancelled = false;
@@ -882,22 +1028,45 @@ function Modal() {
     setPrimaryFieldValue('');
     setExtraField1Value('');
     setExtraField2Value('');
+    setCurrentProducts([]);
+    setCurrentProductsCollectionId(null);
+    setProductListLoading(false);
     setScreen('clubs');
   }
 
-  function handleClubPress(club) {
+  async function handleClubPress(club) {
     setSelectedClub(club);
     setSelectedSubsection(null);
     setSelectedProduct(null);
     setSelectedVariant(null);
-    setScreen(club.type === 'subsections' ? 'subsections' : 'products');
+    if (club.type === 'subsections') {
+      setScreen('subsections');
+      return;
+    }
+    if (dataSource === 'Mock data') {
+      setProductListLoading(false);
+      setCurrentProducts(club.products || []);
+      setCurrentProductsCollectionId(club.collectionId ? club.collectionId : club.name);
+      setScreen('products');
+      return;
+    }
+    setScreen('products');
+    await loadProductsForCollection(club.collectionId);
   }
 
-  function handleSubsectionPress(subsection) {
+  async function handleSubsectionPress(subsection) {
     setSelectedSubsection(subsection);
     setSelectedProduct(null);
     setSelectedVariant(null);
+    if (dataSource === 'Mock data') {
+      setProductListLoading(false);
+      setCurrentProducts(subsection.products || []);
+      setCurrentProductsCollectionId(subsection.collectionId ? subsection.collectionId : subsection.label);
+      setScreen('products');
+      return;
+    }
     setScreen('products');
+    await loadProductsForCollection(subsection.collectionId);
   }
 
   function handleProductPress(product) {
@@ -1103,25 +1272,37 @@ function Modal() {
     );
   }
 
+  function renderProductDebug() {
+    return (
+      <s-section heading="Product debug">
+        <s-stack direction="block" gap="micro">
+          <s-text>Selected club: {selectedClub ? selectedClub.name : ''}</s-text>
+          <s-text>Selected subsection: {selectedSubsection ? selectedSubsection.label : ''}</s-text>
+          <s-text>Current collection id: {currentProductsCollectionId ? currentProductsCollectionId : ''}</s-text>
+          <s-text>Product list loading: {productListLoading ? 'yes' : 'no'}</s-text>
+          <s-text>Current products count: {currentProducts ? currentProducts.length : 0}</s-text>
+        </s-stack>
+      </s-section>
+    );
+  }
+
   function renderClubsScreen() {
     return (
       <s-page heading="Macron POS">
-        <ScrollContainer>
-          {renderDebugHeader()}
-          <s-section heading="Clubs">
-            <s-stack direction="block" gap="base">
-              <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
-              <s-text>Select a club to begin.</s-text>
-              {clubs.map(function (club) {
-                return (
-                  <s-button key={club.name} variant="secondary" onClick={function () { handleClubPress(club); }}>
-                    {club.name}
-                  </s-button>
-                );
-              })}
-            </s-stack>
-          </s-section>
-        </ScrollContainer>
+        {renderDebugHeader()}
+        <s-section heading="Clubs">
+          <s-stack direction="block" gap="base">
+            <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
+            <s-text>Select a club to begin.</s-text>
+            {clubs.map(function (club) {
+              return (
+                <s-button key={club.name} variant="secondary" onClick={function () { handleClubPress(club); }}>
+                  {club.name}
+                </s-button>
+              );
+            })}
+          </s-stack>
+        </s-section>
       </s-page>
     );
   }
@@ -1132,55 +1313,52 @@ function Modal() {
     }
     return (
       <s-page heading="Macron POS">
-        <ScrollContainer>
-          {renderDebugHeader()}
-          <s-section heading={selectedClub.name + ' - Subsections'}>
-            <s-stack direction="block" gap="base">
-              <s-text>Select a subsection.</s-text>
-              {selectedClub.subsections.map(function (sub) {
-                return (
-                  <s-button key={sub.label} variant="secondary" onClick={function () { handleSubsectionPress(sub); }}>
-                    {sub.label}
-                  </s-button>
-                );
-              })}
-              <s-button variant="primary" onClick={handleBack}>Back</s-button>
-            </s-stack>
-          </s-section>
-        </ScrollContainer>
+        {renderDebugHeader()}
+        <s-section heading={selectedClub.name + ' - Subsections'}>
+          <s-stack direction="block" gap="base">
+            <s-text>Select a subsection.</s-text>
+            {selectedClub.subsections.map(function (sub) {
+              return (
+                <s-button key={sub.label} variant="secondary" onClick={function () { handleSubsectionPress(sub); }}>
+                  {sub.label}
+                </s-button>
+              );
+            })}
+            <s-button variant="primary" onClick={handleBack}>Back</s-button>
+          </s-stack>
+        </s-section>
       </s-page>
     );
   }
 
   function productsForCurrentSelection() {
-    if (!selectedClub) {
-      return [];
-    }
-    if (selectedClub.type === 'subsections' && selectedSubsection) {
-      return selectedSubsection.products || [];
-    }
-    return selectedClub.products || [];
+    return currentProducts || [];
   }
 
   function renderProductsScreen() {
     var products = productsForCurrentSelection();
+    var heading = selectedClub ? selectedClub.name : 'Products';
+    if (selectedSubsection) {
+      heading = selectedClub ? selectedClub.name + ' - ' + selectedSubsection.label : selectedSubsection.label;
+    }
     return (
       <s-page heading="Macron POS">
-        <ScrollContainer>
-          {renderDebugHeader()}
-          <s-section heading={selectedClub ? selectedClub.name : 'Products'}>
-            <s-stack direction="block" gap="base">
-              {products.map(function (product) {
-                return (
-                  <s-button key={product.id} variant="secondary" onClick={function () { handleProductPress(product); }}>
-                    View details: {product.title}
-                  </s-button>
-                );
-              })}
-              <s-button variant="primary" onClick={handleBack}>Back</s-button>
-            </s-stack>
-          </s-section>
-        </ScrollContainer>
+        {renderDebugHeader()}
+        <s-section heading={heading}>
+          <s-stack direction="block" gap="base">
+            {productListLoading ? <s-text>Loading products…</s-text> : null}
+            {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
+            {products.map(function (product) {
+              return (
+                <s-button key={product.id} variant="secondary" onClick={function () { handleProductPress(product); }}>
+                  View details: {product.title}
+                </s-button>
+              );
+            })}
+            <s-button variant="primary" onClick={handleBack}>Back</s-button>
+          </s-stack>
+        </s-section>
+        {renderProductDebug()}
       </s-page>
     );
   }
@@ -1228,29 +1406,28 @@ function Modal() {
     var showAddToCart = !hasPersonalisation;
     return (
       <s-page heading="Macron POS">
-        <ScrollContainer>
-          {renderDebugHeader()}
-          <s-section heading="PRODUCT DETAIL SCREEN">
-            <s-stack direction="block" gap="base">
-              <s-text>Product: {selectedProduct.title}</s-text>
-              {renderVariants(selectedProduct)}
-              {renderBundleNote(selectedProduct)}
-              {showAddToCart ? (
-                <s-button variant="primary" onClick={function () { addVariantToCart(selectedProduct, selectedVariant); }}>
-                  Add to cart
-                </s-button>
-              ) : (
-                <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
-                  Continue to personalisation
-                </s-button>
-              )}
-              <s-button variant="secondary" onClick={handleBack}>Back</s-button>
-            </s-stack>
-          </s-section>
-          {renderPersonalisationDebug(selectedProduct)}
-          {renderBundleDebug(selectedProduct)}
-          {renderCartDebug()}
-        </ScrollContainer>
+        {renderDebugHeader()}
+        <s-section heading="PRODUCT DETAIL SCREEN">
+          <s-stack direction="block" gap="base">
+            <s-text>Product: {selectedProduct.title}</s-text>
+            {renderVariants(selectedProduct)}
+            {renderBundleNote(selectedProduct)}
+            {showAddToCart ? (
+              <s-button variant="primary" onClick={function () { addVariantToCart(selectedProduct, selectedVariant); }}>
+                Add to cart
+              </s-button>
+            ) : (
+              <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
+                Continue to personalisation
+              </s-button>
+            )}
+            <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+          </s-stack>
+        </s-section>
+        {renderPersonalisationDebug(selectedProduct)}
+        {renderBundleDebug(selectedProduct)}
+        {renderCartDebug()}
+        {renderProductDebug()}
       </s-page>
     );
   }
@@ -1309,62 +1486,60 @@ function Modal() {
 
     return (
       <s-page heading="Macron POS">
-        <ScrollContainer>
-          {renderDebugHeader()}
-          <s-section heading="Personalisation">
-            <s-stack direction="block" gap="base">
-              <s-text>{selectedProduct.title}</s-text>
-              <s-text appearance="subdued">Variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
+        {renderDebugHeader()}
+        <s-section heading="Personalisation">
+          <s-stack direction="block" gap="base">
+            <s-text>{selectedProduct.title}</s-text>
+            <s-text appearance="subdued">Variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
 
-              {meta.enablePersonalisation ? (
-                <s-stack direction="block" gap="micro">
-                  {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
-                  <s-text-field
-                    value={primaryFieldValue}
-                    maxLength={maxChars === null ? undefined : maxChars}
-                    onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
-                    placeholder="Enter text"
-                  />
-                </s-stack>
-              ) : null}
+            {meta.enablePersonalisation ? (
+              <s-stack direction="block" gap="micro">
+                {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
+                <s-text-field
+                  value={primaryFieldValue}
+                  maxLength={maxChars === null ? undefined : maxChars}
+                  onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
+                  placeholder="Enter text"
+                />
+              </s-stack>
+            ) : null}
 
-              {meta.extraField1Enabled ? (
-                <s-stack direction="block" gap="micro">
-                  {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
-                  <s-text-field
-                    value={extraField1Value}
-                    onInput={function (event) { setExtraField1Value(event.target.value); }}
-                    placeholder="Enter text"
-                  />
-                </s-stack>
-              ) : null}
+            {meta.extraField1Enabled ? (
+              <s-stack direction="block" gap="micro">
+                {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
+                <s-text-field
+                  value={extraField1Value}
+                  onInput={function (event) { setExtraField1Value(event.target.value); }}
+                  placeholder="Enter text"
+                />
+              </s-stack>
+            ) : null}
 
-              {meta.extraField2Enabled ? (
-                <s-stack direction="block" gap="micro">
-                  {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
-                  <s-text-field
-                    value={extraField2Value}
-                    onInput={function (event) { setExtraField2Value(event.target.value); }}
-                    placeholder="Enter text"
-                  />
-                </s-stack>
-              ) : null}
+            {meta.extraField2Enabled ? (
+              <s-stack direction="block" gap="micro">
+                {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
+                <s-text-field
+                  value={extraField2Value}
+                  onInput={function (event) { setExtraField2Value(event.target.value); }}
+                  placeholder="Enter text"
+                />
+              </s-stack>
+            ) : null}
 
-              {meta.enableFileUpload ? (
-                <s-stack direction="block" gap="micro">
-                  {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
-                  <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
-                </s-stack>
-              ) : null}
+            {meta.enableFileUpload ? (
+              <s-stack direction="block" gap="micro">
+                {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
+                <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
+              </s-stack>
+            ) : null}
 
-              <s-button variant="primary" onClick={submitPersonalisation}>
-                Save personalisation (toast only)
-              </s-button>
-              <s-button variant="secondary" onClick={handleBack}>Back</s-button>
-            </s-stack>
-          </s-section>
-          {renderPersonalisationDebug(selectedProduct)}
-        </ScrollContainer>
+            <s-button variant="primary" onClick={submitPersonalisation}>
+              Save personalisation (toast only)
+            </s-button>
+            <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+          </s-stack>
+        </s-section>
+        {renderPersonalisationDebug(selectedProduct)}
       </s-page>
     );
   }
