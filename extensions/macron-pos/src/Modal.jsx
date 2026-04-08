@@ -352,6 +352,64 @@ function hasEnteredPersonalisationValues(meta, primaryFieldValue, extraField1Val
   return false;
 }
 
+function validatePersonalisationInputs(meta, primaryFieldValue, extraField1Value, extraField2Value, toast) {
+  if (!meta) {
+    return {valid: true, error: ''};
+  }
+  if (meta.enablePersonalisation && meta.personalisationRequired && toStr(primaryFieldValue) === '') {
+    var primaryMessage = meta.personalisationLabel || 'Personalisation is required';
+    if (toast) {
+      toast(primaryMessage);
+    }
+    return {valid: false, error: primaryMessage};
+  }
+  if (meta.extraField1Enabled && meta.extraField1Required && toStr(extraField1Value) === '') {
+    var extra1Message = meta.extraField1Label || 'Field 1 is required';
+    if (toast) {
+      toast(extra1Message);
+    }
+    return {valid: false, error: extra1Message};
+  }
+  if (meta.extraField2Enabled && meta.extraField2Required && toStr(extraField2Value) === '') {
+    var extra2Message = meta.extraField2Label || 'Field 2 is required';
+    if (toast) {
+      toast(extra2Message);
+    }
+    return {valid: false, error: extra2Message};
+  }
+  if (meta.enableFileUpload && meta.fileUploadRequired) {
+    var fileUploadMessage = 'This item requires file upload, which is not available in POS V1 yet';
+    if (toast) {
+      toast(fileUploadMessage);
+    }
+    return {valid: false, error: fileUploadMessage};
+  }
+  return {valid: true, error: ''};
+}
+
+function buildPersonalisationProperties(meta, primaryFieldValue, extraField1Value, extraField2Value, includeFeeValue) {
+  var props = {};
+  if (!meta) {
+    return props;
+  }
+  if (meta.enablePersonalisation && toStr(primaryFieldValue) !== '') {
+    props[meta.personalisationLabel || 'Personalisation'] = toStr(primaryFieldValue);
+  }
+  if (meta.extraField1Enabled && toStr(extraField1Value) !== '') {
+    props[meta.extraField1Label || 'Additional information'] = toStr(extraField1Value);
+  }
+  if (meta.extraField2Enabled && toStr(extraField2Value) !== '') {
+    props[meta.extraField2Label || 'Additional information 2'] = toStr(extraField2Value);
+  }
+  if (includeFeeValue !== null && includeFeeValue !== undefined) {
+    var feeNumber = parseFloat(includeFeeValue);
+    if (!isNaN(feeNumber) && feeNumber > 0) {
+      props['Personalisation Fee'] = '£' + feeNumber.toFixed(2);
+    }
+  }
+  return props;
+}
+
 function classifyVariantId(id) {
   if (typeof id === 'number') {
     return 'numeric';
@@ -1473,17 +1531,66 @@ function Modal() {
       return;
     }
 
+    var personalisationMeta = selectedProduct.personalisationMeta || {};
+    var validation = validatePersonalisationInputs(
+      personalisationMeta,
+      primaryFieldValue,
+      extraField1Value,
+      extraField2Value,
+      toast
+    );
+    if (!validation.valid) {
+      setBundleAddStatus('failed');
+      setBundleAddError(validation.error);
+      return;
+    }
+
+    var enteredPersonalisation = hasEnteredPersonalisationValues(
+      personalisationMeta,
+      primaryFieldValue,
+      extraField1Value,
+      extraField2Value
+    );
+    setLastEnteredPersonalisation(enteredPersonalisation);
+
+    var parsedBundleFee = parseFeeAmount(personalisationMeta.personalisationFeeRaw);
+    var bundleFeeAmount = null;
+    if (enteredPersonalisation && parsedBundleFee !== null && parsedBundleFee > 0) {
+      bundleFeeAmount = parsedBundleFee;
+    }
+
     var bundleProps = {};
     bundleProps.Bundle = selectedProduct.title;
     for (var idx = 0; idx < bundleComponents.length; idx += 1) {
       var item = bundleComponents[idx];
       var selected = bundleSelections[item.key];
-      bundleProps['Item ' + String(idx + 1)] = item.title + ' - ' + selected.title;
+      bundleProps['Item ' + String(idx + 1)] = item.title + ' — ' + selected.title;
     }
 
-    setBundleAddStatus('attempting');
+    var personalisationProps = buildPersonalisationProperties(
+      personalisationMeta,
+      primaryFieldValue,
+      extraField1Value,
+      extraField2Value,
+      bundleFeeAmount
+    );
+    var personalisationKeys = Object.keys(personalisationProps);
+    for (var k = 0; k < personalisationKeys.length; k += 1) {
+      var key = personalisationKeys[k];
+      bundleProps[key] = personalisationProps[key];
+    }
+    if (personalisationKeys.length > 0) {
+      var summaryParts = [];
+      for (var s = 0; s < personalisationKeys.length; s += 1) {
+        var summaryKey = personalisationKeys[s];
+        summaryParts.push(summaryKey + ': ' + personalisationProps[summaryKey]);
+      }
+      bundleProps['Personalisation Summary'] = summaryParts.join(' | ');
+    }
+
+    setBundleAddStatus(bundleFeeAmount !== null ? 'resolving_fee' : 'adding_parent');
     setBundleAddError('');
-    var ok = await addSelectedProductToCart(selectedProduct, selectedVariant, bundleProps, null);
+    var ok = await addSelectedProductToCart(selectedProduct, selectedVariant, bundleProps, bundleFeeAmount);
     if (!ok) {
       setBundleAddStatus('failed');
       setBundleAddError('Bundle add failed. See cart debug for detail.');
@@ -1491,6 +1598,9 @@ function Modal() {
     }
     setBundleAddStatus('success');
     setBundleAddError('');
+    setPrimaryFieldValue('');
+    setExtraField1Value('');
+    setExtraField2Value('');
     setScreen('products');
   }
 
@@ -2104,13 +2214,26 @@ function Modal() {
       var component = bundleComponents[p];
       var chosen = bundleSelections[component.key];
       if (chosen && chosen.title) {
-        bundlePreview.push('Item ' + String(p + 1) + ': ' + component.title + ' - ' + chosen.title);
+        bundlePreview.push('Item ' + String(p + 1) + ': ' + component.title + ' — ' + chosen.title);
       }
+    }
+    var bundlePersonalisationProps = buildPersonalisationProperties(
+      product.personalisationMeta || {},
+      primaryFieldValue,
+      extraField1Value,
+      extraField2Value,
+      null
+    );
+    var personalisationPreviewKeys = Object.keys(bundlePersonalisationProps);
+    for (var bp = 0; bp < personalisationPreviewKeys.length; bp += 1) {
+      var previewKey = personalisationPreviewKeys[bp];
+      bundlePreview.push(previewKey + ': ' + bundlePersonalisationProps[previewKey]);
     }
     return (
       <s-section heading="Bundle debug">
         <s-stack direction="block" gap="micro">
           <s-text>bundle parent: {product.title}</s-text>
+          <s-text>parent variant: {selectedVariant ? selectedVariant.title : 'none'}</s-text>
           <s-text>isBundle: {meta.isBundle ? 'true' : 'false'}</s-text>
           <s-text>component handles: {meta.componentHandles.length}</s-text>
           <s-text>component products: {meta.componentProducts.length}</s-text>
@@ -2404,6 +2527,9 @@ function Modal() {
     if (!selectedProduct) {
       return renderProductsScreen();
     }
+    var meta = selectedProduct.personalisationMeta || {};
+    var feeDisplay = parseFeeDisplay(meta.personalisationFeeRaw);
+    var maxChars = parseMaxChars(meta.personalisationMaxCharsRaw);
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
@@ -2443,6 +2569,53 @@ function Modal() {
                   </s-section>
                 );
               })}
+              {hasAnyPersonalisation(meta) ? (
+                <s-section heading="Bundle personalisation">
+                  <s-stack direction="block" gap="base">
+                    {meta.enablePersonalisation ? (
+                      <s-stack direction="block" gap="micro">
+                        {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
+                        <s-text-field
+                          value={primaryFieldValue}
+                          maxLength={maxChars === null ? undefined : maxChars}
+                          onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
+                          placeholder="Enter text"
+                        />
+                      </s-stack>
+                    ) : null}
+
+                    {meta.extraField1Enabled ? (
+                      <s-stack direction="block" gap="micro">
+                        {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
+                        <s-text-field
+                          value={extraField1Value}
+                          onInput={function (event) { setExtraField1Value(event.target.value); }}
+                          placeholder="Enter text"
+                        />
+                      </s-stack>
+                    ) : null}
+
+                    {meta.extraField2Enabled ? (
+                      <s-stack direction="block" gap="micro">
+                        {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
+                        <s-text-field
+                          value={extraField2Value}
+                          onInput={function (event) { setExtraField2Value(event.target.value); }}
+                          placeholder="Enter text"
+                        />
+                      </s-stack>
+                    ) : null}
+
+                    {meta.enableFileUpload ? (
+                      <s-stack direction="block" gap="micro">
+                        {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
+                        <s-text appearance="critical">File upload is not available in POS V1 for bundle personalisation.</s-text>
+                        <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
+                      </s-stack>
+                    ) : null}
+                  </s-stack>
+                </s-section>
+              ) : null}
               <s-button
                 variant="primary"
                 onClick={addBundleParentToCart}
@@ -2479,28 +2652,15 @@ function Modal() {
     var feeDisplay = parseFeeDisplay(meta.personalisationFeeRaw);
     var maxChars = parseMaxChars(meta.personalisationMaxCharsRaw);
 
-    function validate() {
-      if (meta.enablePersonalisation && meta.personalisationRequired && toStr(primaryFieldValue) === '') {
-        toast(meta.personalisationLabel || 'Personalisation is required');
-        return false;
-      }
-      if (meta.extraField1Enabled && meta.extraField1Required && toStr(extraField1Value) === '') {
-        toast(meta.extraField1Label || 'Field 1 is required');
-        return false;
-      }
-      if (meta.extraField2Enabled && meta.extraField2Required && toStr(extraField2Value) === '') {
-        toast(meta.extraField2Label || 'Field 2 is required');
-        return false;
-      }
-      if (meta.enableFileUpload && meta.fileUploadRequired) {
-        toast('This item requires file upload, which is not available in POS V1 yet');
-        return false;
-      }
-      return true;
-    }
-
     function submitPersonalisation() {
-      if (!validate()) {
+      var validation = validatePersonalisationInputs(
+        meta,
+        primaryFieldValue,
+        extraField1Value,
+        extraField2Value,
+        toast
+      );
+      if (!validation.valid) {
         return;
       }
       var enteredPersonalisation = hasEnteredPersonalisationValues(meta, primaryFieldValue, extraField1Value, extraField2Value);
@@ -2510,19 +2670,7 @@ function Modal() {
       if (enteredPersonalisation && parsedFeeAmount !== null && parsedFeeAmount > 0) {
         feeAmount = parsedFeeAmount;
       }
-      var props = {};
-      if (meta.enablePersonalisation && toStr(primaryFieldValue) !== '') {
-        props[meta.personalisationLabel || 'Personalisation'] = toStr(primaryFieldValue);
-      }
-      if (meta.extraField1Enabled && toStr(extraField1Value) !== '') {
-        props[meta.extraField1Label || 'Additional information'] = toStr(extraField1Value);
-      }
-      if (meta.extraField2Enabled && toStr(extraField2Value) !== '') {
-        props[meta.extraField2Label || 'Additional information 2'] = toStr(extraField2Value);
-      }
-      if (enteredPersonalisation && feeAmount !== null && feeAmount > 0) {
-        props['Personalisation Fee'] = '£' + feeAmount.toFixed(2);
-      }
+      var props = buildPersonalisationProperties(meta, primaryFieldValue, extraField1Value, extraField2Value, feeAmount);
       if (Object.keys(props).length > 0) {
         var summaryParts = [];
         var keys = Object.keys(props);
@@ -2623,11 +2771,6 @@ function Modal() {
   }
   return renderClubsScreen();
 }
-
-
-
-
-
 
 
 
