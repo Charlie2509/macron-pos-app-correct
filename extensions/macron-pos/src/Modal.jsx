@@ -772,6 +772,14 @@ export default async function () {
   render(<Modal />, document.body);
 }
 
+function ScreenScroll(props) {
+  return (
+    <s-scroll-box style="height: 100%;">
+      {props.children}
+    </s-scroll-box>
+  );
+}
+
 function Modal() {
   var screenState = useState('clubs');
   var screen = screenState[0];
@@ -1289,20 +1297,22 @@ function Modal() {
   function renderClubsScreen() {
     return (
       <s-page heading="Macron POS">
-        {renderDebugHeader()}
-        <s-section heading="Clubs">
-          <s-stack direction="block" gap="base">
-            <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
-            <s-text>Select a club to begin.</s-text>
-            {clubs.map(function (club) {
-              return (
-                <s-button key={club.name} variant="secondary" onClick={function () { handleClubPress(club); }}>
-                  {club.name}
-                </s-button>
-              );
-            })}
-          </s-stack>
-        </s-section>
+        <ScreenScroll>
+          {renderDebugHeader()}
+          <s-section heading="Clubs">
+            <s-stack direction="block" gap="base">
+              <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
+              <s-text>Select a club to begin.</s-text>
+              {clubs.map(function (club) {
+                return (
+                  <s-button key={club.name} variant="secondary" onClick={function () { handleClubPress(club); }}>
+                    {club.name}
+                  </s-button>
+                );
+              })}
+            </s-stack>
+          </s-section>
+        </ScreenScroll>
       </s-page>
     );
   }
@@ -1313,20 +1323,22 @@ function Modal() {
     }
     return (
       <s-page heading="Macron POS">
-        {renderDebugHeader()}
-        <s-section heading={selectedClub.name + ' - Subsections'}>
-          <s-stack direction="block" gap="base">
-            <s-text>Select a subsection.</s-text>
-            {selectedClub.subsections.map(function (sub) {
-              return (
-                <s-button key={sub.label} variant="secondary" onClick={function () { handleSubsectionPress(sub); }}>
-                  {sub.label}
-                </s-button>
-              );
-            })}
-            <s-button variant="primary" onClick={handleBack}>Back</s-button>
-          </s-stack>
-        </s-section>
+        <ScreenScroll>
+          {renderDebugHeader()}
+          <s-section heading={selectedClub.name + ' - Subsections'}>
+            <s-stack direction="block" gap="base">
+              <s-text>Select a subsection.</s-text>
+              {selectedClub.subsections.map(function (sub) {
+                return (
+                  <s-button key={sub.label} variant="secondary" onClick={function () { handleSubsectionPress(sub); }}>
+                    {sub.label}
+                  </s-button>
+                );
+              })}
+              <s-button variant="primary" onClick={handleBack}>Back</s-button>
+            </s-stack>
+          </s-section>
+        </ScreenScroll>
       </s-page>
     );
   }
@@ -1343,22 +1355,24 @@ function Modal() {
     }
     return (
       <s-page heading="Macron POS">
-        {renderDebugHeader()}
-        <s-section heading={heading}>
-          <s-stack direction="block" gap="base">
-            {productListLoading ? <s-text>Loading products…</s-text> : null}
-            {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
-            {products.map(function (product) {
-              return (
-                <s-button key={product.id} variant="secondary" onClick={function () { handleProductPress(product); }}>
-                  View details: {product.title}
-                </s-button>
-              );
-            })}
-            <s-button variant="primary" onClick={handleBack}>Back</s-button>
-          </s-stack>
-        </s-section>
-        {renderProductDebug()}
+        <ScreenScroll>
+          {renderDebugHeader()}
+          <s-section heading={heading}>
+            <s-stack direction="block" gap="base">
+              {productListLoading ? <s-text>Loading products…</s-text> : null}
+              {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
+              {products.map(function (product) {
+                return (
+                  <s-button key={product.id} variant="secondary" onClick={function () { handleProductPress(product); }}>
+                    View details: {product.title}
+                  </s-button>
+                );
+              })}
+              <s-button variant="primary" onClick={handleBack}>Back</s-button>
+            </s-stack>
+          </s-section>
+          {renderProductDebug()}
+        </ScreenScroll>
       </s-page>
     );
   }
@@ -1406,28 +1420,30 @@ function Modal() {
     var showAddToCart = !hasPersonalisation;
     return (
       <s-page heading="Macron POS">
-        {renderDebugHeader()}
-        <s-section heading="PRODUCT DETAIL SCREEN">
-          <s-stack direction="block" gap="base">
-            <s-text>Product: {selectedProduct.title}</s-text>
-            {renderVariants(selectedProduct)}
-            {renderBundleNote(selectedProduct)}
-            {showAddToCart ? (
-              <s-button variant="primary" onClick={function () { addVariantToCart(selectedProduct, selectedVariant); }}>
-                Add to cart
-              </s-button>
-            ) : (
-              <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
-                Continue to personalisation
-              </s-button>
-            )}
-            <s-button variant="secondary" onClick={handleBack}>Back</s-button>
-          </s-stack>
-        </s-section>
-        {renderPersonalisationDebug(selectedProduct)}
-        {renderBundleDebug(selectedProduct)}
-        {renderCartDebug()}
-        {renderProductDebug()}
+        <ScreenScroll>
+          {renderDebugHeader()}
+          <s-section heading="PRODUCT DETAIL SCREEN">
+            <s-stack direction="block" gap="base">
+              <s-text>Product: {selectedProduct.title}</s-text>
+              {renderVariants(selectedProduct)}
+              {renderBundleNote(selectedProduct)}
+              {showAddToCart ? (
+                <s-button variant="primary" onClick={function () { addVariantToCart(selectedProduct, selectedVariant); }}>
+                  Add to cart
+                </s-button>
+              ) : (
+                <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
+                  Continue to personalisation
+                </s-button>
+              )}
+              <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+            </s-stack>
+          </s-section>
+          {renderPersonalisationDebug(selectedProduct)}
+          {renderBundleDebug(selectedProduct)}
+          {renderCartDebug()}
+          {renderProductDebug()}
+        </ScreenScroll>
       </s-page>
     );
   }
@@ -1486,60 +1502,62 @@ function Modal() {
 
     return (
       <s-page heading="Macron POS">
-        {renderDebugHeader()}
-        <s-section heading="Personalisation">
-          <s-stack direction="block" gap="base">
-            <s-text>{selectedProduct.title}</s-text>
-            <s-text appearance="subdued">Variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
+        <ScreenScroll>
+          {renderDebugHeader()}
+          <s-section heading="Personalisation">
+            <s-stack direction="block" gap="base">
+              <s-text>{selectedProduct.title}</s-text>
+              <s-text appearance="subdued">Variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
 
-            {meta.enablePersonalisation ? (
-              <s-stack direction="block" gap="micro">
-                {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
-                <s-text-field
-                  value={primaryFieldValue}
-                  maxLength={maxChars === null ? undefined : maxChars}
-                  onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
-                  placeholder="Enter text"
-                />
-              </s-stack>
-            ) : null}
+              {meta.enablePersonalisation ? (
+                <s-stack direction="block" gap="micro">
+                  {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
+                  <s-text-field
+                    value={primaryFieldValue}
+                    maxLength={maxChars === null ? undefined : maxChars}
+                    onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
+                    placeholder="Enter text"
+                  />
+                </s-stack>
+              ) : null}
 
-            {meta.extraField1Enabled ? (
-              <s-stack direction="block" gap="micro">
-                {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
-                <s-text-field
-                  value={extraField1Value}
-                  onInput={function (event) { setExtraField1Value(event.target.value); }}
-                  placeholder="Enter text"
-                />
-              </s-stack>
-            ) : null}
+              {meta.extraField1Enabled ? (
+                <s-stack direction="block" gap="micro">
+                  {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
+                  <s-text-field
+                    value={extraField1Value}
+                    onInput={function (event) { setExtraField1Value(event.target.value); }}
+                    placeholder="Enter text"
+                  />
+                </s-stack>
+              ) : null}
 
-            {meta.extraField2Enabled ? (
-              <s-stack direction="block" gap="micro">
-                {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
-                <s-text-field
-                  value={extraField2Value}
-                  onInput={function (event) { setExtraField2Value(event.target.value); }}
-                  placeholder="Enter text"
-                />
-              </s-stack>
-            ) : null}
+              {meta.extraField2Enabled ? (
+                <s-stack direction="block" gap="micro">
+                  {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
+                  <s-text-field
+                    value={extraField2Value}
+                    onInput={function (event) { setExtraField2Value(event.target.value); }}
+                    placeholder="Enter text"
+                  />
+                </s-stack>
+              ) : null}
 
-            {meta.enableFileUpload ? (
-              <s-stack direction="block" gap="micro">
-                {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
-                <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
-              </s-stack>
-            ) : null}
+              {meta.enableFileUpload ? (
+                <s-stack direction="block" gap="micro">
+                  {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
+                  <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
+                </s-stack>
+              ) : null}
 
-            <s-button variant="primary" onClick={submitPersonalisation}>
-              Save personalisation (toast only)
-            </s-button>
-            <s-button variant="secondary" onClick={handleBack}>Back</s-button>
-          </s-stack>
-        </s-section>
-        {renderPersonalisationDebug(selectedProduct)}
+              <s-button variant="primary" onClick={submitPersonalisation}>
+                Save personalisation (toast only)
+              </s-button>
+              <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+            </s-stack>
+          </s-section>
+          {renderPersonalisationDebug(selectedProduct)}
+        </ScreenScroll>
       </s-page>
     );
   }
