@@ -876,6 +876,10 @@ function Modal() {
   var lastNormalizedVariantId = lastNormalizedVariantIdState[0];
   var setLastNormalizedVariantId = lastNormalizedVariantIdState[1];
 
+  var lastLineItemPropertiesState = useState([]);
+  var lastLineItemProperties = lastLineItemPropertiesState[0];
+  var setLastLineItemProperties = lastLineItemPropertiesState[1];
+
   var loadingState = useState(false);
   var loading = loadingState[0];
   var setLoading = loadingState[1];
@@ -1127,9 +1131,10 @@ function Modal() {
     return lines.length;
   }
 
-  async function addVariantToCart(product, variant) {
+  async function addSelectedProductToCart(product, variant, lineItemProperties) {
     setLastCartActionStatus('idle');
     setLastCartErrorMessage('');
+    setLastLineItemProperties(lineItemProperties || []);
     if (!product || !variant) {
       toast('Select a size first');
       setLastCartActionStatus('failed');
@@ -1161,10 +1166,14 @@ function Modal() {
     setLastCartBeforeCount(beforeCount);
     setLastCartAfterCount(beforeCount);
     try {
-      var result = await shopify.cart.addLineItem({
+      var payload = {
         variantId: normalized.value,
         quantity: 1,
-      });
+      };
+      if (lineItemProperties && lineItemProperties.length > 0) {
+        payload.properties = lineItemProperties;
+      }
+      var result = await shopify.cart.addLineItem(payload);
       if (!result) {
         toast('Could not add to cart.');
         setLastCartActionStatus('failed');
@@ -1330,6 +1339,16 @@ function Modal() {
           <s-text>Last cart after: {lastCartAfterCount}</s-text>
           <s-text>Last cart status: {lastCartActionStatus}</s-text>
           <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
+          <s-text>
+            Line item properties preview:{' '}
+            {lastLineItemProperties && lastLineItemProperties.length > 0
+              ? lastLineItemProperties
+                  .map(function (p) {
+                    return (p.key || '') + ':' + (p.value || '');
+                  })
+                  .join(', ')
+              : 'none'}
+          </s-text>
         </s-stack>
       </s-section>
     );
@@ -1486,7 +1505,12 @@ function Modal() {
               {renderVariants(selectedProduct)}
               {renderBundleNote(selectedProduct)}
               {showAddToCart ? (
-                <s-button variant="primary" onClick={function () { addVariantToCart(selectedProduct, selectedVariant); }}>
+                <s-button
+                  variant="primary"
+                  onClick={function () {
+                    addSelectedProductToCart(selectedProduct, selectedVariant, []);
+                  }}
+                >
                   Add to cart
                 </s-button>
               ) : (
@@ -1548,14 +1572,41 @@ function Modal() {
       if (!validate()) {
         return;
       }
-      toast(
-        'Personalisation saved: ' +
-          toStr(primaryFieldValue) +
-          ' ' +
-          toStr(extraField1Value) +
-          ' ' +
-          toStr(extraField2Value)
-      );
+      var props = [];
+      if (meta.enablePersonalisation && toStr(primaryFieldValue) !== '') {
+        props.push({
+          key: meta.personalisationLabel || 'Personalisation',
+          value: toStr(primaryFieldValue),
+        });
+      }
+      if (meta.extraField1Enabled && toStr(extraField1Value) !== '') {
+        props.push({
+          key: meta.extraField1Label || 'Additional information',
+          value: toStr(extraField1Value),
+        });
+      }
+      if (meta.extraField2Enabled && toStr(extraField2Value) !== '') {
+        props.push({
+          key: meta.extraField2Label || 'Additional information 2',
+          value: toStr(extraField2Value),
+        });
+      }
+      if (props.length > 0) {
+        var summary = props
+          .map(function (p) {
+            return p.key + ': ' + p.value;
+          })
+          .join(' | ');
+        props.push({key: 'Personalisation Summary', value: summary});
+      }
+      addSelectedProductToCart(selectedProduct, selectedVariant, props).then(function (ok) {
+        if (ok) {
+          setPrimaryFieldValue('');
+          setExtraField1Value('');
+          setExtraField2Value('');
+          setScreen('products');
+        }
+      });
     }
 
     return (
@@ -1608,13 +1659,13 @@ function Modal() {
                 </s-stack>
               ) : null}
 
-              <s-button variant="primary" onClick={submitPersonalisation}>
-                Save personalisation (toast only)
-              </s-button>
-              <s-button variant="secondary" onClick={handleBack}>Back</s-button>
-            </s-stack>
-          </s-section>
-          {renderPersonalisationDebug(selectedProduct)}
+            <s-button variant="primary" onClick={submitPersonalisation}>
+              Add to cart
+            </s-button>
+            <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+          </s-stack>
+        </s-section>
+        {renderPersonalisationDebug(selectedProduct)}
         </ScreenScroll>
       </s-page>
     );
