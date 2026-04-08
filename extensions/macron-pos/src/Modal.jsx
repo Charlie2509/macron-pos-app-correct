@@ -945,6 +945,26 @@ function Modal() {
   var lastFeeProductTitleTarget = lastFeeProductTitleTargetState[0];
   var setLastFeeProductTitleTarget = lastFeeProductTitleTargetState[1];
 
+  var lastFeeLookupQueryState = useState('');
+  var lastFeeLookupQuery = lastFeeLookupQueryState[0];
+  var setLastFeeLookupQuery = lastFeeLookupQueryState[1];
+
+  var lastFeeCandidateCountState = useState(0);
+  var lastFeeCandidateCount = lastFeeCandidateCountState[0];
+  var setLastFeeCandidateCount = lastFeeCandidateCountState[1];
+
+  var lastFeeVariantScanCountState = useState(0);
+  var lastFeeVariantScanCount = lastFeeVariantScanCountState[0];
+  var setLastFeeVariantScanCount = lastFeeVariantScanCountState[1];
+
+  var lastFeeMatchMethodState = useState('none');
+  var lastFeeMatchMethod = lastFeeMatchMethodState[0];
+  var setLastFeeMatchMethod = lastFeeMatchMethodState[1];
+
+  var lastFeeExactTitleValidationPassedState = useState(false);
+  var lastFeeExactTitleValidationPassed = lastFeeExactTitleValidationPassedState[0];
+  var setLastFeeExactTitleValidationPassed = lastFeeExactTitleValidationPassedState[1];
+
   var lastFeeProductFoundState = useState(false);
   var lastFeeProductFound = lastFeeProductFoundState[0];
   var setLastFeeProductFound = lastFeeProductFoundState[1];
@@ -1219,6 +1239,11 @@ function Modal() {
   async function fetchPersonalisationFeeVariant(feeAmount) {
     var targetProductTitle = 'Personalisation fee (system)';
     setLastFeeProductTitleTarget(targetProductTitle);
+    setLastFeeLookupQuery('');
+    setLastFeeCandidateCount(0);
+    setLastFeeVariantScanCount(0);
+    setLastFeeMatchMethod('none');
+    setLastFeeExactTitleValidationPassed(false);
     setLastFeeProductFound(false);
     setLastFeeProductId('');
     setLastFeeVariantTitleMatched('');
@@ -1234,6 +1259,7 @@ function Modal() {
     }
 
     var searchQuery = 'title:"' + targetProductTitle + '"';
+    setLastFeeLookupQuery(searchQuery);
     var gql = 'query FeeVariants($query: String!) { products(first: 5, query: $query) { edges { node { id title variants(first: 100) { edges { node { id title selectedOptions { name value } price { amount currencyCode } } } } } } } }';
     var response = await fetch('shopify:admin/api/graphql.json', {
       method: 'POST',
@@ -1267,6 +1293,7 @@ function Modal() {
     }
 
     var edges = json.data.products.edges;
+    setLastFeeCandidateCount(edges.length);
     var feeProductNode = null;
     for (var i = 0; i < edges.length; i += 1) {
       var node = edges[i] && edges[i].node ? edges[i].node : null;
@@ -1277,30 +1304,52 @@ function Modal() {
     }
 
     if (!feeProductNode) {
+      setLastFeeExactTitleValidationPassed(false);
       return null;
     }
 
+    setLastFeeExactTitleValidationPassed(true);
     setLastFeeProductFound(true);
     setLastFeeProductId(feeProductNode.id ? String(feeProductNode.id) : '');
 
     var variantEdges = feeProductNode.variants && feeProductNode.variants.edges ? feeProductNode.variants.edges : [];
+    setLastFeeVariantScanCount(variantEdges.length);
     var feeFixed = numericFee.toFixed(2);
-    var foundByExactText = null;
-    var foundByNumericMatch = null;
+    var foundByExactTitle = null;
+    var foundByExactOption = null;
+    var foundByNumericText = null;
+    var foundByPriceAmount = null;
 
     for (var v = 0; v < variantEdges.length; v += 1) {
       var variantNode = variantEdges[v] && variantEdges[v].node ? variantEdges[v].node : null;
       if (!variantNode) {
         continue;
       }
-      var candidateTexts = [];
       var variantTitle = toStr(variantNode.title);
+      if (variantTitle === feeFixed) {
+        foundByExactTitle = { id: variantNode.id, matchedText: variantTitle };
+        break;
+      }
+      if (variantNode.selectedOptions && Array.isArray(variantNode.selectedOptions)) {
+        for (var o = 0; o < variantNode.selectedOptions.length; o += 1) {
+          var exactOptionValue = toStr(variantNode.selectedOptions[o] ? variantNode.selectedOptions[o].value : '');
+          if (exactOptionValue === feeFixed) {
+            foundByExactOption = { id: variantNode.id, matchedText: exactOptionValue };
+            break;
+          }
+        }
+      }
+      if (foundByExactOption) {
+        break;
+      }
+
+      var candidateTexts = [];
       if (variantTitle !== '') {
         candidateTexts.push(variantTitle);
       }
       if (variantNode.selectedOptions && Array.isArray(variantNode.selectedOptions)) {
-        for (var o = 0; o < variantNode.selectedOptions.length; o += 1) {
-          var optionValue = toStr(variantNode.selectedOptions[o] ? variantNode.selectedOptions[o].value : '');
+        for (var n = 0; n < variantNode.selectedOptions.length; n += 1) {
+          var optionValue = toStr(variantNode.selectedOptions[n] ? variantNode.selectedOptions[n].value : '');
           if (optionValue !== '') {
             candidateTexts.push(optionValue);
           }
@@ -1309,24 +1358,33 @@ function Modal() {
 
       for (var c = 0; c < candidateTexts.length; c += 1) {
         var candidate = toStr(candidateTexts[c]);
-        if (candidate === feeFixed) {
-          foundByExactText = { id: variantNode.id, matchedText: candidate };
+        var candidateAmount = parseFeeAmount(candidate);
+        if (candidateAmount !== null && Math.abs(candidateAmount - numericFee) < 0.0001) {
+          foundByNumericText = { id: variantNode.id, matchedText: candidate };
           break;
         }
-        var candidateAmount = parseFeeAmount(candidate);
-        if (candidateAmount !== null && Math.abs(candidateAmount - numericFee) < 0.0001 && !foundByNumericMatch) {
-          foundByNumericMatch = { id: variantNode.id, matchedText: candidate };
-        }
       }
-      if (foundByExactText) {
+      if (foundByNumericText) {
         break;
       }
     }
 
-    var chosen = foundByExactText ? foundByExactText : foundByNumericMatch;
-    if (chosen && chosen.id) {
-      setLastFeeVariantTitleMatched(chosen.matchedText ? String(chosen.matchedText) : '');
-      return chosen.id;
+    if (foundByExactTitle && foundByExactTitle.id) {
+      setLastFeeMatchMethod('exact_title');
+      setLastFeeVariantTitleMatched(foundByExactTitle.matchedText ? String(foundByExactTitle.matchedText) : '');
+      return foundByExactTitle.id;
+    }
+
+    if (foundByExactOption && foundByExactOption.id) {
+      setLastFeeMatchMethod('exact_option');
+      setLastFeeVariantTitleMatched(foundByExactOption.matchedText ? String(foundByExactOption.matchedText) : '');
+      return foundByExactOption.id;
+    }
+
+    if (foundByNumericText && foundByNumericText.id) {
+      setLastFeeMatchMethod('numeric_text');
+      setLastFeeVariantTitleMatched(foundByNumericText.matchedText ? String(foundByNumericText.matchedText) : '');
+      return foundByNumericText.id;
     }
 
     for (var p = 0; p < variantEdges.length; p += 1) {
@@ -1334,14 +1392,22 @@ function Modal() {
       if (priceVariant && priceVariant.price && priceVariant.price.amount !== undefined) {
         var priceAmount = parseFeeAmount(priceVariant.price.amount);
         if (priceAmount !== null && Math.abs(priceAmount - numericFee) < 0.0001) {
-          setLastFeeVariantTitleMatched(toStr(priceVariant.title));
-          return priceVariant.id;
+          foundByPriceAmount = { id: priceVariant.id, matchedText: toStr(priceVariant.title) };
+          break;
         }
       }
     }
 
+    if (foundByPriceAmount && foundByPriceAmount.id) {
+      setLastFeeMatchMethod('price_amount');
+      setLastFeeVariantTitleMatched(foundByPriceAmount.matchedText ? String(foundByPriceAmount.matchedText) : '');
+      return foundByPriceAmount.id;
+    }
+
+    setLastFeeMatchMethod('none');
     return null;
   }
+
 
   async function addSelectedProductToCart(product, variant, lineItemProperties, feeAmount) {
     setLastCartActionStatus('idle');
@@ -1357,6 +1423,11 @@ function Modal() {
     setLastFeeLineItemUuid('');
     setLastFeePropertiesAttachStatus('idle');
     setLastFeeProductTitleTarget('Personalisation fee (system)');
+    setLastFeeLookupQuery('');
+    setLastFeeCandidateCount(0);
+    setLastFeeVariantScanCount(0);
+    setLastFeeMatchMethod('none');
+    setLastFeeExactTitleValidationPassed(false);
     setLastFeeProductFound(false);
     setLastFeeProductId('');
     setLastFeeVariantTitleMatched('');
@@ -1447,13 +1518,13 @@ function Modal() {
           setLastFeeVariantStatus(feeVariantId ? 'found' : 'not_found');
         } catch (feeErr) {
           setLastFeeVariantStatus('failed');
-          setLastFeeErrorMessage(feeErr && feeErr.message ? feeErr.message : 'Fee variant lookup failed');
+          setLastFeeErrorMessage('fee lookup failed: ' + (feeErr && feeErr.message ? feeErr.message : 'unknown lookup error'));
           setLastCartActionStatus('failed');
           toast('Personalisation fee could not be added.');
           return false;
         }
         if (!feeVariantId) {
-          setLastFeeErrorMessage('Fee variant not found for amount');
+          setLastFeeErrorMessage('fee variant not found');
           setLastFeeVariantStatus('not_found');
           setLastCartActionStatus('failed');
           toast('Personalisation fee variant not found.');
@@ -1463,7 +1534,7 @@ function Modal() {
         var feeNormalized = normalizeVariantId(feeVariantId);
         if (!feeNormalized.valid || feeNormalized.value === null) {
           setLastFeeVariantStatus('failed');
-          setLastFeeErrorMessage('Fee variant id invalid');
+          setLastFeeErrorMessage('fee variant id invalid');
           setLastCartActionStatus('failed');
           toast('Fee variant id invalid.');
           return false;
@@ -1477,7 +1548,7 @@ function Modal() {
           setLastFeeLineItemUuid(feeUuid ? String(feeUuid) : '');
           if (!feeUuid) {
             setLastFeeVariantStatus('failed');
-            setLastFeeErrorMessage('Fee cart add returned no uuid');
+            setLastFeeErrorMessage('fee addLineItem failed: cart add returned no uuid');
             setLastFeeLineAddStatus('failed');
             setLastCartActionStatus('failed');
             toast('Fee line could not be added.');
@@ -1486,7 +1557,7 @@ function Modal() {
           setLastFeeLineAddStatus('success');
         } catch (feeAddErr) {
           setLastFeeVariantStatus('failed');
-          setLastFeeErrorMessage(feeAddErr && feeAddErr.message ? feeAddErr.message : 'Fee cart add failed');
+          setLastFeeErrorMessage('fee addLineItem failed: ' + (feeAddErr && feeAddErr.message ? feeAddErr.message : 'unknown add error'));
           setLastFeeLineAddStatus('failed');
           setLastCartActionStatus('failed');
           toast('Fee line could not be added.');
@@ -1506,7 +1577,7 @@ function Modal() {
           } catch (feePropErr) {
             setLastFeePropertiesAttachStatus('failed');
             setLastFeeVariantStatus('failed');
-            setLastFeeErrorMessage(feePropErr && feePropErr.message ? feePropErr.message : 'Fee properties attach failed');
+            setLastFeeErrorMessage('fee addLineItemProperties failed: ' + (feePropErr && feePropErr.message ? feePropErr.message : 'unknown properties error'));
             setLastCartActionStatus('failed');
             toast('Fee line added without properties.');
             return false;
@@ -1514,7 +1585,7 @@ function Modal() {
         } else {
           setLastFeePropertiesAttachStatus('failed');
           setLastFeeVariantStatus('failed');
-          setLastFeeErrorMessage('Cart API missing addLineItemProperties for fee');
+          setLastFeeErrorMessage('fee addLineItemProperties failed: Cart API missing addLineItemProperties for fee');
           setLastCartActionStatus('failed');
           toast('Fee properties could not be attached.');
           return false;
@@ -1527,7 +1598,7 @@ function Modal() {
             });
           } catch (linkErr) {
             setLastCartActionStatus('failed');
-            setLastFeeErrorMessage(linkErr && linkErr.message ? linkErr.message : 'Failed to link fee to product line');
+            setLastFeeErrorMessage('fee link-back-to-main failed: ' + (linkErr && linkErr.message ? linkErr.message : 'unknown link error'));
             toast('Fee added but linking failed.');
             return false;
           }
@@ -1699,6 +1770,11 @@ function Modal() {
           <s-text>Fee amount: {lastFeeAmount === null ? 'none' : '£' + Number(lastFeeAmount).toFixed(2)}</s-text>
           <s-text>Fee required: {lastFeeRequired ? 'yes' : 'no'}</s-text>
           <s-text>Fee product title targeted: {lastFeeProductTitleTarget}</s-text>
+          <s-text>Fee lookup query: {lastFeeLookupQuery === '' ? 'none' : lastFeeLookupQuery}</s-text>
+          <s-text>Fee candidate count: {lastFeeCandidateCount}</s-text>
+          <s-text>Fee variant scan count: {lastFeeVariantScanCount}</s-text>
+          <s-text>Fee exact title validation: {lastFeeExactTitleValidationPassed ? 'passed' : 'failed'}</s-text>
+          <s-text>Fee match method: {lastFeeMatchMethod}</s-text>
           <s-text>Fee product found: {lastFeeProductFound ? 'yes' : 'no'}</s-text>
           <s-text>Fee product id: {lastFeeProductId === '' ? 'none' : lastFeeProductId}</s-text>
           <s-text>Fee variant status: {lastFeeVariantStatus}</s-text>
@@ -2033,6 +2109,8 @@ function Modal() {
           </s-stack>
         </s-section>
         {renderPersonalisationDebug(selectedProduct)}
+        {renderCartDebug()}
+        {renderProductDebug()}
         </ScreenScroll>
       </s-page>
     );
@@ -2053,9 +2131,6 @@ function Modal() {
   }
   return renderClubsScreen();
 }
-
-
-
 
 
 
