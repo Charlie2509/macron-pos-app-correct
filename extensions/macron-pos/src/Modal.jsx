@@ -1,4 +1,4 @@
-
+ï»¿
 import {render} from 'preact';
 import {useEffect, useState} from 'preact/hooks';
 
@@ -280,7 +280,7 @@ function parseFeeDisplay(raw) {
   if (isNaN(fee) || fee <= 0) {
     return '';
   }
-  return '+£' + fee.toFixed(2);
+  return '+Â£' + fee.toFixed(2);
 }
 
 function parseMaxChars(raw) {
@@ -457,24 +457,23 @@ function mapProducts(productEdges) {
   return products;
 }
 
-function mapCollections(data) {
+function mapCollections(collectionNodes) {
   var clubs = [];
   var collectionsCount = 0;
   var directClubsCount = 0;
   var subsectionClubsCount = 0;
+  var orphanChildIgnored = 0;
   var parents = {};
   var parentNames = [];
   var children = [];
 
-  if (data && data.collections && data.collections.edges && Array.isArray(data.collections.edges)) {
-    collectionsCount = data.collections.edges.length;
-    var edges = data.collections.edges;
-    for (var i = 0; i < edges.length; i += 1) {
-      var edge = edges[i];
-      if (!edge || !edge.node) {
+  if (collectionNodes && Array.isArray(collectionNodes)) {
+    collectionsCount = collectionNodes.length;
+    for (var i = 0; i < collectionNodes.length; i += 1) {
+      var node = collectionNodes[i];
+      if (!node) {
         continue;
       }
-      var node = edge.node;
       var title = toStr(node.title);
       var products = mapProducts(node.products ? node.products.edges : []);
       var splitIndex = title.indexOf(' - ');
@@ -549,103 +548,111 @@ function mapCollections(data) {
     }
   }
 
+  for (var i2 = 0; i2 < children.length; i2 += 1) {
+    var child = children[i2];
+    if (!parents[child.parentName]) {
+      orphanChildIgnored += 1;
+    }
+  }
+
   return {
     clubs: clubs,
     collectionsCount: collectionsCount,
     directClubsCount: directClubsCount,
     subsectionClubsCount: subsectionClubsCount,
+    orphanChildIgnored: orphanChildIgnored,
   };
 }
+
 async function fetchLiveClubs() {
   if (typeof fetch === 'undefined') {
     throw new Error('Admin API fetch unavailable');
   }
-  var query = `#graphql
-    {
-      collections(first: 20) {
-        edges {
-          node {
-            id
-            title
-            products(first: 50) {
-              edges {
-                node {
-                  id
-                  title
-                  variants(first: 20) {
-                    edges {
-                      node { id title }
-                    }
-                  }
-                  enablePersonalisation: metafield(namespace: "custom", key: "enable_personalisation") { value }
-                  personalisationLabel: metafield(namespace: "custom", key: "personalisation_label") { value }
-                  personalisationFee: metafield(namespace: "custom", key: "personalisation_fee") { value }
-                  personalisationMaxChars: metafield(namespace: "custom", key: "personalisation_max_chars") { value }
-                  personalisationRequired: metafield(namespace: "custom", key: "personalisation_required") { value }
-                  extraField1Enabled: metafield(namespace: "custom", key: "extra_field_1_enabled") { value }
-                  extraField1Label: metafield(namespace: "custom", key: "extra_field_1_label") { value }
-                  extraField1Required: metafield(namespace: "custom", key: "extra_field_1_required") { value }
-                  extraField2Enabled: metafield(namespace: "custom", key: "extra_field_2_enabled") { value }
-                  extraField2Label: metafield(namespace: "custom", key: "extra_field_2_label") { value }
-                  extraField2Required: metafield(namespace: "custom", key: "extra_field_2_required") { value }
-                  enableFileUpload: metafield(namespace: "custom", key: "enable_file_upload") { value }
-                  fileUploadLabel: metafield(namespace: "custom", key: "file_upload_label") { value }
-                  fileUploadHelpText: metafield(namespace: "custom", key: "file_upload_help_text") { value }
-                  fileUploadRequired: metafield(namespace: "custom", key: "file_upload_required") { value }
-                  bundleComponents: metafield(namespace: "custom", key: "bundle_components") { value }
-                }
-              }
-            }
-          }
-        }
+
+  var query = "query Collections($cursor: String) {\n    collections(first: 100, after: $cursor) {\n      edges {\n        cursor\n        node {\n          id\n          title\n          products(first: 50) {\n            edges {\n              node {\n                id\n                title\n                variants(first: 20) {\n                  edges {\n                    node { id title }\n                  }\n                }\n                enablePersonalisation: metafield(namespace: \\\"custom\\\", key: \\\"enable_personalisation\\\") { value }\n                personalisationLabel: metafield(namespace: \\\"custom\\\", key: \\\"personalisation_label\\\") { value }\n                personalisationFee: metafield(namespace: \\\"custom\\\", key: \\\"personalisation_fee\\\") { value }\n                personalisationMaxChars: metafield(namespace: \\\"custom\\\", key: \\\"personalisation_max_chars\\\") { value }\n                personalisationRequired: metafield(namespace: \\\"custom\\\", key: \\\"personalisation_required\\\") { value }\n                extraField1Enabled: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_1_enabled\\\") { value }\n                extraField1Label: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_1_label\\\") { value }\n                extraField1Required: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_1_required\\\") { value }\n                extraField2Enabled: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_2_enabled\\\") { value }\n                extraField2Label: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_2_label\\\") { value }\n                extraField2Required: metafield(namespace: \\\"custom\\\", key: \\\"extra_field_2_required\\\") { value }\n                enableFileUpload: metafield(namespace: \\\"custom\\\", key: \\\"enable_file_upload\\\") { value }\n                fileUploadLabel: metafield(namespace: \\\"custom\\\", key: \\\"file_upload_label\\\") { value }\n                fileUploadHelpText: metafield(namespace: \\\"custom\\\", key: \\\"file_upload_help_text\\\") { value }\n                fileUploadRequired: metafield(namespace: \\\"custom\\\", key: \\\"file_upload_required\\\") { value }\n                bundleComponents: metafield(namespace: \\\"custom\\\", key: \\\"bundle_components\\\") { value }\n              }\n            }\n          }\n        }\n      }\n      pageInfo { hasNextPage endCursor }\n    }\n  }";
+
+  var allCollections = [];
+  var cursor = null;
+  var hasNextPage = true;
+  var pageSafetyLimit = 20;
+  var pagesFetched = 0;
+  var errors = [];
+
+  while (hasNextPage && pagesFetched < pageSafetyLimit) {
+    pagesFetched += 1;
+    var response;
+    try {
+      response = await fetch('shopify:admin/api/graphql.json', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: query,
+          variables: {cursor: cursor},
+        }),
+      });
+    } catch (err) {
+      throw new Error('Admin API fetch failed: ' + (err && err.message ? err.message : String(err)));
+    }
+
+    if (!response || !response.ok) {
+      var statusCode = response && response.status ? response.status : 'unknown';
+      var statusText = response && response.statusText ? response.statusText : 'unknown';
+      throw new Error('Admin API HTTP error: ' + statusCode + ' ' + statusText);
+    }
+
+    var json;
+    try {
+      json = await response.json();
+    } catch (err) {
+      throw new Error('Failed to parse GraphQL JSON: ' + (err && err.message ? err.message : String(err)));
+    }
+
+    if (json && json.errors && Array.isArray(json.errors) && json.errors.length > 0) {
+      errors = errors.concat(json.errors);
+    }
+
+    if (!json || !json.data || !json.data.collections) {
+      errors.push({message: 'Missing data in GraphQL response'});
+      break;
+    }
+
+    var edges = json.data.collections.edges || [];
+    for (var i = 0; i < edges.length; i += 1) {
+      if (edges[i] && edges[i].node) {
+        allCollections.push(edges[i].node);
       }
     }
-  `;
 
-  var response;
-  try {
-    response = await fetch('shopify:admin/api/graphql.json', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query: query,
-        variables: {},
-      }),
-    });
-  } catch (err) {
-    throw new Error('Admin API fetch failed: ' + (err && err.message ? err.message : String(err)));
+    var pageInfo = json.data.collections.pageInfo;
+    hasNextPage = pageInfo && pageInfo.hasNextPage === true;
+    cursor = hasNextPage ? pageInfo.endCursor : null;
   }
 
-  if (!response || !response.ok) {
-    var statusCode = response && response.status ? response.status : 'unknown';
-    var statusText = response && response.statusText ? response.statusText : 'unknown';
-    throw new Error('Admin API HTTP error: ' + statusCode + ' ' + statusText);
-  }
-
-  var json;
-  try {
-    json = await response.json();
-  } catch (err) {
-    throw new Error('Failed to parse GraphQL JSON: ' + (err && err.message ? err.message : String(err)));
-  }
-
-  var errors = [];
-  if (json && json.errors && Array.isArray(json.errors)) {
-    errors = json.errors;
-  }
-
-  if (!json || !json.data) {
-    errors.push({message: 'Missing data in GraphQL response'});
-  }
-
-  var mapped = mapCollections(json ? json.data : null);
-  return {clubs: mapped.clubs, collectionsCount: mapped.collectionsCount, directClubsCount: mapped.directClubsCount, subsectionClubsCount: mapped.subsectionClubsCount, errors: errors, raw: json};
+  var mapped = mapCollections(allCollections);
+  return {
+    clubs: mapped.clubs,
+    collectionsCount: mapped.collectionsCount,
+    directClubsCount: mapped.directClubsCount,
+    subsectionClubsCount: mapped.subsectionClubsCount,
+    orphanChildIgnored: mapped.orphanChildIgnored,
+    errors: errors,
+    rawCollectionsCount: allCollections.length,
+    pagesFetched: pagesFetched,
+  };
 }
 // ---------------- UI ----------------
 export default async function () {
   render(<Modal />, document.body);
+}
+
+function ScrollContainer(props) {
+  return (
+    <div style="max-height: 100vh; overflow-y: auto; padding: 0 0 12px 0;">
+      {props.children}
+    </div>
+  );
 }
 
 function Modal() {
@@ -692,6 +699,18 @@ function Modal() {
   var subsectionClubsCountState = useState(0);
   var subsectionClubsCount = subsectionClubsCountState[0];
   var setSubsectionClubsCount = subsectionClubsCountState[1];
+
+  var orphanChildIgnoredState = useState(0);
+  var orphanChildIgnored = orphanChildIgnoredState[0];
+  var setOrphanChildIgnored = orphanChildIgnoredState[1];
+
+  var pagesFetchedState = useState(0);
+  var pagesFetched = pagesFetchedState[0];
+  var setPagesFetched = pagesFetchedState[1];
+
+  var rawCollectionsCountState = useState(0);
+  var rawCollectionsCount = rawCollectionsCountState[0];
+  var setRawCollectionsCount = rawCollectionsCountState[1];
 
   var liveSourceStageState = useState('idle');
   var liveSourceStage = liveSourceStageState[0];
@@ -745,14 +764,24 @@ function Modal() {
           return;
         }
         setLiveSourceStage('parsing graphql response');
+        setPagesFetched(liveResult.pagesFetched || 0);
+        setRawCollectionsCount(liveResult.rawCollectionsCount || 0);
         setLiveCollectionsCount(liveResult.collectionsCount || 0);
         setDirectClubsCount(liveResult.directClubsCount || 0);
         setSubsectionClubsCount(liveResult.subsectionClubsCount || 0);
+        setOrphanChildIgnored(liveResult.orphanChildIgnored || 0);
         if (!liveResult) {
           setLiveFetchFailed(true);
           setLiveFetchSucceeded(false);
           setLiveFetchErrorMessage('No GraphQL result');
           setLiveSourceStage('falling back to mock');
+          setPagesFetched(0);
+          setRawCollectionsCount(0);
+          setLiveCollectionsCount(0);
+          setDirectClubsCount(0);
+          setSubsectionClubsCount(0);
+          setOrphanChildIgnored(0);
+          setLiveUsableClubCount(0);
           setClubs(MOCK_CLUBS);
           setDataSource('Mock data');
           setLoading(false);
@@ -767,6 +796,13 @@ function Modal() {
           setLiveFetchSucceeded(false);
           setLiveFetchErrorMessage(errMsg);
           setLiveSourceStage('falling back to mock');
+          setPagesFetched(0);
+          setRawCollectionsCount(0);
+          setLiveCollectionsCount(0);
+          setDirectClubsCount(0);
+          setSubsectionClubsCount(0);
+          setOrphanChildIgnored(0);
+          setLiveUsableClubCount(0);
           setClubs(MOCK_CLUBS);
           setDataSource('Mock data');
           setLoading(false);
@@ -780,6 +816,12 @@ function Modal() {
           setLiveFetchSucceeded(false);
           setLiveFetchErrorMessage('Collections query returned 0 collections');
           setLiveSourceStage('falling back to mock');
+          setPagesFetched(pagesFetched);
+          setRawCollectionsCount(liveResult.rawCollectionsCount || 0);
+          setLiveUsableClubCount(0);
+          setDirectClubsCount(0);
+          setSubsectionClubsCount(0);
+          setOrphanChildIgnored(liveResult.orphanChildIgnored || 0);
           setClubs(MOCK_CLUBS);
           setDataSource('Mock data');
           setLoading(false);
@@ -790,6 +832,10 @@ function Modal() {
           setLiveFetchSucceeded(false);
           setLiveFetchErrorMessage('Collections returned but no usable clubs built');
           setLiveSourceStage('falling back to mock');
+          setLiveUsableClubCount(0);
+          setDirectClubsCount(0);
+          setSubsectionClubsCount(0);
+          setOrphanChildIgnored(liveResult.orphanChildIgnored || 0);
           setClubs(MOCK_CLUBS);
           setDataSource('Mock data');
           setLoading(false);
@@ -807,6 +853,13 @@ function Modal() {
           setLiveFetchSucceeded(false);
           setLiveFetchErrorMessage(err && err.message ? err.message : String(err));
           setLiveSourceStage('falling back to mock');
+          setPagesFetched(0);
+          setRawCollectionsCount(0);
+          setLiveCollectionsCount(0);
+          setDirectClubsCount(0);
+          setSubsectionClubsCount(0);
+          setOrphanChildIgnored(0);
+          setLiveUsableClubCount(0);
           setClubs(MOCK_CLUBS);
           setDataSource('Mock data');
         }
@@ -952,10 +1005,13 @@ function Modal() {
           <s-text>Live fetch succeeded: {liveFetchSucceeded ? 'yes' : 'no'}</s-text>
           <s-text>Live fetch failed: {liveFetchFailed ? 'yes' : 'no'}</s-text>
           <s-text>Live source stage: {liveSourceStage}</s-text>
+          <s-text>Pages fetched: {pagesFetched}</s-text>
+          <s-text>Raw collections fetched: {rawCollectionsCount}</s-text>
           <s-text>Collections returned: {liveCollectionsCount}</s-text>
           <s-text>Usable clubs built: {liveUsableClubCount}</s-text>
           <s-text>Direct clubs: {directClubsCount}</s-text>
           <s-text>Subsection clubs: {subsectionClubsCount}</s-text>
+          <s-text>Orphan child collections ignored: {orphanChildIgnored}</s-text>
           <s-text>Data source in use: {dataSource}</s-text>
           <s-text>Error: {liveFetchErrorMessage === '' ? 'none' : liveFetchErrorMessage}</s-text>
         </s-stack>
@@ -969,7 +1025,7 @@ function Modal() {
           <s-text appearance="critical">DEBUG VERSION: PRODUCT DETAIL V1</s-text>
           <s-text>Screen: {screen}</s-text>
           <s-text>{dataSource}</s-text>
-          {loading ? <s-text>Loading…</s-text> : null}
+          {loading ? <s-text>Loadingâ€¦</s-text> : null}
           {errorMessage ? <s-text appearance="critical">{errorMessage}</s-text> : null}
         </s-stack>
         {renderLiveDebugPanel()}
@@ -1050,11 +1106,11 @@ function Modal() {
   function renderClubsScreen() {
     return (
       <s-page heading="Macron POS">
-        <s-box style="max-height: 100vh; overflow-y: auto; display: block; padding: 0 0 12px 0;">
+        <ScrollContainer>
           {renderDebugHeader()}
           <s-section heading="Clubs">
             <s-stack direction="block" gap="base">
-              <s-text appearance="subdued">Data source: {dataSource === ''Live data'' ? ''Live'' : ''Mock''}</s-text>
+              <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
               <s-text>Select a club to begin.</s-text>
               {clubs.map(function (club) {
                 return (
@@ -1065,7 +1121,7 @@ function Modal() {
               })}
             </s-stack>
           </s-section>
-        </s-box>
+        </ScrollContainer>
       </s-page>
     );
   }
@@ -1076,7 +1132,7 @@ function Modal() {
     }
     return (
       <s-page heading="Macron POS">
-        <s-box style="max-height: 100vh; overflow-y: auto; display: block; padding: 0 0 12px 0;">
+        <ScrollContainer>
           {renderDebugHeader()}
           <s-section heading={selectedClub.name + ' - Subsections'}>
             <s-stack direction="block" gap="base">
@@ -1091,7 +1147,7 @@ function Modal() {
               <s-button variant="primary" onClick={handleBack}>Back</s-button>
             </s-stack>
           </s-section>
-        </s-box>
+        </ScrollContainer>
       </s-page>
     );
   }
@@ -1110,7 +1166,7 @@ function Modal() {
     var products = productsForCurrentSelection();
     return (
       <s-page heading="Macron POS">
-        <s-box style="max-height: 100vh; overflow-y: auto; display: block; padding: 0 0 12px 0;">
+        <ScrollContainer>
           {renderDebugHeader()}
           <s-section heading={selectedClub ? selectedClub.name : 'Products'}>
             <s-stack direction="block" gap="base">
@@ -1124,7 +1180,7 @@ function Modal() {
               <s-button variant="primary" onClick={handleBack}>Back</s-button>
             </s-stack>
           </s-section>
-        </s-box>
+        </ScrollContainer>
       </s-page>
     );
   }
@@ -1137,7 +1193,7 @@ function Modal() {
       <s-section heading="Bundle">
         <s-stack direction="block" gap="micro">
           <s-text appearance="subdued">Bundle product detected.</s-text>
-          <s-button variant="secondary" onClick={function () { toast('Bundle builder placeholder – coming next.'); }}>
+          <s-button variant="secondary" onClick={function () { toast('Bundle builder placeholder â€“ coming next.'); }}>
             Continue to bundle builder
           </s-button>
         </s-stack>
@@ -1172,7 +1228,7 @@ function Modal() {
     var showAddToCart = !hasPersonalisation;
     return (
       <s-page heading="Macron POS">
-        <s-box style="max-height: 100vh; overflow-y: auto; display: block; padding: 0 0 12px 0;">
+        <ScrollContainer>
           {renderDebugHeader()}
           <s-section heading="PRODUCT DETAIL SCREEN">
             <s-stack direction="block" gap="base">
@@ -1194,7 +1250,7 @@ function Modal() {
           {renderPersonalisationDebug(selectedProduct)}
           {renderBundleDebug(selectedProduct)}
           {renderCartDebug()}
-        </s-box>
+        </ScrollContainer>
       </s-page>
     );
   }
@@ -1253,7 +1309,7 @@ function Modal() {
 
     return (
       <s-page heading="Macron POS">
-        <s-box style="max-height: 100vh; overflow-y: auto; display: block; padding: 0 0 12px 0;">
+        <ScrollContainer>
           {renderDebugHeader()}
           <s-section heading="Personalisation">
             <s-stack direction="block" gap="base">
@@ -1308,7 +1364,7 @@ function Modal() {
             </s-stack>
           </s-section>
           {renderPersonalisationDebug(selectedProduct)}
-        </s-box>
+        </ScrollContainer>
       </s-page>
     );
   }
@@ -1328,6 +1384,23 @@ function Modal() {
   }
   return renderClubsScreen();
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
