@@ -460,6 +460,12 @@ function mapProducts(productEdges) {
 function mapCollections(data) {
   var clubs = [];
   var collectionsCount = 0;
+  var directClubsCount = 0;
+  var subsectionClubsCount = 0;
+  var parents = {};
+  var parentNames = [];
+  var children = [];
+
   if (data && data.collections && data.collections.edges && Array.isArray(data.collections.edges)) {
     collectionsCount = data.collections.edges.length;
     var edges = data.collections.edges;
@@ -469,18 +475,87 @@ function mapCollections(data) {
         continue;
       }
       var node = edge.node;
+      var title = toStr(node.title);
       var products = mapProducts(node.products ? node.products.edges : []);
-      clubs.push({
-        name: node.title,
-        type: 'products',
-        subsections: [],
-        products: products,
-      });
+      var splitIndex = title.indexOf(' - ');
+      if (splitIndex > -1) {
+        var parentName = title.substring(0, splitIndex);
+        var subsectionLabel = title.substring(splitIndex + 3);
+        if (parentName !== '' && subsectionLabel !== '') {
+          children.push({
+            parentName: parentName,
+            label: subsectionLabel,
+            products: products,
+          });
+        }
+      } else {
+        if (!parents[title]) {
+          parents[title] = {products: products};
+          parentNames.push(title);
+        } else {
+          parents[title].products = products;
+        }
+      }
     }
   }
-  return {clubs: clubs, collectionsCount: collectionsCount};
-}
 
+  parentNames.sort(function (a, b) {
+    if (a < b) { return -1; }
+    if (a > b) { return 1; }
+    return 0;
+  });
+
+  for (var p = 0; p < parentNames.length; p += 1) {
+    var name = parentNames[p];
+    var parentProducts = parents[name] ? parents[name].products : [];
+    var matchingChildren = [];
+    for (var c = 0; c < children.length; c += 1) {
+      if (children[c].parentName === name) {
+        matchingChildren.push(children[c]);
+      }
+    }
+    matchingChildren.sort(function (a, b) {
+      if (a.label < b.label) { return -1; }
+      if (a.label > b.label) { return 1; }
+      return 0;
+    });
+
+    if (parentProducts && parentProducts.length > 0) {
+      clubs.push({
+        name: name,
+        type: 'products',
+        subsections: [],
+        products: parentProducts,
+      });
+      directClubsCount += 1;
+      continue;
+    }
+
+    if (matchingChildren.length > 0) {
+      var subsections = [];
+      for (var m = 0; m < matchingChildren.length; m += 1) {
+        subsections.push({
+          label: matchingChildren[m].label,
+          products: matchingChildren[m].products,
+        });
+      }
+      clubs.push({
+        name: name,
+        type: 'subsections',
+        subsections: subsections,
+        products: [],
+      });
+      subsectionClubsCount += 1;
+    }
+  }
+
+  return {
+    clubs: clubs,
+    collectionsCount: collectionsCount,
+    directClubsCount: directClubsCount,
+    subsectionClubsCount: subsectionClubsCount,
+  };
+}
 async function fetchLiveClubs() {
   if (typeof fetch === 'undefined') {
     throw new Error('Admin API fetch unavailable');
@@ -566,7 +641,7 @@ async function fetchLiveClubs() {
   }
 
   var mapped = mapCollections(json ? json.data : null);
-  return {clubs: mapped.clubs, collectionsCount: mapped.collectionsCount, errors: errors, raw: json};
+  return {clubs: mapped.clubs, collectionsCount: mapped.collectionsCount, directClubsCount: mapped.directClubsCount, subsectionClubsCount: mapped.subsectionClubsCount, errors: errors, raw: json};
 }
 // ---------------- UI ----------------
 export default async function () {
@@ -610,10 +685,17 @@ function Modal() {
   var liveUsableClubCount = liveUsableClubCountState[0];
   var setLiveUsableClubCount = liveUsableClubCountState[1];
 
+  var directClubsCountState = useState(0);
+  var directClubsCount = directClubsCountState[0];
+  var setDirectClubsCount = directClubsCountState[1];
+
+  var subsectionClubsCountState = useState(0);
+  var subsectionClubsCount = subsectionClubsCountState[0];
+  var setSubsectionClubsCount = subsectionClubsCountState[1];
+
   var liveSourceStageState = useState('idle');
   var liveSourceStage = liveSourceStageState[0];
   var setLiveSourceStage = liveSourceStageState[1];
-
   var errorState = useState('');
   var errorMessage = errorState[0];
   var setErrorMessage = errorState[1];
@@ -664,6 +746,8 @@ function Modal() {
         }
         setLiveSourceStage('parsing graphql response');
         setLiveCollectionsCount(liveResult.collectionsCount || 0);
+        setDirectClubsCount(liveResult.directClubsCount || 0);
+        setSubsectionClubsCount(liveResult.subsectionClubsCount || 0);
         if (!liveResult) {
           setLiveFetchFailed(true);
           setLiveFetchSucceeded(false);
@@ -870,13 +954,14 @@ function Modal() {
           <s-text>Live source stage: {liveSourceStage}</s-text>
           <s-text>Collections returned: {liveCollectionsCount}</s-text>
           <s-text>Usable clubs built: {liveUsableClubCount}</s-text>
+          <s-text>Direct clubs: {directClubsCount}</s-text>
+          <s-text>Subsection clubs: {subsectionClubsCount}</s-text>
           <s-text>Data source in use: {dataSource}</s-text>
           <s-text>Error: {liveFetchErrorMessage === '' ? 'none' : liveFetchErrorMessage}</s-text>
         </s-stack>
       </s-section>
     );
   }
-
   function renderDebugHeader() {
     return (
       <s-section heading="Debug">
@@ -1232,5 +1317,15 @@ function Modal() {
   }
   return renderClubsScreen();
 }
+
+
+
+
+
+
+
+
+
+
 
 
