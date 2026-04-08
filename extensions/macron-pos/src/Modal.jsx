@@ -856,6 +856,26 @@ function Modal() {
   var currentProductsCollectionId = currentProductsCollectionIdState[0];
   var setCurrentProductsCollectionId = currentProductsCollectionIdState[1];
 
+  var lastCartActionStatusState = useState('idle');
+  var lastCartActionStatus = lastCartActionStatusState[0];
+  var setLastCartActionStatus = lastCartActionStatusState[1];
+
+  var lastCartErrorMessageState = useState('');
+  var lastCartErrorMessage = lastCartErrorMessageState[0];
+  var setLastCartErrorMessage = lastCartErrorMessageState[1];
+
+  var lastCartBeforeCountState = useState(0);
+  var lastCartBeforeCount = lastCartBeforeCountState[0];
+  var setLastCartBeforeCount = lastCartBeforeCountState[1];
+
+  var lastCartAfterCountState = useState(0);
+  var lastCartAfterCount = lastCartAfterCountState[0];
+  var setLastCartAfterCount = lastCartAfterCountState[1];
+
+  var lastNormalizedVariantIdState = useState('');
+  var lastNormalizedVariantId = lastNormalizedVariantIdState[0];
+  var setLastNormalizedVariantId = lastNormalizedVariantIdState[1];
+
   var loadingState = useState(false);
   var loading = loadingState[0];
   var setLoading = loadingState[1];
@@ -1108,23 +1128,38 @@ function Modal() {
   }
 
   async function addVariantToCart(product, variant) {
+    setLastCartActionStatus('idle');
+    setLastCartErrorMessage('');
     if (!product || !variant) {
       toast('Select a size first');
+      setLastCartActionStatus('failed');
+      setLastCartErrorMessage('No product or variant selected');
       return false;
     }
     if (isMockVariant(variant.id)) {
       toast('Mock products cannot be added to the POS cart.');
+      setLastCartActionStatus('failed');
+      setLastCartErrorMessage('Mock product cannot be added');
       return false;
     }
     var normalized = normalizeVariantId(variant.id);
+    setLastNormalizedVariantId(normalized.valid ? String(normalized.value) : '');
     if (!normalized.valid || normalized.value === null) {
       toast('Variant ID is invalid for POS cart add.');
+      setLastCartActionStatus('failed');
+      setLastCartErrorMessage('Invalid normalized variant id');
       return false;
     }
-    if (typeof shopify === 'undefined' || !shopify.cart || !shopify.cart.addLineItem) {
+    var cartApiAvailable = typeof shopify !== 'undefined' && shopify.cart && shopify.cart.addLineItem;
+    if (!cartApiAvailable) {
       toast('Cart API unavailable.');
+      setLastCartActionStatus('failed');
+      setLastCartErrorMessage('Cart API unavailable');
       return false;
     }
+    var beforeCount = cartLineCount();
+    setLastCartBeforeCount(beforeCount);
+    setLastCartAfterCount(beforeCount);
     try {
       var result = await shopify.cart.addLineItem({
         variantId: normalized.value,
@@ -1132,13 +1167,26 @@ function Modal() {
       });
       if (!result) {
         toast('Could not add to cart.');
+        setLastCartActionStatus('failed');
+        setLastCartErrorMessage('Cart API returned no result');
         return false;
       }
-      var count = cartLineCount();
-      toast('Added to cart. Cart lines: ' + count);
-      return true;
+      var afterCount = cartLineCount();
+      setLastCartAfterCount(afterCount);
+      if (afterCount > beforeCount) {
+        toast('Added to cart. Cart lines: ' + afterCount);
+        setLastCartActionStatus('success');
+        setLastCartErrorMessage('');
+        return true;
+      }
+      toast('Cart API returned, but cart did not update');
+      setLastCartActionStatus('failed');
+      setLastCartErrorMessage('No cart count change');
+      return false;
     } catch (err) {
       toast('Could not add to cart.');
+      setLastCartActionStatus('failed');
+      setLastCartErrorMessage(err && err.message ? err.message : String(err));
       return false;
     }
   }
@@ -1274,7 +1322,14 @@ function Modal() {
           <s-text>Selected variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
           <s-text>Variant id: {variantId}</s-text>
           <s-text>Variant id type: {classifyVariantId(variantId)}</s-text>
+          <s-text>Normalized variant id: {lastNormalizedVariantId}</s-text>
+          <s-text>Product is mock: {selectedVariant ? (isMockVariant(selectedVariant.id) ? 'yes' : 'no') : ''}</s-text>
+          <s-text>Cart API available: {typeof shopify !== 'undefined' && shopify.cart && shopify.cart.addLineItem ? 'yes' : 'no'}</s-text>
           <s-text>Cart line count: {cartLineCount()}</s-text>
+          <s-text>Last cart before: {lastCartBeforeCount}</s-text>
+          <s-text>Last cart after: {lastCartAfterCount}</s-text>
+          <s-text>Last cart status: {lastCartActionStatus}</s-text>
+          <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
         </s-stack>
       </s-section>
     );
@@ -1425,6 +1480,9 @@ function Modal() {
           <s-section heading="PRODUCT DETAIL SCREEN">
             <s-stack direction="block" gap="base">
               <s-text>Product: {selectedProduct.title}</s-text>
+              {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
+                <s-text appearance="subdued">Testing live cart add for standard products</s-text>
+              ) : null}
               {renderVariants(selectedProduct)}
               {renderBundleNote(selectedProduct)}
               {showAddToCart ? (
