@@ -482,8 +482,8 @@ function mapCollections(data) {
 }
 
 async function fetchLiveClubs() {
-  if (typeof shopify === 'undefined' || !shopify.graphql) {
-    throw new Error('Shopify GraphQL unavailable');
+  if (typeof fetch === 'undefined') {
+    throw new Error('Admin API fetch unavailable');
   }
   var query = `#graphql
     {
@@ -526,13 +526,47 @@ async function fetchLiveClubs() {
       }
     }
   `;
-  var result = await shopify.graphql(query);
-  var mapped = mapCollections(result);
-  var errors = [];
-  if (result && result.errors && Array.isArray(result.errors)) {
-    errors = result.errors;
+
+  var response;
+  try {
+    response = await fetch('shopify:admin/api/graphql.json', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: query,
+        variables: {},
+      }),
+    });
+  } catch (err) {
+    throw new Error('Admin API fetch failed: ' + (err && err.message ? err.message : String(err)));
   }
-  return {clubs: mapped.clubs, collectionsCount: mapped.collectionsCount, errors: errors, raw: result};
+
+  if (!response || !response.ok) {
+    var statusCode = response && response.status ? response.status : 'unknown';
+    var statusText = response && response.statusText ? response.statusText : 'unknown';
+    throw new Error('Admin API HTTP error: ' + statusCode + ' ' + statusText);
+  }
+
+  var json;
+  try {
+    json = await response.json();
+  } catch (err) {
+    throw new Error('Failed to parse GraphQL JSON: ' + (err && err.message ? err.message : String(err)));
+  }
+
+  var errors = [];
+  if (json && json.errors && Array.isArray(json.errors)) {
+    errors = json.errors;
+  }
+
+  if (!json || !json.data) {
+    errors.push({message: 'Missing data in GraphQL response'});
+  }
+
+  var mapped = mapCollections(json ? json.data : null);
+  return {clubs: mapped.clubs, collectionsCount: mapped.collectionsCount, errors: errors, raw: json};
 }
 // ---------------- UI ----------------
 export default async function () {
@@ -623,12 +657,12 @@ function Modal() {
       setLiveSourceStage('starting fetch');
       setLoading(true);
       try {
-        setLiveSourceStage('fetching');
+        setLiveSourceStage('sending admin graphql request');
         var liveResult = await fetchLiveClubs();
         if (cancelled) {
           return;
         }
-        setLiveSourceStage('graphql returned');
+        setLiveSourceStage('parsing graphql response');
         setLiveCollectionsCount(liveResult.collectionsCount || 0);
         if (!liveResult) {
           setLiveFetchFailed(true);
@@ -1198,3 +1232,5 @@ function Modal() {
   }
   return renderClubsScreen();
 }
+
+
