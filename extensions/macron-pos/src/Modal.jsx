@@ -876,9 +876,17 @@ function Modal() {
   var lastNormalizedVariantId = lastNormalizedVariantIdState[0];
   var setLastNormalizedVariantId = lastNormalizedVariantIdState[1];
 
-  var lastLineItemPropertiesState = useState([]);
+  var lastLineItemPropertiesState = useState({});
   var lastLineItemProperties = lastLineItemPropertiesState[0];
   var setLastLineItemProperties = lastLineItemPropertiesState[1];
+
+  var lastCartLineItemUuidState = useState('');
+  var lastCartLineItemUuid = lastCartLineItemUuidState[0];
+  var setLastCartLineItemUuid = lastCartLineItemUuidState[1];
+
+  var lastPropertiesAttachStatusState = useState('idle');
+  var lastPropertiesAttachStatus = lastPropertiesAttachStatusState[0];
+  var setLastPropertiesAttachStatus = lastPropertiesAttachStatusState[1];
 
   var loadingState = useState(false);
   var loading = loadingState[0];
@@ -1134,7 +1142,9 @@ function Modal() {
   async function addSelectedProductToCart(product, variant, lineItemProperties) {
     setLastCartActionStatus('idle');
     setLastCartErrorMessage('');
-    setLastLineItemProperties(lineItemProperties || []);
+    setLastCartLineItemUuid('');
+    setLastPropertiesAttachStatus('idle');
+    setLastLineItemProperties(lineItemProperties || {});
     if (!product || !variant) {
       toast('Select a size first');
       setLastCartActionStatus('failed');
@@ -1166,19 +1176,33 @@ function Modal() {
     setLastCartBeforeCount(beforeCount);
     setLastCartAfterCount(beforeCount);
     try {
-      var payload = {
-        variantId: normalized.value,
-        quantity: 1,
-      };
-      if (lineItemProperties && lineItemProperties.length > 0) {
-        payload.properties = lineItemProperties;
-      }
-      var result = await shopify.cart.addLineItem(payload);
-      if (!result) {
+      var uuid = await shopify.cart.addLineItem(normalized.value, 1);
+      setLastCartLineItemUuid(uuid ? String(uuid) : '');
+      if (!uuid) {
         toast('Could not add to cart.');
         setLastCartActionStatus('failed');
-        setLastCartErrorMessage('Cart API returned no result');
+        setLastCartErrorMessage('Cart API returned no line item uuid');
         return false;
+      }
+      if (lineItemProperties && typeof lineItemProperties === 'object' && Object.keys(lineItemProperties).length > 0) {
+        if (shopify.cart && shopify.cart.addLineItemProperties) {
+          try {
+            await shopify.cart.addLineItemProperties(uuid, lineItemProperties);
+            setLastPropertiesAttachStatus('success');
+          } catch (errProps) {
+            setLastPropertiesAttachStatus('failed');
+            setLastCartActionStatus('failed');
+            setLastCartErrorMessage(errProps && errProps.message ? errProps.message : 'Failed to attach properties');
+            return false;
+          }
+        } else {
+          setLastPropertiesAttachStatus('failed');
+          setLastCartActionStatus('failed');
+          setLastCartErrorMessage('Cart API missing addLineItemProperties');
+          return false;
+        }
+      } else {
+        setLastPropertiesAttachStatus('skipped');
       }
       var afterCount = cartLineCount();
       setLastCartAfterCount(afterCount);
@@ -1337,14 +1361,16 @@ function Modal() {
           <s-text>Cart line count: {cartLineCount()}</s-text>
           <s-text>Last cart before: {lastCartBeforeCount}</s-text>
           <s-text>Last cart after: {lastCartAfterCount}</s-text>
+          <s-text>Last line item uuid: {lastCartLineItemUuid}</s-text>
+          <s-text>Properties attach: {lastPropertiesAttachStatus}</s-text>
           <s-text>Last cart status: {lastCartActionStatus}</s-text>
           <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
           <s-text>
             Line item properties preview:{' '}
-            {lastLineItemProperties && lastLineItemProperties.length > 0
-              ? lastLineItemProperties
-                  .map(function (p) {
-                    return (p.key || '') + ':' + (p.value || '');
+            {lastLineItemProperties && Object.keys(lastLineItemProperties).length > 0
+              ? Object.keys(lastLineItemProperties)
+                  .map(function (k) {
+                    return k + ':' + lastLineItemProperties[k];
                   })
                   .join(', ')
               : 'none'}
@@ -1508,7 +1534,7 @@ function Modal() {
                 <s-button
                   variant="primary"
                   onClick={function () {
-                    addSelectedProductToCart(selectedProduct, selectedVariant, []);
+                    addSelectedProductToCart(selectedProduct, selectedVariant, {});
                   }}
                 >
                   Add to cart
@@ -1572,32 +1598,23 @@ function Modal() {
       if (!validate()) {
         return;
       }
-      var props = [];
+      var props = {};
       if (meta.enablePersonalisation && toStr(primaryFieldValue) !== '') {
-        props.push({
-          key: meta.personalisationLabel || 'Personalisation',
-          value: toStr(primaryFieldValue),
-        });
+        props[meta.personalisationLabel || 'Personalisation'] = toStr(primaryFieldValue);
       }
       if (meta.extraField1Enabled && toStr(extraField1Value) !== '') {
-        props.push({
-          key: meta.extraField1Label || 'Additional information',
-          value: toStr(extraField1Value),
-        });
+        props[meta.extraField1Label || 'Additional information'] = toStr(extraField1Value);
       }
       if (meta.extraField2Enabled && toStr(extraField2Value) !== '') {
-        props.push({
-          key: meta.extraField2Label || 'Additional information 2',
-          value: toStr(extraField2Value),
-        });
+        props[meta.extraField2Label || 'Additional information 2'] = toStr(extraField2Value);
       }
-      if (props.length > 0) {
-        var summary = props
-          .map(function (p) {
-            return p.key + ': ' + p.value;
-          })
-          .join(' | ');
-        props.push({key: 'Personalisation Summary', value: summary});
+      if (Object.keys(props).length > 0) {
+        var summaryParts = [];
+        var keys = Object.keys(props);
+        for (var i = 0; i < keys.length; i += 1) {
+          summaryParts.push(keys[i] + ': ' + props[keys[i]]);
+        }
+        props['Personalisation Summary'] = summaryParts.join(' | ');
       }
       addSelectedProductToCart(selectedProduct, selectedVariant, props).then(function (ok) {
         if (ok) {
