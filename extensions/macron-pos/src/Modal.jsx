@@ -945,6 +945,10 @@ function Modal() {
   var lastFeeProductTitleTarget = lastFeeProductTitleTargetState[0];
   var setLastFeeProductTitleTarget = lastFeeProductTitleTargetState[1];
 
+  var lastFeeProductHandleTargetState = useState('personalisation-fee');
+  var lastFeeProductHandleTarget = lastFeeProductHandleTargetState[0];
+  var setLastFeeProductHandleTarget = lastFeeProductHandleTargetState[1];
+
   var lastFeeLookupQueryState = useState('');
   var lastFeeLookupQuery = lastFeeLookupQueryState[0];
   var setLastFeeLookupQuery = lastFeeLookupQueryState[1];
@@ -1237,7 +1241,9 @@ function Modal() {
   }
 
   async function fetchPersonalisationFeeVariant(feeAmount) {
+    var targetProductHandle = 'personalisation-fee';
     var targetProductTitle = 'Personalisation fee (system)';
+    setLastFeeProductHandleTarget(targetProductHandle);
     setLastFeeProductTitleTarget(targetProductTitle);
     setLastFeeLookupQuery('');
     setLastFeeCandidateCount(0);
@@ -1258,13 +1264,12 @@ function Modal() {
       throw new Error('Admin API fetch unavailable for fee lookup');
     }
 
-    var searchQuery = 'title:"' + targetProductTitle + '"';
-    setLastFeeLookupQuery(searchQuery);
-    var gql = 'query FeeVariants($query: String!) { products(first: 5, query: $query) { edges { node { id title variants(first: 100) { edges { node { id title selectedOptions { name value } price { amount currencyCode } } } } } } } }';
+    setLastFeeLookupQuery('productByHandle(handle: "' + targetProductHandle + '")');
+    var gql = 'query FeeVariants($handle: String!) { productByHandle(handle: $handle) { id title variants(first: 100) { edges { node { id title selectedOptions { name value } } } } } }';
     var response = await fetch('shopify:admin/api/graphql.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: gql, variables: { query: searchQuery } }),
+      body: JSON.stringify({ query: gql, variables: { handle: targetProductHandle } }),
     });
 
     if (!response || !response.ok) {
@@ -1288,23 +1293,23 @@ function Modal() {
     if (json && json.errors && Array.isArray(json.errors) && json.errors.length > 0) {
       throw new Error('Fee variant GraphQL error: ' + (json.errors[0] && json.errors[0].message ? json.errors[0].message : 'unknown error'));
     }
-    if (!json || !json.data || !json.data.products || !json.data.products.edges) {
+    if (!json || !json.data) {
       return null;
     }
 
-    var edges = json.data.products.edges;
-    setLastFeeCandidateCount(edges.length);
-    var feeProductNode = null;
-    for (var i = 0; i < edges.length; i += 1) {
-      var node = edges[i] && edges[i].node ? edges[i].node : null;
-      if (node && toStr(node.title) === targetProductTitle) {
-        feeProductNode = node;
-        break;
-      }
-    }
+    var feeProductNode = json.data.productByHandle ? json.data.productByHandle : null;
+    setLastFeeCandidateCount(feeProductNode ? 1 : 0);
 
     if (!feeProductNode) {
       setLastFeeExactTitleValidationPassed(false);
+      return null;
+    }
+
+    if (toStr(feeProductNode.title) !== targetProductTitle) {
+      setLastFeeExactTitleValidationPassed(false);
+      setLastFeeProductFound(false);
+      setLastFeeProductId(feeProductNode.id ? String(feeProductNode.id) : '');
+      setLastFeeErrorMessage('fee product title mismatch for handle ' + targetProductHandle);
       return null;
     }
 
@@ -1318,7 +1323,6 @@ function Modal() {
     var foundByExactTitle = null;
     var foundByExactOption = null;
     var foundByNumericText = null;
-    var foundByPriceAmount = null;
 
     for (var v = 0; v < variantEdges.length; v += 1) {
       var variantNode = variantEdges[v] && variantEdges[v].node ? variantEdges[v].node : null;
@@ -1387,23 +1391,6 @@ function Modal() {
       return foundByNumericText.id;
     }
 
-    for (var p = 0; p < variantEdges.length; p += 1) {
-      var priceVariant = variantEdges[p] && variantEdges[p].node ? variantEdges[p].node : null;
-      if (priceVariant && priceVariant.price && priceVariant.price.amount !== undefined) {
-        var priceAmount = parseFeeAmount(priceVariant.price.amount);
-        if (priceAmount !== null && Math.abs(priceAmount - numericFee) < 0.0001) {
-          foundByPriceAmount = { id: priceVariant.id, matchedText: toStr(priceVariant.title) };
-          break;
-        }
-      }
-    }
-
-    if (foundByPriceAmount && foundByPriceAmount.id) {
-      setLastFeeMatchMethod('price_amount');
-      setLastFeeVariantTitleMatched(foundByPriceAmount.matchedText ? String(foundByPriceAmount.matchedText) : '');
-      return foundByPriceAmount.id;
-    }
-
     setLastFeeMatchMethod('none');
     return null;
   }
@@ -1422,6 +1409,7 @@ function Modal() {
     setLastFeeErrorMessage('');
     setLastFeeLineItemUuid('');
     setLastFeePropertiesAttachStatus('idle');
+    setLastFeeProductHandleTarget('personalisation-fee');
     setLastFeeProductTitleTarget('Personalisation fee (system)');
     setLastFeeLookupQuery('');
     setLastFeeCandidateCount(0);
@@ -1769,6 +1757,7 @@ function Modal() {
           <s-text>Properties attach: {lastPropertiesAttachStatus}</s-text>
           <s-text>Fee amount: {lastFeeAmount === null ? 'none' : '£' + Number(lastFeeAmount).toFixed(2)}</s-text>
           <s-text>Fee required: {lastFeeRequired ? 'yes' : 'no'}</s-text>
+          <s-text>Fee product handle targeted: {lastFeeProductHandleTarget}</s-text>
           <s-text>Fee product title targeted: {lastFeeProductTitleTarget}</s-text>
           <s-text>Fee lookup query: {lastFeeLookupQuery === '' ? 'none' : lastFeeLookupQuery}</s-text>
           <s-text>Fee candidate count: {lastFeeCandidateCount}</s-text>
@@ -2131,7 +2120,6 @@ function Modal() {
   }
   return renderClubsScreen();
 }
-
 
 
 
