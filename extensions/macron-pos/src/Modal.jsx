@@ -336,6 +336,22 @@ function hasAnyPersonalisation(meta) {
   );
 }
 
+function hasEnteredPersonalisationValues(meta, primaryFieldValue, extraField1Value, extraField2Value) {
+  if (!meta) {
+    return false;
+  }
+  if (meta.enablePersonalisation === true && toStr(primaryFieldValue) !== '') {
+    return true;
+  }
+  if (meta.extraField1Enabled === true && toStr(extraField1Value) !== '') {
+    return true;
+  }
+  if (meta.extraField2Enabled === true && toStr(extraField2Value) !== '') {
+    return true;
+  }
+  return false;
+}
+
 function classifyVariantId(id) {
   if (typeof id === 'number') {
     return 'numeric';
@@ -989,6 +1005,14 @@ function Modal() {
   var lastFeeLineAddStatus = lastFeeLineAddStatusState[0];
   var setLastFeeLineAddStatus = lastFeeLineAddStatusState[1];
 
+  var lastFeeVariantAvailableForSaleState = useState(null);
+  var lastFeeVariantAvailableForSale = lastFeeVariantAvailableForSaleState[0];
+  var setLastFeeVariantAvailableForSale = lastFeeVariantAvailableForSaleState[1];
+
+  var lastEnteredPersonalisationState = useState(false);
+  var lastEnteredPersonalisation = lastEnteredPersonalisationState[0];
+  var setLastEnteredPersonalisation = lastEnteredPersonalisationState[1];
+
   var loadingState = useState(false);
   var loading = loadingState[0];
   var setLoading = loadingState[1];
@@ -1253,6 +1277,7 @@ function Modal() {
     setLastFeeProductFound(false);
     setLastFeeProductId('');
     setLastFeeVariantTitleMatched('');
+    setLastFeeVariantAvailableForSale(null);
     if (feeAmount === null || feeAmount === undefined) {
       return null;
     }
@@ -1265,7 +1290,7 @@ function Modal() {
     }
 
     setLastFeeLookupQuery('productByHandle(handle: "' + targetProductHandle + '")');
-    var gql = 'query FeeVariants($handle: String!) { productByHandle(handle: $handle) { id title variants(first: 100) { edges { node { id title selectedOptions { name value } } } } } }';
+    var gql = 'query FeeVariants($handle: String!) { productByHandle(handle: $handle) { id title variants(first: 100) { edges { node { id title availableForSale selectedOptions { name value } } } } } }';
     var response = await fetch('shopify:admin/api/graphql.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1331,14 +1356,14 @@ function Modal() {
       }
       var variantTitle = toStr(variantNode.title);
       if (variantTitle === feeFixed) {
-        foundByExactTitle = { id: variantNode.id, matchedText: variantTitle };
+        foundByExactTitle = { id: variantNode.id, matchedText: variantTitle, availableForSale: variantNode.availableForSale === true };
         break;
       }
       if (variantNode.selectedOptions && Array.isArray(variantNode.selectedOptions)) {
         for (var o = 0; o < variantNode.selectedOptions.length; o += 1) {
           var exactOptionValue = toStr(variantNode.selectedOptions[o] ? variantNode.selectedOptions[o].value : '');
           if (exactOptionValue === feeFixed) {
-            foundByExactOption = { id: variantNode.id, matchedText: exactOptionValue };
+            foundByExactOption = { id: variantNode.id, matchedText: exactOptionValue, availableForSale: variantNode.availableForSale === true };
             break;
           }
         }
@@ -1364,7 +1389,7 @@ function Modal() {
         var candidate = toStr(candidateTexts[c]);
         var candidateAmount = parseFeeAmount(candidate);
         if (candidateAmount !== null && Math.abs(candidateAmount - numericFee) < 0.0001) {
-          foundByNumericText = { id: variantNode.id, matchedText: candidate };
+          foundByNumericText = { id: variantNode.id, matchedText: candidate, availableForSale: variantNode.availableForSale === true };
           break;
         }
       }
@@ -1376,18 +1401,33 @@ function Modal() {
     if (foundByExactTitle && foundByExactTitle.id) {
       setLastFeeMatchMethod('exact_title');
       setLastFeeVariantTitleMatched(foundByExactTitle.matchedText ? String(foundByExactTitle.matchedText) : '');
+      setLastFeeVariantAvailableForSale(foundByExactTitle.availableForSale ? true : false);
+      if (!foundByExactTitle.availableForSale) {
+        setLastFeeErrorMessage('matched fee variant is not available for sale');
+        throw new Error('matched fee variant is not available for sale');
+      }
       return foundByExactTitle.id;
     }
 
     if (foundByExactOption && foundByExactOption.id) {
       setLastFeeMatchMethod('exact_option');
       setLastFeeVariantTitleMatched(foundByExactOption.matchedText ? String(foundByExactOption.matchedText) : '');
+      setLastFeeVariantAvailableForSale(foundByExactOption.availableForSale ? true : false);
+      if (!foundByExactOption.availableForSale) {
+        setLastFeeErrorMessage('matched fee variant is not available for sale');
+        throw new Error('matched fee variant is not available for sale');
+      }
       return foundByExactOption.id;
     }
 
     if (foundByNumericText && foundByNumericText.id) {
       setLastFeeMatchMethod('numeric_text');
       setLastFeeVariantTitleMatched(foundByNumericText.matchedText ? String(foundByNumericText.matchedText) : '');
+      setLastFeeVariantAvailableForSale(foundByNumericText.availableForSale ? true : false);
+      if (!foundByNumericText.availableForSale) {
+        setLastFeeErrorMessage('matched fee variant is not available for sale');
+        throw new Error('matched fee variant is not available for sale');
+      }
       return foundByNumericText.id;
     }
 
@@ -1421,6 +1461,7 @@ function Modal() {
     setLastFeeVariantTitleMatched('');
     setLastFeeLineAddAttempted(false);
     setLastFeeLineAddStatus('idle');
+    setLastFeeVariantAvailableForSale(null);
 
     if (!product || !variant) {
       toast('Select a size first');
@@ -1505,8 +1546,9 @@ function Modal() {
           setLastFeeVariantId(feeVariantId ? String(feeVariantId) : '');
           setLastFeeVariantStatus(feeVariantId ? 'found' : 'not_found');
         } catch (feeErr) {
-          setLastFeeVariantStatus('failed');
-          setLastFeeErrorMessage('fee lookup failed: ' + (feeErr && feeErr.message ? feeErr.message : 'unknown lookup error'));
+          var feeLookupError = feeErr && feeErr.message ? feeErr.message : 'unknown lookup error';
+          setLastFeeVariantStatus(feeLookupError === 'matched fee variant is not available for sale' ? 'not_saleable' : 'failed');
+          setLastFeeErrorMessage(feeLookupError === 'matched fee variant is not available for sale' ? feeLookupError : 'fee lookup failed: ' + feeLookupError);
           setLastCartActionStatus('failed');
           toast('Personalisation fee could not be added.');
           return false;
@@ -1756,6 +1798,7 @@ function Modal() {
           <s-text>Last line item uuid: {lastCartLineItemUuid}</s-text>
           <s-text>Properties attach: {lastPropertiesAttachStatus}</s-text>
           <s-text>Fee amount: {lastFeeAmount === null ? 'none' : '£' + Number(lastFeeAmount).toFixed(2)}</s-text>
+          <s-text>Entered personalisation: {lastEnteredPersonalisation ? 'yes' : 'no'}</s-text>
           <s-text>Fee required: {lastFeeRequired ? 'yes' : 'no'}</s-text>
           <s-text>Fee product handle targeted: {lastFeeProductHandleTarget}</s-text>
           <s-text>Fee product title targeted: {lastFeeProductTitleTarget}</s-text>
@@ -1769,6 +1812,7 @@ function Modal() {
           <s-text>Fee variant status: {lastFeeVariantStatus}</s-text>
           <s-text>Fee variant id: {lastFeeVariantId}</s-text>
           <s-text>Fee variant title matched: {lastFeeVariantTitleMatched === '' ? 'none' : lastFeeVariantTitleMatched}</s-text>
+          <s-text>Fee variant available for sale: {lastFeeVariantAvailableForSale === null ? 'unknown' : (lastFeeVariantAvailableForSale ? 'yes' : 'no')}</s-text>
           <s-text>Fee line add attempted: {lastFeeLineAddAttempted ? 'yes' : 'no'}</s-text>
           <s-text>Fee line add status: {lastFeeLineAddStatus}</s-text>
           <s-text>Fee line uuid: {lastFeeLineItemUuid === '' ? 'none' : lastFeeLineItemUuid}</s-text>
@@ -1945,6 +1989,7 @@ function Modal() {
                 <s-button
                   variant="primary"
                   onClick={function () {
+                    setLastEnteredPersonalisation(false);
                     addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
                   }}
                 >
@@ -2009,7 +2054,13 @@ function Modal() {
       if (!validate()) {
         return;
       }
-      var feeAmount = parseFeeAmount(meta.personalisationFeeRaw);
+      var enteredPersonalisation = hasEnteredPersonalisationValues(meta, primaryFieldValue, extraField1Value, extraField2Value);
+      setLastEnteredPersonalisation(enteredPersonalisation);
+      var parsedFeeAmount = parseFeeAmount(meta.personalisationFeeRaw);
+      var feeAmount = null;
+      if (enteredPersonalisation && parsedFeeAmount !== null && parsedFeeAmount > 0) {
+        feeAmount = parsedFeeAmount;
+      }
       var props = {};
       if (meta.enablePersonalisation && toStr(primaryFieldValue) !== '') {
         props[meta.personalisationLabel || 'Personalisation'] = toStr(primaryFieldValue);
@@ -2020,7 +2071,7 @@ function Modal() {
       if (meta.extraField2Enabled && toStr(extraField2Value) !== '') {
         props[meta.extraField2Label || 'Additional information 2'] = toStr(extraField2Value);
       }
-      if (feeAmount !== null && feeAmount > 0) {
+      if (enteredPersonalisation && feeAmount !== null && feeAmount > 0) {
         props['Personalisation Fee'] = '£' + feeAmount.toFixed(2);
       }
       if (Object.keys(props).length > 0) {
@@ -2120,12 +2171,6 @@ function Modal() {
   }
   return renderClubsScreen();
 }
-
-
-
-
-
-
 
 
 
