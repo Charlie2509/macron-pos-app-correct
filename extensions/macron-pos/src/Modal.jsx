@@ -941,6 +941,30 @@ function Modal() {
   var lastFeePropertiesAttachStatus = lastFeePropertiesAttachStatusState[0];
   var setLastFeePropertiesAttachStatus = lastFeePropertiesAttachStatusState[1];
 
+  var lastFeeProductTitleTargetState = useState('Personalisation fee (system)');
+  var lastFeeProductTitleTarget = lastFeeProductTitleTargetState[0];
+  var setLastFeeProductTitleTarget = lastFeeProductTitleTargetState[1];
+
+  var lastFeeProductFoundState = useState(false);
+  var lastFeeProductFound = lastFeeProductFoundState[0];
+  var setLastFeeProductFound = lastFeeProductFoundState[1];
+
+  var lastFeeProductIdState = useState('');
+  var lastFeeProductId = lastFeeProductIdState[0];
+  var setLastFeeProductId = lastFeeProductIdState[1];
+
+  var lastFeeVariantTitleMatchedState = useState('');
+  var lastFeeVariantTitleMatched = lastFeeVariantTitleMatchedState[0];
+  var setLastFeeVariantTitleMatched = lastFeeVariantTitleMatchedState[1];
+
+  var lastFeeLineAddAttemptedState = useState(false);
+  var lastFeeLineAddAttempted = lastFeeLineAddAttemptedState[0];
+  var setLastFeeLineAddAttempted = lastFeeLineAddAttemptedState[1];
+
+  var lastFeeLineAddStatusState = useState('idle');
+  var lastFeeLineAddStatus = lastFeeLineAddStatusState[0];
+  var setLastFeeLineAddStatus = lastFeeLineAddStatusState[1];
+
   var loadingState = useState(false);
   var loading = loadingState[0];
   var setLoading = loadingState[1];
@@ -1193,6 +1217,11 @@ function Modal() {
   }
 
   async function fetchPersonalisationFeeVariant(feeAmount) {
+    var targetProductTitle = 'Personalisation fee (system)';
+    setLastFeeProductTitleTarget(targetProductTitle);
+    setLastFeeProductFound(false);
+    setLastFeeProductId('');
+    setLastFeeVariantTitleMatched('');
     if (feeAmount === null || feeAmount === undefined) {
       return null;
     }
@@ -1203,74 +1232,114 @@ function Modal() {
     if (typeof fetch === 'undefined') {
       throw new Error('Admin API fetch unavailable for fee lookup');
     }
-    var query = 'personalisation fee';
-    var gql = 'query FeeVariants($query: String, $cursor: String) { products(first: 20, after: $cursor, query: $query) { edges { cursor node { id title handle variants(first: 50) { edges { node { id title price { amount currencyCode } } } } } } pageInfo { hasNextPage endCursor } } }';
-    var cursor = null;
-    var pageSafetyLimit = 10;
-    var pages = 0;
-    var foundVariantId = null;
-    while (pages < pageSafetyLimit) {
-      pages += 1;
-      var response = await fetch('shopify:admin/api/graphql.json', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: gql, variables: { query: query, cursor: cursor } }),
-      });
-      if (!response || !response.ok) {
-        var statusCode = response && response.status ? response.status : 'unknown';
-        var statusText = response && response.statusText ? response.statusText : 'unknown';
-        var bodyText = '';
-        try {
-          bodyText = await response.text();
-        } catch (e) {
-          bodyText = '';
-        }
-        throw new Error('Fee variant fetch HTTP error: ' + statusCode + ' ' + statusText + (bodyText ? ' ' + bodyText : ''));
-      }
-      var json;
+
+    var searchQuery = 'title:"' + targetProductTitle + '"';
+    var gql = 'query FeeVariants($query: String!) { products(first: 5, query: $query) { edges { node { id title variants(first: 100) { edges { node { id title selectedOptions { name value } price { amount currencyCode } } } } } } } }';
+    var response = await fetch('shopify:admin/api/graphql.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: gql, variables: { query: searchQuery } }),
+    });
+
+    if (!response || !response.ok) {
+      var statusCode = response && response.status ? response.status : 'unknown';
+      var statusText = response && response.statusText ? response.statusText : 'unknown';
+      var bodyText = '';
       try {
-        json = await response.json();
-      } catch (err) {
-        throw new Error('Fee variant JSON parse error: ' + (err && err.message ? err.message : String(err)));
+        bodyText = await response.text();
+      } catch (e) {
+        bodyText = '';
       }
-      if (json && json.errors && Array.isArray(json.errors) && json.errors.length > 0) {
-        throw new Error('Fee variant GraphQL error: ' + (json.errors[0] && json.errors[0].message ? json.errors[0].message : 'unknown error'));
-      }
-      if (!json || !json.data || !json.data.products || !json.data.products.edges) {
-        break;
-      }
-      var edges = json.data.products.edges;
-      for (var i = 0; i < edges.length; i += 1) {
-        var edge = edges[i];
-        if (!edge || !edge.node || !edge.node.variants || !edge.node.variants.edges) {
-          continue;
-        }
-        var variantEdges = edge.node.variants.edges;
-        for (var v = 0; v < variantEdges.length; v += 1) {
-          var variantNode = variantEdges[v] && variantEdges[v].node ? variantEdges[v].node : null;
-          if (!variantNode || !variantNode.price) {
-            continue;
-          }
-          var priceAmount = parseFloat(toStr(variantNode.price.amount).replace(/[^0-9.\\-]/g, ''));
-          if (!isNaN(priceAmount) && Math.abs(priceAmount - numericFee) < 0.001) {
-            foundVariantId = variantNode.id;
-            break;
-          }
-        }
-        if (foundVariantId) {
-          break;
-        }
-      }
-      if (foundVariantId) {
-        return foundVariantId;
-      }
-      var pageInfo = json.data.products.pageInfo;
-      if (pageInfo && pageInfo.hasNextPage) {
-        cursor = pageInfo.endCursor;
-      } else {
+      throw new Error('Fee variant fetch HTTP error: ' + statusCode + ' ' + statusText + (bodyText ? ' ' + bodyText : ''));
+    }
+
+    var json;
+    try {
+      json = await response.json();
+    } catch (err) {
+      throw new Error('Fee variant JSON parse error: ' + (err && err.message ? err.message : String(err)));
+    }
+    if (json && json.errors && Array.isArray(json.errors) && json.errors.length > 0) {
+      throw new Error('Fee variant GraphQL error: ' + (json.errors[0] && json.errors[0].message ? json.errors[0].message : 'unknown error'));
+    }
+    if (!json || !json.data || !json.data.products || !json.data.products.edges) {
+      return null;
+    }
+
+    var edges = json.data.products.edges;
+    var feeProductNode = null;
+    for (var i = 0; i < edges.length; i += 1) {
+      var node = edges[i] && edges[i].node ? edges[i].node : null;
+      if (node && toStr(node.title) === targetProductTitle) {
+        feeProductNode = node;
         break;
       }
     }
+
+    if (!feeProductNode) {
+      return null;
+    }
+
+    setLastFeeProductFound(true);
+    setLastFeeProductId(feeProductNode.id ? String(feeProductNode.id) : '');
+
+    var variantEdges = feeProductNode.variants && feeProductNode.variants.edges ? feeProductNode.variants.edges : [];
+    var feeFixed = numericFee.toFixed(2);
+    var foundByExactText = null;
+    var foundByNumericMatch = null;
+
+    for (var v = 0; v < variantEdges.length; v += 1) {
+      var variantNode = variantEdges[v] && variantEdges[v].node ? variantEdges[v].node : null;
+      if (!variantNode) {
+        continue;
+      }
+      var candidateTexts = [];
+      var variantTitle = toStr(variantNode.title);
+      if (variantTitle !== '') {
+        candidateTexts.push(variantTitle);
+      }
+      if (variantNode.selectedOptions && Array.isArray(variantNode.selectedOptions)) {
+        for (var o = 0; o < variantNode.selectedOptions.length; o += 1) {
+          var optionValue = toStr(variantNode.selectedOptions[o] ? variantNode.selectedOptions[o].value : '');
+          if (optionValue !== '') {
+            candidateTexts.push(optionValue);
+          }
+        }
+      }
+
+      for (var c = 0; c < candidateTexts.length; c += 1) {
+        var candidate = toStr(candidateTexts[c]);
+        if (candidate === feeFixed) {
+          foundByExactText = { id: variantNode.id, matchedText: candidate };
+          break;
+        }
+        var candidateAmount = parseFeeAmount(candidate);
+        if (candidateAmount !== null && Math.abs(candidateAmount - numericFee) < 0.0001 && !foundByNumericMatch) {
+          foundByNumericMatch = { id: variantNode.id, matchedText: candidate };
+        }
+      }
+      if (foundByExactText) {
+        break;
+      }
+    }
+
+    var chosen = foundByExactText ? foundByExactText : foundByNumericMatch;
+    if (chosen && chosen.id) {
+      setLastFeeVariantTitleMatched(chosen.matchedText ? String(chosen.matchedText) : '');
+      return chosen.id;
+    }
+
+    for (var p = 0; p < variantEdges.length; p += 1) {
+      var priceVariant = variantEdges[p] && variantEdges[p].node ? variantEdges[p].node : null;
+      if (priceVariant && priceVariant.price && priceVariant.price.amount !== undefined) {
+        var priceAmount = parseFeeAmount(priceVariant.price.amount);
+        if (priceAmount !== null && Math.abs(priceAmount - numericFee) < 0.0001) {
+          setLastFeeVariantTitleMatched(toStr(priceVariant.title));
+          return priceVariant.id;
+        }
+      }
+    }
+
     return null;
   }
 
@@ -1287,6 +1356,12 @@ function Modal() {
     setLastFeeErrorMessage('');
     setLastFeeLineItemUuid('');
     setLastFeePropertiesAttachStatus('idle');
+    setLastFeeProductTitleTarget('Personalisation fee (system)');
+    setLastFeeProductFound(false);
+    setLastFeeProductId('');
+    setLastFeeVariantTitleMatched('');
+    setLastFeeLineAddAttempted(false);
+    setLastFeeLineAddStatus('idle');
 
     if (!product || !variant) {
       toast('Select a size first');
@@ -1395,19 +1470,24 @@ function Modal() {
         }
 
         var feeUuid = null;
+        setLastFeeLineAddAttempted(true);
+        setLastFeeLineAddStatus('attempting');
         try {
           feeUuid = await shopify.cart.addLineItem(feeNormalized.value, 1);
           setLastFeeLineItemUuid(feeUuid ? String(feeUuid) : '');
           if (!feeUuid) {
             setLastFeeVariantStatus('failed');
             setLastFeeErrorMessage('Fee cart add returned no uuid');
+            setLastFeeLineAddStatus('failed');
             setLastCartActionStatus('failed');
             toast('Fee line could not be added.');
             return false;
           }
+          setLastFeeLineAddStatus('success');
         } catch (feeAddErr) {
           setLastFeeVariantStatus('failed');
           setLastFeeErrorMessage(feeAddErr && feeAddErr.message ? feeAddErr.message : 'Fee cart add failed');
+          setLastFeeLineAddStatus('failed');
           setLastCartActionStatus('failed');
           toast('Fee line could not be added.');
           return false;
@@ -1618,9 +1698,15 @@ function Modal() {
           <s-text>Properties attach: {lastPropertiesAttachStatus}</s-text>
           <s-text>Fee amount: {lastFeeAmount === null ? 'none' : '£' + Number(lastFeeAmount).toFixed(2)}</s-text>
           <s-text>Fee required: {lastFeeRequired ? 'yes' : 'no'}</s-text>
+          <s-text>Fee product title targeted: {lastFeeProductTitleTarget}</s-text>
+          <s-text>Fee product found: {lastFeeProductFound ? 'yes' : 'no'}</s-text>
+          <s-text>Fee product id: {lastFeeProductId === '' ? 'none' : lastFeeProductId}</s-text>
           <s-text>Fee variant status: {lastFeeVariantStatus}</s-text>
           <s-text>Fee variant id: {lastFeeVariantId}</s-text>
-          <s-text>Fee line uuid: {lastFeeLineItemUuid}</s-text>
+          <s-text>Fee variant title matched: {lastFeeVariantTitleMatched === '' ? 'none' : lastFeeVariantTitleMatched}</s-text>
+          <s-text>Fee line add attempted: {lastFeeLineAddAttempted ? 'yes' : 'no'}</s-text>
+          <s-text>Fee line add status: {lastFeeLineAddStatus}</s-text>
+          <s-text>Fee line uuid: {lastFeeLineItemUuid === '' ? 'none' : lastFeeLineItemUuid}</s-text>
           <s-text>Fee properties attach: {lastFeePropertiesAttachStatus}</s-text>
           <s-text>Last cart status: {lastCartActionStatus}</s-text>
           <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
