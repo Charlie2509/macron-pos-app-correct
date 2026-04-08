@@ -560,9 +560,16 @@ function mapProducts(productEdges) {
       continue;
     }
     var node = edge.node;
+    var productImage = null;
+    if (node.featuredImage && node.featuredImage.url) {
+      productImage = node.featuredImage.url;
+    } else if (node.images && node.images.edges && node.images.edges[0] && node.images.edges[0].node && node.images.edges[0].node.url) {
+      productImage = node.images.edges[0].node.url;
+    }
     products.push({
       id: node.id,
       title: node.title,
+      imageUrl: productImage,
       variants: mapVariants(node.variants ? node.variants.edges : []),
       personalisationMeta: mapPersonalisationMeta(node),
       bundleMeta: mapBundleMeta(node.bundleComponents),
@@ -601,16 +608,18 @@ function mapCollections(collectionNodes) {
             collectionId: node.id,
             collectionTitle: title,
             productsCount: productsCount,
+            imageUrl: node.image && node.image.url ? node.image.url : '',
           });
         }
       } else {
         if (!parents[title]) {
-          parents[title] = {collectionId: node.id, productsCount: productsCount, collectionTitle: title};
+          parents[title] = {collectionId: node.id, productsCount: productsCount, collectionTitle: title, imageUrl: node.image && node.image.url ? node.image.url : ''};
           parentNames.push(title);
         } else {
           parents[title].productsCount = productsCount;
           parents[title].collectionId = node.id;
           parents[title].collectionTitle = title;
+          parents[title].imageUrl = node.image && node.image.url ? node.image.url : parents[title].imageUrl;
         }
       }
     }
@@ -646,6 +655,7 @@ function mapCollections(collectionNodes) {
         products: null,
         collectionId: parentInfo.collectionId,
         collectionTitle: parentInfo.collectionTitle,
+        imageUrl: parentInfo.imageUrl || '',
       });
       directClubsCount += 1;
       continue;
@@ -658,6 +668,7 @@ function mapCollections(collectionNodes) {
           label: matchingChildren[m].label,
           collectionId: matchingChildren[m].collectionId,
           collectionTitle: matchingChildren[m].collectionTitle,
+          imageUrl: matchingChildren[m].imageUrl || '',
         });
       }
       clubs.push({
@@ -667,6 +678,7 @@ function mapCollections(collectionNodes) {
         products: null,
         collectionId: parentInfo ? parentInfo.collectionId : null,
         collectionTitle: parentInfo ? parentInfo.collectionTitle : name,
+        imageUrl: parentInfo && parentInfo.imageUrl ? parentInfo.imageUrl : '',
       });
       subsectionClubsCount += 1;
     }
@@ -700,6 +712,9 @@ async function fetchLiveClubs() {
         node {
           id
           title
+          image {
+            url
+          }
           productsCount {
             count
           }
@@ -801,6 +816,16 @@ async function fetchProductsForCollection(collectionId) {
           node {
             id
             title
+            featuredImage {
+              url
+            }
+            images(first: 1) {
+              edges {
+                node {
+                  url
+                }
+              }
+            }
             variants(first: 20) {
               edges {
                 node { id title }
@@ -868,6 +893,15 @@ async function fetchProductsForCollection(collectionId) {
         products.push({
           id: edges[i].node.id,
           title: edges[i].node.title,
+          imageUrl: edges[i].node.featuredImage && edges[i].node.featuredImage.url
+            ? edges[i].node.featuredImage.url
+            : (edges[i].node.images &&
+              edges[i].node.images.edges &&
+              edges[i].node.images.edges[0] &&
+              edges[i].node.images.edges[0].node &&
+              edges[i].node.images.edges[0].node.url
+              ? edges[i].node.images.edges[0].node.url
+              : ''),
           variants: mapVariants(edges[i].node.variants ? edges[i].node.variants.edges : []),
           personalisationMeta: mapPersonalisationMeta(edges[i].node),
           bundleMeta: mapBundleMeta(edges[i].node.bundleComponents),
@@ -2286,11 +2320,11 @@ function Modal() {
   }
   function renderDebugHeader() {
     return (
-      <s-section heading="Debug">
+      <s-section heading="Debug (for diagnostics)">
         <s-stack direction="block" gap="micro">
-          <s-text appearance="critical">DEBUG VERSION: PRODUCT DETAIL V1</s-text>
-          <s-text>Screen: {screen}</s-text>
-          <s-text>{dataSource}</s-text>
+          <s-text appearance="subdued">DEBUG VERSION: PRODUCT DETAIL V1</s-text>
+          <s-text appearance="subdued">Screen: {screen}</s-text>
+          <s-text appearance="subdued">{dataSource}</s-text>
           {loading ? <s-text>Loading…</s-text> : null}
           {errorMessage ? <s-text appearance="critical">{errorMessage}</s-text> : null}
         </s-stack>
@@ -2469,24 +2503,65 @@ function Modal() {
     );
   }
 
+  function renderScreenIntro(title, subtitle) {
+    return (
+      <s-section heading={title}>
+        <s-stack direction="block" gap="small">
+          <s-text>{subtitle}</s-text>
+        </s-stack>
+      </s-section>
+    );
+  }
+
+  function renderImageThumb(imageUrl, altText, height) {
+    var boxHeight = height || '88px';
+    if (imageUrl && toStr(imageUrl) !== '') {
+      return (
+        <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 10px; overflow: hidden; background: #f4f4f5; border: 1px solid #e5e7eb;'}>
+          <img src={imageUrl} alt={altText} style="width: 100%; height: 100%; object-fit: cover; display: block;" />
+        </div>
+      );
+    }
+    return (
+      <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 12px; font-weight: 600;'}>
+        No image
+      </div>
+    );
+  }
+
+  function renderTapCard(item) {
+    return (
+      <s-button key={item.key} variant="secondary" onClick={item.onPress}>
+        <s-stack direction="block" gap="small">
+          {renderImageThumb(item.imageUrl, item.title, item.thumbHeight)}
+          <s-text>{item.title}</s-text>
+          {item.subtitle ? <s-text appearance="subdued">{item.subtitle}</s-text> : null}
+        </s-stack>
+      </s-button>
+    );
+  }
+
   function renderClubsScreen() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderDebugHeader()}
-          <s-section heading="Clubs">
-            <s-stack direction="block" gap="base">
+          {renderScreenIntro('Clubs', 'Select a club to begin.')}
+          <s-section heading="Club list">
+            <s-stack direction="block" gap="small">
               <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
-              <s-text>Select a club to begin.</s-text>
               {clubs.map(function (club) {
-                return (
-                  <s-button key={club.name} variant="secondary" onClick={function () { handleClubPress(club); }}>
-                    {club.name}
-                  </s-button>
-                );
+                return renderTapCard({
+                  key: club.name,
+                  title: club.name,
+                  subtitle: club.type === 'subsections' ? 'Opens subsections' : 'Opens products',
+                  imageUrl: club.imageUrl,
+                  thumbHeight: '96px',
+                  onPress: function () { handleClubPress(club); },
+                });
               })}
             </s-stack>
           </s-section>
+          {renderDebugHeader()}
         </ScreenScroll>
       </s-page>
     );
@@ -2499,20 +2574,23 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderDebugHeader()}
-          <s-section heading={selectedClub.name + ' - Subsections'}>
-            <s-stack direction="block" gap="base">
-              <s-text>Select a subsection.</s-text>
+          {renderScreenIntro(selectedClub.name, 'Choose a subsection.')}
+          <s-section heading="Subsections">
+            <s-stack direction="block" gap="small">
               {selectedClub.subsections.map(function (sub) {
-                return (
-                  <s-button key={sub.label} variant="secondary" onClick={function () { handleSubsectionPress(sub); }}>
-                    {sub.label}
-                  </s-button>
-                );
+                return renderTapCard({
+                  key: sub.label,
+                  title: sub.label,
+                  subtitle: 'View products',
+                  imageUrl: sub.imageUrl,
+                  thumbHeight: '92px',
+                  onPress: function () { handleSubsectionPress(sub); },
+                });
               })}
               <s-button variant="primary" onClick={handleBack}>Back</s-button>
             </s-stack>
           </s-section>
+          {renderDebugHeader()}
         </ScreenScroll>
       </s-page>
     );
@@ -2531,22 +2609,26 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderDebugHeader()}
-          <s-section heading={heading}>
-            <s-stack direction="block" gap="base">
+          {renderScreenIntro(heading, 'Tap a product to view details.')}
+          <s-section heading="Products">
+            <s-stack direction="block" gap="small">
               {productListLoading ? <s-text>Loading products…</s-text> : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
               {products.map(function (product) {
-                return (
-                  <s-button key={product.id} variant="secondary" onClick={function () { handleProductPress(product); }}>
-                    View details: {product.title}
-                  </s-button>
-                );
+                return renderTapCard({
+                  key: product.id,
+                  title: product.title,
+                  subtitle: 'View details',
+                  imageUrl: product.imageUrl,
+                  thumbHeight: '88px',
+                  onPress: function () { handleProductPress(product); },
+                });
               })}
               <s-button variant="primary" onClick={handleBack}>Back</s-button>
             </s-stack>
           </s-section>
           {renderProductDebug()}
+          {renderDebugHeader()}
         </ScreenScroll>
       </s-page>
     );
@@ -2578,7 +2660,10 @@ function Modal() {
           var active = selectedVariant && selectedVariant.id === variant.id;
           return (
             <s-button key={variant.id} variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
-              {variant.title}
+              <s-stack direction="inline" gap="small" wrap="false">
+                <s-text>{variant.title}</s-text>
+                <s-text appearance="subdued">{active ? 'Selected' : 'Tap to select'}</s-text>
+              </s-stack>
             </s-button>
           );
         })}
@@ -2597,37 +2682,47 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderDebugHeader()}
-          <s-section heading="PRODUCT DETAIL SCREEN">
-            <s-stack direction="block" gap="base">
-              <s-text>Product: {selectedProduct.title}</s-text>
+          <s-section heading="Product detail">
+            <s-stack direction="block" gap="small">
+              {renderImageThumb(selectedProduct.imageUrl, selectedProduct.title, '130px')}
+              <s-text>{selectedProduct.title}</s-text>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
                 <s-text appearance="subdued">Testing live cart add for standard products</s-text>
               ) : null}
-              {renderVariants(selectedProduct)}
+              <s-section heading="Select variant">
+                <s-stack direction="block" gap="small">
+                  <s-text appearance="subdued">Choose one variant to continue.</s-text>
+                  {renderVariants(selectedProduct)}
+                </s-stack>
+              </s-section>
               {renderBundleNote(selectedProduct)}
-              {showAddToCart ? (
-                <s-button
-                  variant="primary"
-                  onClick={function () {
-                    setLastEnteredPersonalisation(false);
-                    addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
-                  }}
-                >
-                  Add to cart
-                </s-button>
-              ) : (!isBundleProduct ? (
-                <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
-                  Continue to personalisation
-                </s-button>
-              ) : null)}
-              <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+              <s-section heading="Actions">
+                <s-stack direction="block" gap="small">
+                  {showAddToCart ? (
+                    <s-button
+                      variant="primary"
+                      onClick={function () {
+                        setLastEnteredPersonalisation(false);
+                        addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
+                      }}
+                    >
+                      Add to cart
+                    </s-button>
+                  ) : (!isBundleProduct ? (
+                    <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
+                      Continue to personalisation
+                    </s-button>
+                  ) : null)}
+                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+                </s-stack>
+              </s-section>
             </s-stack>
           </s-section>
           {renderPersonalisationDebug(selectedProduct)}
           {renderBundleDebug(selectedProduct)}
           {renderCartDebug()}
           {renderProductDebug()}
+          {renderDebugHeader()}
         </ScreenScroll>
       </s-page>
     );
@@ -2643,9 +2738,8 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderDebugHeader()}
           <s-section heading="Bundle builder">
-            <s-stack direction="block" gap="base">
+            <s-stack direction="block" gap="small">
               <s-text>Bundle parent: {selectedProduct.title}</s-text>
               <s-text appearance="subdued">Parent variant: {selectedVariant ? selectedVariant.title : 'none selected'}</s-text>
               <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
@@ -2657,6 +2751,7 @@ function Modal() {
                   <s-section key={component.key} heading={component.title}>
                     <s-stack direction="block" gap="small">
                       <s-text appearance="subdued">Select one variant</s-text>
+                      <s-text>{chosen ? ('Selected: ' + chosen.title) : 'Nothing selected yet'}</s-text>
                       {component.variants && component.variants.length > 0 ? (
                         <s-stack direction="inline" wrap="true" gap="small">
                           {component.variants.map(function (variant) {
@@ -2681,9 +2776,9 @@ function Modal() {
               })}
               {hasAnyPersonalisation(meta) ? (
                 <s-section heading="Bundle personalisation">
-                  <s-stack direction="block" gap="base">
+                  <s-stack direction="block" gap="small">
                     {meta.enablePersonalisation ? (
-                      <s-stack direction="block" gap="micro">
+                      <s-stack direction="block" gap="small">
                         {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
                         <s-text-field
                           value={primaryFieldValue}
@@ -2695,7 +2790,7 @@ function Modal() {
                     ) : null}
 
                     {meta.extraField1Enabled ? (
-                      <s-stack direction="block" gap="micro">
+                      <s-stack direction="block" gap="small">
                         {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
                         <s-text-field
                           value={extraField1Value}
@@ -2706,7 +2801,7 @@ function Modal() {
                     ) : null}
 
                     {meta.extraField2Enabled ? (
-                      <s-stack direction="block" gap="micro">
+                      <s-stack direction="block" gap="small">
                         {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
                         <s-text-field
                           value={extraField2Value}
@@ -2717,7 +2812,7 @@ function Modal() {
                     ) : null}
 
                     {meta.enableFileUpload ? (
-                      <s-stack direction="block" gap="micro">
+                      <s-stack direction="block" gap="small">
                         {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
                         <s-text appearance="critical">File upload is not available in POS V1 for bundle personalisation.</s-text>
                         <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
@@ -2726,19 +2821,24 @@ function Modal() {
                   </s-stack>
                 </s-section>
               ) : null}
-              <s-button
-                variant="primary"
-                onClick={addBundleParentToCart}
-                disabled={bundleLoading}
-              >
-                Add bundle to cart
-              </s-button>
-              <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+              <s-section heading="Actions">
+                <s-stack direction="block" gap="small">
+                  <s-button
+                    variant="primary"
+                    onClick={addBundleParentToCart}
+                    disabled={bundleLoading}
+                  >
+                    Add bundle to cart
+                  </s-button>
+                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+                </s-stack>
+              </s-section>
             </s-stack>
           </s-section>
           {renderBundleDebug(selectedProduct)}
           {renderCartDebug()}
           {renderProductDebug()}
+          {renderDebugHeader()}
         </ScreenScroll>
       </s-page>
     );
@@ -2748,7 +2848,7 @@ function Modal() {
     return (
       <s-stack direction="inline" gap="micro" wrap="true">
         <s-text>{label}</s-text>
-        {required ? <s-text appearance="critical">*</s-text> : null}
+        {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
         {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
       </s-stack>
     );
@@ -2802,14 +2902,13 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderDebugHeader()}
           <s-section heading="Personalisation">
-            <s-stack direction="block" gap="base">
+            <s-stack direction="block" gap="small">
               <s-text>{selectedProduct.title}</s-text>
               <s-text appearance="subdued">Variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
 
               {meta.enablePersonalisation ? (
-                <s-stack direction="block" gap="micro">
+                <s-stack direction="block" gap="small">
                   {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
                   <s-text-field
                     value={primaryFieldValue}
@@ -2821,7 +2920,7 @@ function Modal() {
               ) : null}
 
               {meta.extraField1Enabled ? (
-                <s-stack direction="block" gap="micro">
+                <s-stack direction="block" gap="small">
                   {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
                   <s-text-field
                     value={extraField1Value}
@@ -2832,7 +2931,7 @@ function Modal() {
               ) : null}
 
               {meta.extraField2Enabled ? (
-                <s-stack direction="block" gap="micro">
+                <s-stack direction="block" gap="small">
                   {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
                   <s-text-field
                     value={extraField2Value}
@@ -2843,21 +2942,25 @@ function Modal() {
               ) : null}
 
               {meta.enableFileUpload ? (
-                <s-stack direction="block" gap="micro">
+                <s-stack direction="block" gap="small">
                   {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
                   <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
                 </s-stack>
               ) : null}
-
-            <s-button variant="primary" onClick={submitPersonalisation}>
-              Add to cart
-            </s-button>
-            <s-button variant="secondary" onClick={handleBack}>Back</s-button>
-          </s-stack>
-        </s-section>
-        {renderPersonalisationDebug(selectedProduct)}
-        {renderCartDebug()}
-        {renderProductDebug()}
+              <s-section heading="Actions">
+                <s-stack direction="block" gap="small">
+                  <s-button variant="primary" onClick={submitPersonalisation}>
+                    Add to cart
+                  </s-button>
+                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+                </s-stack>
+              </s-section>
+            </s-stack>
+          </s-section>
+          {renderPersonalisationDebug(selectedProduct)}
+          {renderCartDebug()}
+          {renderProductDebug()}
+          {renderDebugHeader()}
         </ScreenScroll>
       </s-page>
     );
@@ -2881,12 +2984,3 @@ function Modal() {
   }
   return renderClubsScreen();
 }
-
-
-
-
-
-
-
-
-
