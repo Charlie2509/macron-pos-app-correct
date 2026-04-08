@@ -1009,6 +1009,26 @@ function Modal() {
   var lastFeeVariantAvailableForSale = lastFeeVariantAvailableForSaleState[0];
   var setLastFeeVariantAvailableForSale = lastFeeVariantAvailableForSaleState[1];
 
+  var lastRollbackAttemptedState = useState(false);
+  var lastRollbackAttempted = lastRollbackAttemptedState[0];
+  var setLastRollbackAttempted = lastRollbackAttemptedState[1];
+
+  var lastRollbackStatusState = useState('idle');
+  var lastRollbackStatus = lastRollbackStatusState[0];
+  var setLastRollbackStatus = lastRollbackStatusState[1];
+
+  var lastRollbackDetailState = useState('');
+  var lastRollbackDetail = lastRollbackDetailState[0];
+  var setLastRollbackDetail = lastRollbackDetailState[1];
+
+  var lastRollbackMainLineRemovedState = useState(false);
+  var lastRollbackMainLineRemoved = lastRollbackMainLineRemovedState[0];
+  var setLastRollbackMainLineRemoved = lastRollbackMainLineRemovedState[1];
+
+  var lastRollbackFeeLineRemovedState = useState(false);
+  var lastRollbackFeeLineRemoved = lastRollbackFeeLineRemovedState[0];
+  var setLastRollbackFeeLineRemoved = lastRollbackFeeLineRemovedState[1];
+
   var lastEnteredPersonalisationState = useState(false);
   var lastEnteredPersonalisation = lastEnteredPersonalisationState[0];
   var setLastEnteredPersonalisation = lastEnteredPersonalisationState[1];
@@ -1462,6 +1482,11 @@ function Modal() {
     setLastFeeLineAddAttempted(false);
     setLastFeeLineAddStatus('idle');
     setLastFeeVariantAvailableForSale(null);
+    setLastRollbackAttempted(false);
+    setLastRollbackStatus('idle');
+    setLastRollbackDetail('');
+    setLastRollbackMainLineRemoved(false);
+    setLastRollbackFeeLineRemoved(false);
 
     if (!product || !variant) {
       toast('Select a size first');
@@ -1508,37 +1533,48 @@ function Modal() {
     setLastFeeAmount(feeRequired ? numericFee : null);
 
     var expectedIncrease = 1 + (feeRequired ? 1 : 0);
+    var mainUuid = '';
+    var feeUuid = '';
+    var feeNormalized = null;
 
-    try {
-      var uuid = await shopify.cart.addLineItem(normalized.value, 1);
-      setLastCartLineItemUuid(uuid ? String(uuid) : '');
-      if (!uuid) {
-        toast('Could not add to cart.');
-        setLastCartActionStatus('failed');
-        setLastCartErrorMessage('Cart API returned no line item uuid');
+    async function rollbackAddedLines(reason) {
+      setLastRollbackAttempted(true);
+      setLastRollbackStatus('attempting');
+      setLastRollbackDetail(reason);
+      var canRemove = shopify.cart && typeof shopify.cart.removeLineItem === 'function';
+      if (!canRemove) {
+        setLastRollbackStatus('failed');
+        setLastRollbackDetail(reason + ' | rollback failed: Cart API missing removeLineItem');
         return false;
       }
-      if (lineItemProperties && typeof lineItemProperties === 'object' && Object.keys(lineItemProperties).length > 0) {
-        if (shopify.cart && shopify.cart.addLineItemProperties) {
-          try {
-            await shopify.cart.addLineItemProperties(uuid, lineItemProperties);
-            setLastPropertiesAttachStatus('success');
-          } catch (errProps) {
-            setLastPropertiesAttachStatus('failed');
-            setLastCartActionStatus('failed');
-            setLastCartErrorMessage(errProps && errProps.message ? errProps.message : 'Failed to attach properties');
-            return false;
-          }
-        } else {
-          setLastPropertiesAttachStatus('failed');
-          setLastCartActionStatus('failed');
-          setLastCartErrorMessage('Cart API missing addLineItemProperties');
-          return false;
+      var rollbackErrors = [];
+      if (feeUuid) {
+        try {
+          await shopify.cart.removeLineItem(feeUuid);
+          setLastRollbackFeeLineRemoved(true);
+        } catch (feeRemoveErr) {
+          rollbackErrors.push('fee remove failed: ' + (feeRemoveErr && feeRemoveErr.message ? feeRemoveErr.message : 'unknown'));
         }
-      } else {
-        setLastPropertiesAttachStatus('skipped');
       }
+      if (mainUuid) {
+        try {
+          await shopify.cart.removeLineItem(mainUuid);
+          setLastRollbackMainLineRemoved(true);
+        } catch (mainRemoveErr) {
+          rollbackErrors.push('main remove failed: ' + (mainRemoveErr && mainRemoveErr.message ? mainRemoveErr.message : 'unknown'));
+        }
+      }
+      if (rollbackErrors.length > 0) {
+        setLastRollbackStatus('failed');
+        setLastRollbackDetail(reason + ' | ' + rollbackErrors.join(' | '));
+        return false;
+      }
+      setLastRollbackStatus('success');
+      setLastRollbackDetail(reason + ' | rollback completed');
+      return true;
+    }
 
+    try {
       if (feeRequired) {
         var feeVariantId = null;
         try {
@@ -1561,7 +1597,7 @@ function Modal() {
           return false;
         }
 
-        var feeNormalized = normalizeVariantId(feeVariantId);
+        feeNormalized = normalizeVariantId(feeVariantId);
         if (!feeNormalized.valid || feeNormalized.value === null) {
           setLastFeeVariantStatus('failed');
           setLastFeeErrorMessage('fee variant id invalid');
@@ -1569,8 +1605,44 @@ function Modal() {
           toast('Fee variant id invalid.');
           return false;
         }
+      } else {
+        setLastFeeVariantStatus('skipped');
+        setLastFeePropertiesAttachStatus('skipped');
+      }
 
-        var feeUuid = null;
+      mainUuid = await shopify.cart.addLineItem(normalized.value, 1);
+      setLastCartLineItemUuid(mainUuid ? String(mainUuid) : '');
+      if (!mainUuid) {
+        toast('Could not add to cart.');
+        setLastCartActionStatus('failed');
+        setLastCartErrorMessage('Cart API returned no line item uuid');
+        return false;
+      }
+
+      if (lineItemProperties && typeof lineItemProperties === 'object' && Object.keys(lineItemProperties).length > 0) {
+        if (shopify.cart && shopify.cart.addLineItemProperties) {
+          try {
+            await shopify.cart.addLineItemProperties(mainUuid, lineItemProperties);
+            setLastPropertiesAttachStatus('success');
+          } catch (errProps) {
+            setLastPropertiesAttachStatus('failed');
+            await rollbackAddedLines('main addLineItemProperties failed');
+            setLastCartActionStatus('failed');
+            setLastCartErrorMessage(errProps && errProps.message ? errProps.message : 'Failed to attach properties');
+            return false;
+          }
+        } else {
+          setLastPropertiesAttachStatus('failed');
+          await rollbackAddedLines('main addLineItemProperties missing API');
+          setLastCartActionStatus('failed');
+          setLastCartErrorMessage('Cart API missing addLineItemProperties');
+          return false;
+        }
+      } else {
+        setLastPropertiesAttachStatus('skipped');
+      }
+
+      if (feeRequired) {
         setLastFeeLineAddAttempted(true);
         setLastFeeLineAddStatus('attempting');
         try {
@@ -1580,6 +1652,7 @@ function Modal() {
             setLastFeeVariantStatus('failed');
             setLastFeeErrorMessage('fee addLineItem failed: cart add returned no uuid');
             setLastFeeLineAddStatus('failed');
+            await rollbackAddedLines('fee addLineItem returned no uuid');
             setLastCartActionStatus('failed');
             toast('Fee line could not be added.');
             return false;
@@ -1589,6 +1662,7 @@ function Modal() {
           setLastFeeVariantStatus('failed');
           setLastFeeErrorMessage('fee addLineItem failed: ' + (feeAddErr && feeAddErr.message ? feeAddErr.message : 'unknown add error'));
           setLastFeeLineAddStatus('failed');
+          await rollbackAddedLines('fee addLineItem threw error');
           setLastCartActionStatus('failed');
           toast('Fee line could not be added.');
           return false;
@@ -1608,6 +1682,7 @@ function Modal() {
             setLastFeePropertiesAttachStatus('failed');
             setLastFeeVariantStatus('failed');
             setLastFeeErrorMessage('fee addLineItemProperties failed: ' + (feePropErr && feePropErr.message ? feePropErr.message : 'unknown properties error'));
+            await rollbackAddedLines('fee addLineItemProperties failed');
             setLastCartActionStatus('failed');
             toast('Fee line added without properties.');
             return false;
@@ -1616,6 +1691,7 @@ function Modal() {
           setLastFeePropertiesAttachStatus('failed');
           setLastFeeVariantStatus('failed');
           setLastFeeErrorMessage('fee addLineItemProperties failed: Cart API missing addLineItemProperties for fee');
+          await rollbackAddedLines('fee addLineItemProperties missing API');
           setLastCartActionStatus('failed');
           toast('Fee properties could not be attached.');
           return false;
@@ -1623,19 +1699,14 @@ function Modal() {
 
         if (shopify.cart && shopify.cart.addLineItemProperties) {
           try {
-            await shopify.cart.addLineItemProperties(uuid, {
+            await shopify.cart.addLineItemProperties(mainUuid, {
               'Linked Fee Variant Id': String(feeNormalized.value),
             });
           } catch (linkErr) {
-            setLastCartActionStatus('failed');
             setLastFeeErrorMessage('fee link-back-to-main failed: ' + (linkErr && linkErr.message ? linkErr.message : 'unknown link error'));
-            toast('Fee added but linking failed.');
-            return false;
+            toast('Added to cart. Fee link-back warning only.');
           }
         }
-      } else {
-        setLastFeeVariantStatus('skipped');
-        setLastFeePropertiesAttachStatus('skipped');
       }
 
       var afterCount = cartLineCount();
@@ -1651,6 +1722,9 @@ function Modal() {
       setLastCartErrorMessage('No cart count change');
       return false;
     } catch (err) {
+      if (mainUuid || feeUuid) {
+        await rollbackAddedLines('unexpected cart add failure');
+      }
       toast('Could not add to cart.');
       setLastCartActionStatus('failed');
       setLastCartErrorMessage(err && err.message ? err.message : String(err));
@@ -1757,7 +1831,7 @@ function Modal() {
     return (
       <s-section heading="Personalisation debug">
         <s-stack direction="block" gap="micro">
-          <s-text>Has personalisation: {summary}</s-text>
+          <s-text>Product supports personalisation: {summary}</s-text>
           <s-text>Parsed max chars: {parsedMax === null ? 'none' : parsedMax}</s-text>
           <s-text>Parsed fee: {feeDisplay === '' ? 'none' : feeDisplay}</s-text>
           <s-text>enablePersonalisation: {meta.enablePersonalisation ? 'true' : 'false'}</s-text>
@@ -1817,6 +1891,11 @@ function Modal() {
           <s-text>Fee line add status: {lastFeeLineAddStatus}</s-text>
           <s-text>Fee line uuid: {lastFeeLineItemUuid === '' ? 'none' : lastFeeLineItemUuid}</s-text>
           <s-text>Fee properties attach: {lastFeePropertiesAttachStatus}</s-text>
+          <s-text>Rollback attempted: {lastRollbackAttempted ? 'yes' : 'no'}</s-text>
+          <s-text>Rollback status: {lastRollbackStatus}</s-text>
+          <s-text>Rollback detail: {lastRollbackDetail === '' ? 'none' : lastRollbackDetail}</s-text>
+          <s-text>Main line removed during rollback: {lastRollbackMainLineRemoved ? 'yes' : 'no'}</s-text>
+          <s-text>Fee line removed during rollback: {lastRollbackFeeLineRemoved ? 'yes' : 'no'}</s-text>
           <s-text>Last cart status: {lastCartActionStatus}</s-text>
           <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
           <s-text>Last fee error: {lastFeeErrorMessage === '' ? 'none' : lastFeeErrorMessage}</s-text>
@@ -2171,7 +2250,6 @@ function Modal() {
   }
   return renderClubsScreen();
 }
-
 
 
 
