@@ -259,6 +259,21 @@ function toStr(value) {
   return String(value).trim();
 }
 
+function normalizeBundleComponentReference(rawReference) {
+  var raw = toStr(rawReference);
+  if (raw === '') {
+    return {raw: raw, type: 'unknown', value: ''};
+  }
+  if (raw.indexOf('gid://shopify/Product/') === 0) {
+    return {raw: raw, type: 'product_gid', value: raw};
+  }
+  var handleSlug = /^[a-z0-9][a-z0-9-_]*$/;
+  if (handleSlug.test(raw)) {
+    return {raw: raw, type: 'handle', value: raw};
+  }
+  return {raw: raw, type: 'unknown', value: raw};
+}
+
 function toBool(value) {
   if (value === true) {
     return true;
@@ -867,30 +882,49 @@ async function fetchProductsForCollection(collectionId) {
   return products;
 }
 
-async function fetchProductsByHandles(handles) {
+async function fetchBundleComponentsByReferences(componentRefs) {
   var result = {
-    productsByHandle: {},
-    unresolvedHandles: [],
+    productsByReference: {},
+    unresolvedRefs: [],
     errors: [],
+    resolvedByHandleCount: 0,
+    resolvedByGidCount: 0,
+    unknownRefCount: 0,
   };
-  if (!handles || !Array.isArray(handles) || handles.length === 0) {
+  if (!componentRefs || !Array.isArray(componentRefs) || componentRefs.length === 0) {
     return result;
   }
+  var normalizedRefs = [];
+  for (var r = 0; r < componentRefs.length; r += 1) {
+    normalizedRefs.push(normalizeBundleComponentReference(componentRefs[r]));
+  }
   if (typeof fetch === 'undefined') {
-    for (var i = 0; i < handles.length; i += 1) {
-      result.unresolvedHandles.push(handles[i]);
+    for (var i = 0; i < normalizedRefs.length; i += 1) {
+      if (normalizedRefs[i].type === 'unknown') {
+        result.unknownRefCount += 1;
+      }
+      result.unresolvedRefs.push(normalizedRefs[i].raw);
     }
     result.errors.push('Admin API fetch unavailable for bundle components');
     return result;
   }
 
-  var query = 'query BundleComponentByHandle($handle: String!) { productByHandle(handle: $handle) { id title handle variants(first: 50) { edges { node { id title } } } } }';
-  for (var h = 0; h < handles.length; h += 1) {
-    var handle = toStr(handles[h]);
-    if (handle === '') {
+  var byHandleQuery = 'query BundleComponentByHandle($handle: String!) { productByHandle(handle: $handle) { id title handle variants(first: 50) { edges { node { id title } } } } }';
+  var byGidQuery = 'query BundleComponentByGid($id: ID!) { node(id: $id) { ... on Product { id title handle variants(first: 50) { edges { node { id title } } } } } }';
+  for (var h = 0; h < normalizedRefs.length; h += 1) {
+    var normalized = normalizedRefs[h];
+    var ref = normalized.raw;
+    if (ref === '') {
+      continue;
+    }
+    if (normalized.type === 'unknown') {
+      result.unknownRefCount += 1;
+      result.unresolvedRefs.push(ref);
       continue;
     }
     try {
+      var query = normalized.type === 'product_gid' ? byGidQuery : byHandleQuery;
+      var variables = normalized.type === 'product_gid' ? {id: normalized.value} : {handle: normalized.value};
       var response = await fetch('shopify:admin/api/graphql.json', {
         method: 'POST',
         headers: {
@@ -898,36 +932,46 @@ async function fetchProductsByHandles(handles) {
         },
         body: JSON.stringify({
           query: query,
-          variables: {handle: handle},
+          variables: variables,
         }),
       });
 
       if (!response || !response.ok) {
-        result.unresolvedHandles.push(handle);
-        result.errors.push('Bundle component fetch HTTP error for handle "' + handle + '"');
+        result.unresolvedRefs.push(ref);
+        result.errors.push('Bundle component fetch HTTP error for ref "' + ref + '"');
         continue;
       }
 
       var json = await response.json();
       if (json && json.errors && Array.isArray(json.errors) && json.errors.length > 0) {
-        result.unresolvedHandles.push(handle);
-        result.errors.push('Bundle component GraphQL error for handle "' + handle + '": ' + (json.errors[0] && json.errors[0].message ? json.errors[0].message : 'unknown error'));
+        result.unresolvedRefs.push(ref);
+        result.errors.push('Bundle component GraphQL error for ref "' + ref + '": ' + (json.errors[0] && json.errors[0].message ? json.errors[0].message : 'unknown error'));
         continue;
       }
-      var productNode = json && json.data && json.data.productByHandle ? json.data.productByHandle : null;
+      var productNode = null;
+      if (normalized.type === 'product_gid') {
+        productNode = json && json.data && json.data.node ? json.data.node : null;
+      } else {
+        productNode = json && json.data && json.data.productByHandle ? json.data.productByHandle : null;
+      }
       if (!productNode) {
-        result.unresolvedHandles.push(handle);
+        result.unresolvedRefs.push(ref);
         continue;
       }
-      result.productsByHandle[handle] = {
+      result.productsByReference[ref] = {
         id: productNode.id,
         handle: toStr(productNode.handle),
         title: productNode.title,
         variants: mapVariants(productNode.variants && productNode.variants.edges ? productNode.variants.edges : []),
       };
+      if (normalized.type === 'product_gid') {
+        result.resolvedByGidCount += 1;
+      } else {
+        result.resolvedByHandleCount += 1;
+      }
     } catch (err) {
-      result.unresolvedHandles.push(handle);
-      result.errors.push('Bundle component fetch failed for handle "' + handle + '": ' + (err && err.message ? err.message : String(err)));
+      result.unresolvedRefs.push(ref);
+      result.errors.push('Bundle component fetch failed for ref "' + ref + '": ' + (err && err.message ? err.message : String(err)));
     }
   }
   return result;
@@ -1205,9 +1249,25 @@ function Modal() {
   var bundleError = bundleErrorState[0];
   var setBundleError = bundleErrorState[1];
 
-  var bundleDebugUnresolvedHandlesState = useState([]);
-  var bundleDebugUnresolvedHandles = bundleDebugUnresolvedHandlesState[0];
-  var setBundleDebugUnresolvedHandles = bundleDebugUnresolvedHandlesState[1];
+  var bundleDebugUnresolvedRefsState = useState([]);
+  var bundleDebugUnresolvedRefs = bundleDebugUnresolvedRefsState[0];
+  var setBundleDebugUnresolvedRefs = bundleDebugUnresolvedRefsState[1];
+
+  var bundleDebugRawRefsCountState = useState(0);
+  var bundleDebugRawRefsCount = bundleDebugRawRefsCountState[0];
+  var setBundleDebugRawRefsCount = bundleDebugRawRefsCountState[1];
+
+  var bundleDebugResolvedByHandleCountState = useState(0);
+  var bundleDebugResolvedByHandleCount = bundleDebugResolvedByHandleCountState[0];
+  var setBundleDebugResolvedByHandleCount = bundleDebugResolvedByHandleCountState[1];
+
+  var bundleDebugResolvedByGidCountState = useState(0);
+  var bundleDebugResolvedByGidCount = bundleDebugResolvedByGidCountState[0];
+  var setBundleDebugResolvedByGidCount = bundleDebugResolvedByGidCountState[1];
+
+  var bundleDebugUnknownRefCountState = useState(0);
+  var bundleDebugUnknownRefCount = bundleDebugUnknownRefCountState[0];
+  var setBundleDebugUnknownRefCount = bundleDebugUnknownRefCountState[1];
 
   var bundleDebugFetchErrorsState = useState([]);
   var bundleDebugFetchErrors = bundleDebugFetchErrorsState[0];
@@ -1376,7 +1436,11 @@ function Modal() {
     setBundleSelections({});
     setBundleLoading(false);
     setBundleError('');
-    setBundleDebugUnresolvedHandles([]);
+    setBundleDebugUnresolvedRefs([]);
+    setBundleDebugRawRefsCount(0);
+    setBundleDebugResolvedByHandleCount(0);
+    setBundleDebugResolvedByGidCount(0);
+    setBundleDebugUnknownRefCount(0);
     setBundleDebugFetchErrors([]);
     setBundleAddStatus('idle');
     setBundleAddError('');
@@ -1388,7 +1452,11 @@ function Modal() {
     setBundleSelections({});
     setBundleLoading(false);
     setBundleError('');
-    setBundleDebugUnresolvedHandles([]);
+    setBundleDebugUnresolvedRefs([]);
+    setBundleDebugRawRefsCount(0);
+    setBundleDebugResolvedByHandleCount(0);
+    setBundleDebugResolvedByGidCount(0);
+    setBundleDebugUnknownRefCount(0);
     setBundleDebugFetchErrors([]);
     setBundleAddStatus('idle');
     setBundleAddError('');
@@ -1400,14 +1468,32 @@ function Modal() {
       return;
     }
     var meta = product.bundleMeta;
-    var handles = meta.componentHandles || [];
+    var componentRefs = meta.componentHandles || [];
     var fallbackMap = {};
+    var fallbackByIdMap = {};
     var i = 0;
     for (i = 0; i < meta.componentProducts.length; i += 1) {
       var fallbackComp = meta.componentProducts[i];
       var fallbackHandle = fallbackComp && fallbackComp.handle ? toStr(fallbackComp.handle) : '';
+      var fallbackId = fallbackComp && fallbackComp.id ? toStr(fallbackComp.id) : '';
       if (fallbackHandle !== '') {
         fallbackMap[fallbackHandle] = fallbackComp;
+      }
+      if (fallbackId !== '') {
+        fallbackByIdMap[fallbackId] = fallbackComp;
+      }
+    }
+    var classifiedHandleCount = 0;
+    var classifiedGidCount = 0;
+    var classifiedUnknownCount = 0;
+    for (i = 0; i < componentRefs.length; i += 1) {
+      var normalized = normalizeBundleComponentReference(componentRefs[i]);
+      if (normalized.type === 'handle') {
+        classifiedHandleCount += 1;
+      } else if (normalized.type === 'product_gid') {
+        classifiedGidCount += 1;
+      } else {
+        classifiedUnknownCount += 1;
       }
     }
 
@@ -1415,39 +1501,55 @@ function Modal() {
     setBundleError('');
     setBundleComponents([]);
     setBundleSelections({});
-    setBundleDebugUnresolvedHandles([]);
+    setBundleDebugUnresolvedRefs([]);
+    setBundleDebugRawRefsCount(componentRefs.length);
+    setBundleDebugResolvedByHandleCount(0);
+    setBundleDebugResolvedByGidCount(0);
+    setBundleDebugUnknownRefCount(classifiedUnknownCount);
     setBundleDebugFetchErrors([]);
 
     var loaded = [];
-    var unresolved = [];
+    var unresolvedRefs = [];
     var debugErrors = [];
+    var resolvedByHandleCount = 0;
+    var resolvedByGidCount = 0;
+    var unknownRefCount = classifiedUnknownCount;
 
-    if (dataSource === 'Live data' && handles.length > 0) {
-      var fetched = await fetchProductsByHandles(handles);
+    if (dataSource === 'Live data' && componentRefs.length > 0) {
+      var fetched = await fetchBundleComponentsByReferences(componentRefs);
       debugErrors = fetched.errors || [];
-      for (i = 0; i < handles.length; i += 1) {
-        var handle = toStr(handles[i]);
-        var found = fetched.productsByHandle[handle];
-        var fallbackByHandle = fallbackMap[handle];
+      resolvedByHandleCount = fetched.resolvedByHandleCount || 0;
+      resolvedByGidCount = fetched.resolvedByGidCount || 0;
+      unknownRefCount = fetched.unknownRefCount || 0;
+      for (i = 0; i < componentRefs.length; i += 1) {
+        var rawRef = toStr(componentRefs[i]);
+        var found = fetched.productsByReference[rawRef];
+        var normalizedRef = normalizeBundleComponentReference(rawRef);
+        var fallbackByHandle = normalizedRef.type === 'handle' ? fallbackMap[normalizedRef.value] : null;
+        var fallbackById = normalizedRef.type === 'product_gid' ? fallbackByIdMap[normalizedRef.value] : null;
+        var fallbackAny = fallbackByHandle ? fallbackByHandle : fallbackById;
         if (found) {
+          var foundKey = toStr(found.handle);
           loaded.push({
-            key: handle !== '' ? handle : found.id,
+            key: foundKey !== '' ? foundKey : found.id,
             id: found.id,
-            handle: found.handle ? found.handle : handle,
+            handle: found.handle,
             title: found.title,
             variants: found.variants || [],
           });
-        } else if (fallbackByHandle) {
+        } else if (fallbackAny) {
+          var fallbackAnyHandle = fallbackAny && fallbackAny.handle ? toStr(fallbackAny.handle) : '';
+          var fallbackAnyId = fallbackAny && fallbackAny.id ? toStr(fallbackAny.id) : '';
           loaded.push({
-            key: handle !== '' ? handle : fallbackByHandle.id,
-            id: fallbackByHandle.id,
-            handle: handle,
-            title: fallbackByHandle.title,
-            variants: fallbackByHandle.variants || [],
+            key: fallbackAnyHandle !== '' ? fallbackAnyHandle : fallbackAnyId,
+            id: fallbackAny.id,
+            handle: fallbackAnyHandle,
+            title: fallbackAny.title,
+            variants: fallbackAny.variants || [],
           });
-          unresolved.push(handle);
+          unresolvedRefs.push(rawRef);
         } else {
-          unresolved.push(handle);
+          unresolvedRefs.push(rawRef);
         }
       }
     } else {
@@ -1463,17 +1565,22 @@ function Modal() {
         });
       }
       if (loaded.length === 0) {
-        for (i = 0; i < handles.length; i += 1) {
-          unresolved.push(toStr(handles[i]));
+        for (i = 0; i < componentRefs.length; i += 1) {
+          unresolvedRefs.push(toStr(componentRefs[i]));
         }
       }
+      resolvedByHandleCount = classifiedHandleCount;
+      resolvedByGidCount = classifiedGidCount;
     }
 
     if (loaded.length === 0) {
       setBundleError('No bundle components could be loaded');
     }
     setBundleComponents(loaded);
-    setBundleDebugUnresolvedHandles(unresolved);
+    setBundleDebugUnresolvedRefs(unresolvedRefs);
+    setBundleDebugResolvedByHandleCount(resolvedByHandleCount);
+    setBundleDebugResolvedByGidCount(resolvedByGidCount);
+    setBundleDebugUnknownRefCount(unknownRefCount);
     setBundleDebugFetchErrors(debugErrors);
     setBundleLoading(false);
   }
@@ -2235,11 +2342,14 @@ function Modal() {
           <s-text>bundle parent: {product.title}</s-text>
           <s-text>parent variant: {selectedVariant ? selectedVariant.title : 'none'}</s-text>
           <s-text>isBundle: {meta.isBundle ? 'true' : 'false'}</s-text>
-          <s-text>component handles: {meta.componentHandles.length}</s-text>
+          <s-text>raw component refs: {bundleDebugRawRefsCount}</s-text>
+          <s-text>resolved by handle: {bundleDebugResolvedByHandleCount}</s-text>
+          <s-text>resolved by gid: {bundleDebugResolvedByGidCount}</s-text>
+          <s-text>unknown refs: {bundleDebugUnknownRefCount}</s-text>
           <s-text>component products: {meta.componentProducts.length}</s-text>
           <s-text>loaded components: {bundleComponents.length}</s-text>
           <s-text>bundle loading: {bundleLoading ? 'yes' : 'no'}</s-text>
-          <s-text>unresolved handles: {bundleDebugUnresolvedHandles.length === 0 ? 'none' : bundleDebugUnresolvedHandles.join(', ')}</s-text>
+          <s-text>unresolved refs: {bundleDebugUnresolvedRefs.length === 0 ? 'none' : bundleDebugUnresolvedRefs.join(', ')}</s-text>
           <s-text>selected variants: {selectedSummary.length === 0 ? 'none' : selectedSummary.join(' | ')}</s-text>
           <s-text>bundle add status: {bundleAddStatus}</s-text>
           <s-text>bundle add error: {bundleAddError === '' ? 'none' : bundleAddError}</s-text>
@@ -2771,13 +2881,6 @@ function Modal() {
   }
   return renderClubsScreen();
 }
-
-
-
-
-
-
-
 
 
 
