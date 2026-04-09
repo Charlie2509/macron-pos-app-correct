@@ -2353,11 +2353,10 @@ function Modal() {
   }
   function renderDebugHeader() {
     return (
-      <s-section heading="Diagnostics">
+      <s-section heading="Debug (compact)">
         <s-stack direction="block" gap="micro">
-          <s-text size="small" appearance="subdued">Optional debug snapshot</s-text>
-          <s-text size="small" appearance="subdued">Screen: {screen}</s-text>
-          <s-text size="small" appearance="subdued">{dataSource}</s-text>
+          <s-text size="small" appearance="subdued">Internal diagnostics</s-text>
+          <s-text size="small" appearance="subdued">Screen: {screen} · {dataSource}</s-text>
           {loading ? <s-text size="small" appearance="subdued">Loading…</s-text> : null}
           {errorMessage ? <s-text size="small" appearance="critical">{errorMessage}</s-text> : null}
         </s-stack>
@@ -2563,27 +2562,25 @@ function Modal() {
     var boxHeight = height || '120px';
     if (imageUrl && toStr(imageUrl) !== '') {
       return (
-        <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; overflow: hidden; background: #f8fafc; border: 1px solid #e2e8f0;'}>
+        <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; overflow: hidden; background: #f8fafc; border: 1px solid #dbe3ee;'}>
           <img src={imageUrl} alt={altText} style="width: 100%; height: 100%; object-fit: cover; display: block;" />
         </div>
       );
     }
     return (
-      <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%); border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 12px; font-weight: 600; letter-spacing: 0.2px;'}>
-        No image available
+      <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; background: linear-gradient(160deg, #f8fafc 0%, #edf3ff 55%, #e2e8f0 100%); border: 1px solid #dbe3ee; display: flex; align-items: center; justify-content: center; color: #475569; font-size: 12px; font-weight: 700; letter-spacing: 0.2px; text-transform: uppercase;'}>
+        Macron Teamwear
       </div>
     );
   }
 
   function renderTapCard(item) {
     return (
-      <button
-        type="button"
+      <div
         key={item.key}
-        onClick={item.onPress}
-        style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 12px; box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04); text-align: left; cursor: pointer;"
+        style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 12px; box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04); text-align: left;"
       >
-        <s-stack direction="block" gap="base">
+        <s-stack direction="block" gap="small">
           {renderImageThumb(item.imageUrl, item.title, item.thumbHeight)}
           <div style="padding: 2px 2px 0 2px;">
             <div style="font-size: 16px; font-weight: 700; line-height: 1.35; margin-bottom: 6px;">
@@ -2595,8 +2592,11 @@ function Modal() {
               </div>
             ) : null}
           </div>
+          <s-button variant={item.ctaVariant || 'primary'} onClick={item.onPress}>
+            {item.ctaLabel || 'Open'}
+          </s-button>
         </s-stack>
-      </button>
+      </div>
     );
   }
 
@@ -2605,22 +2605,27 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           {renderScreenIntro('Clubs', 'Select a club to begin.')}
-          <s-section heading="Club list">
-            <s-stack direction="block" gap="base">
+          <s-section heading="Choose club">
+            <s-stack direction="block" gap="small">
               <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
-              {clubs.map(function (club) {
-                return renderTapCard({
-                  key: club.name,
-                  title: club.name,
-                  subtitle: club.type === 'subsections' ? 'Opens subsections' : 'Opens products',
-                  imageUrl: club.imageUrl,
-                  thumbHeight: '124px',
-                  onPress: function () { handleClubPress(club); },
-                });
-              })}
+              <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
+                {clubs.map(function (club) {
+                  return renderTapCard({
+                    key: club.name,
+                    title: club.name,
+                    subtitle: club.type === 'subsections' ? 'Browse sections' : 'Browse products',
+                    imageUrl: club.imageUrl,
+                    thumbHeight: '104px',
+                    ctaLabel: 'Open club',
+                    onPress: function () { handleClubPress(club); },
+                  });
+                })}
+              </div>
             </s-stack>
           </s-section>
-          {renderDebugHeader()}
+          <div style="margin-top: 12px; opacity: 0.7;">
+            {renderDebugHeader()}
+          </div>
         </ScreenScroll>
       </s-page>
     );
@@ -2634,21 +2639,24 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           {renderScreenIntro(selectedClub.name, 'Choose a subsection.')}
-          <s-section heading="Subsections">
-            <s-stack direction="block" gap="base">
+          <s-section heading="Sections">
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
               {selectedClub.subsections.map(function (sub) {
                 return renderTapCard({
                   key: sub.label,
                   title: sub.label,
-                  subtitle: 'View products',
+                  subtitle: 'Select section',
                   imageUrl: sub.imageUrl,
-                  thumbHeight: '118px',
+                  thumbHeight: '102px',
+                  ctaLabel: 'Open section',
                   onPress: function () { handleSubsectionPress(sub); },
                 });
               })}
-            </s-stack>
+            </div>
           </s-section>
-          {renderDebugHeader()}
+          <div style="margin-top: 12px; opacity: 0.7;">
+            {renderDebugHeader()}
+          </div>
         </ScreenScroll>
       </s-page>
     );
@@ -2682,16 +2690,19 @@ function Modal() {
                 return renderTapCard({
                   key: product.id,
                   title: product.title,
-                  subtitle: 'View details',
+                  subtitle: '',
                   imageUrl: product.imageUrl,
-                  thumbHeight: '136px',
+                  thumbHeight: '160px',
+                  ctaLabel: 'View product',
                   onPress: function () { handleProductPress(product); },
                 });
               })}
             </s-stack>
           </s-section>
           {renderProductDebug()}
-          {renderDebugHeader()}
+          <div style="margin-top: 12px; opacity: 0.7;">
+            {renderDebugHeader()}
+          </div>
         </ScreenScroll>
       </s-page>
     );
@@ -2723,7 +2734,7 @@ function Modal() {
           var active = selectedVariant && selectedVariant.id === variant.id;
           return (
             <s-button key={variant.id} variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
-              <s-text>{variant.title}</s-text>
+              {variant.title}
             </s-button>
           );
         })}
@@ -2743,7 +2754,7 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section>
-            <s-stack direction="block" gap="base">
+            <s-stack direction="block" gap="small">
               {renderImageThumb(selectedProduct.imageUrl, selectedProduct.title, '190px')}
               <div style="font-size: 20px; font-weight: 700; line-height: 1.3;"><s-text>{selectedProduct.title}</s-text></div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
@@ -2751,11 +2762,8 @@ function Modal() {
               ) : <s-text appearance="subdued">Bundle workflow available for this product.</s-text>}
             </s-stack>
           </s-section>
-          <s-section heading="Variant">
-            <s-stack direction="block" gap="small">
-              <s-text appearance="subdued">Choose one variant to continue.</s-text>
-              {renderVariants(selectedProduct)}
-            </s-stack>
+          <s-section heading="Size">
+            {renderVariants(selectedProduct)}
           </s-section>
           {renderBundleNote(selectedProduct)}
           <s-section heading="Actions">
@@ -2781,7 +2789,9 @@ function Modal() {
           {renderBundleDebug(selectedProduct)}
           {renderCartDebug()}
           {renderProductDebug()}
-          {renderDebugHeader()}
+          <div style="margin-top: 12px; opacity: 0.7;">
+            {renderDebugHeader()}
+          </div>
         </ScreenScroll>
       </s-page>
     );
@@ -2896,7 +2906,9 @@ function Modal() {
           {renderBundleDebug(selectedProduct)}
           {renderCartDebug()}
           {renderProductDebug()}
-          {renderDebugHeader()}
+          <div style="margin-top: 12px; opacity: 0.7;">
+            {renderDebugHeader()}
+          </div>
         </ScreenScroll>
       </s-page>
     );
@@ -3020,7 +3032,9 @@ function Modal() {
           {renderPersonalisationDebug(selectedProduct)}
           {renderCartDebug()}
           {renderProductDebug()}
-          {renderDebugHeader()}
+          <div style="margin-top: 12px; opacity: 0.7;">
+            {renderDebugHeader()}
+          </div>
         </ScreenScroll>
       </s-page>
     );
