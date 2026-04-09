@@ -1,4 +1,4 @@
-import "@shopify/ui-extensions/preact";
+﻿import "@shopify/ui-extensions/preact";
 import {render} from 'preact';
 import {useEffect, useState} from 'preact/hooks';
 
@@ -2587,17 +2587,15 @@ function Modal() {
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
     var boxHeight = height || '96px';
     var objectFit = fitMode || 'contain';
-    var imageWrapStyle = 'height:' + boxHeight + '; width:100%; display:flex; align-items:center; justify-content:center; overflow:hidden;';
-    if (imageUrl && toStr(imageUrl) !== '') {
-      return (
-        <div style={imageWrapStyle}>
-          <s-image src={imageUrl} alt={altText} inlineSize="100%" blockSize={boxHeight} objectFit={objectFit} />
-        </div>
-      );
-    }
+    var outerStyle = 'height:' + boxHeight + '; width:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; background:#ffffff;';
+    var imgStyle = 'max-width:100%; max-height:100%; width:auto; height:auto; object-fit:' + objectFit + '; display:block;';
     return (
-      <div style={imageWrapStyle}>
-        <s-text appearance="subdued">No image</s-text>
+      <div style={outerStyle}>
+        {imageUrl && toStr(imageUrl) !== '' ? (
+          <img src={imageUrl} alt={altText || ''} style={imgStyle} />
+        ) : (
+          <div style="font-size:12px; color:#6b7280;">No image</div>
+        )}
       </div>
     );
   }
@@ -2617,40 +2615,38 @@ function Modal() {
 
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
+    var width = tileWidth(columns);
     return (
-      <div key={'collection-' + title} style="width:100%; min-width:0;">
+      <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
-          <div style="border:1px solid #d8dee6; border-radius:14px; background:#ffffff; overflow:hidden; min-height:170px; display:flex; flex-direction:column;">
-            <div style="padding:12px 12px 10px; min-height:96px; display:flex; align-items:center; justify-content:center;">
+          <div style="border:1px solid #d9dee7; border-radius:12px; background:#ffffff; overflow:hidden; padding:10px; min-height:170px; display:flex; flex-direction:column; justify-content:flex-start;">
+            <div style="height:82px; display:flex; align-items:center; justify-content:center;">
               {renderImageOrFallback(item ? item.imageUrl : '', title, '72px', 'contain')}
             </div>
-            <div style="border-top:1px solid #eef2f6; padding:10px 12px 12px; text-align:center; display:flex; align-items:center; justify-content:center; min-height:56px;">
-              <div style="font-size:12px; line-height:1.35; font-weight:600; color:#111827; word-break:break-word;">
-                {title}
-              </div>
+            <div style="margin-top:10px; padding-top:10px; border-top:1px solid #edf0f3; text-align:center; font-size:14px; font-weight:600; line-height:1.3;">
+              {title}
             </div>
           </div>
         </s-clickable>
-      </div>
+      </s-box>
     );
   }
 
   function renderProductTile(product, onPress, columns) {
+    var width = tileWidth(columns);
     return (
-      <div key={'product-' + product.id} style="width:100%; min-width:0;">
+      <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
-          <div style="border:1px solid #d8dee6; border-radius:14px; background:#ffffff; overflow:hidden; min-height:196px; display:flex; flex-direction:column;">
-            <div style="padding:12px 12px 10px; min-height:108px; display:flex; align-items:center; justify-content:center;">
-              {renderImageOrFallback(product.imageUrl, product.title, '84px', 'contain')}
+          <div style="border:1px solid #d9dee7; border-radius:12px; background:#ffffff; overflow:hidden; padding:10px; min-height:190px; display:flex; flex-direction:column; justify-content:flex-start;">
+            <div style="height:96px; display:flex; align-items:center; justify-content:center;">
+              {renderImageOrFallback(product.imageUrl, product.title, '86px', 'contain')}
             </div>
-            <div style="border-top:1px solid #eef2f6; padding:10px 12px 12px; min-height:72px; display:flex; align-items:flex-start; justify-content:flex-start;">
-              <div style="font-size:12px; line-height:1.35; font-weight:600; color:#111827; text-align:left; word-break:break-word; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; width:100%;">
-                {product.title}
-              </div>
+            <div style="margin-top:10px; padding-top:10px; border-top:1px solid #edf0f3; text-align:left; font-size:13px; font-weight:600; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">
+              {product.title}
             </div>
           </div>
         </s-clickable>
-      </div>
+      </s-box>
     );
   }
 
@@ -2659,13 +2655,12 @@ function Modal() {
     if (list.length === 0) {
       return null;
     }
-    var gridTemplate = columns === 4 ? 'repeat(4, minmax(0, 1fr))' : (columns === 3 ? 'repeat(3, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))');
     return (
-      <div style={'display:grid; grid-template-columns:' + gridTemplate + '; gap:14px; width:100%; align-items:start;'}>
+      <s-stack direction="inline" gap="small" wrap="true" alignItems="start">
         {list.map(function (item) {
           return renderItem(item, columns);
         })}
-      </div>
+      </s-stack>
     );
   }
 
