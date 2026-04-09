@@ -2353,14 +2353,16 @@ function Modal() {
   }
   function renderDebugHeader() {
     return (
-      <s-section heading="Debug (compact)">
+      <s-section heading="Debug">
         <s-stack direction="block" gap="micro">
-          <s-text size="small" appearance="subdued">Internal diagnostics</s-text>
           <s-text size="small" appearance="subdued">Screen: {screen} · {dataSource}</s-text>
           {loading ? <s-text size="small" appearance="subdued">Loading…</s-text> : null}
           {errorMessage ? <s-text size="small" appearance="critical">{errorMessage}</s-text> : null}
         </s-stack>
-        {renderLiveDebugPanel()}
+        <details>
+          <summary>Live diagnostics</summary>
+          {renderLiveDebugPanel()}
+        </details>
       </s-section>
     );
   }
@@ -2558,49 +2560,120 @@ function Modal() {
     );
   }
 
-  function renderImageThumb(imageUrl, altText, height) {
+  function chunkIntoRows(items, rowSize) {
+    var rows = [];
+    var safeRowSize = rowSize > 0 ? rowSize : 1;
+    var index = 0;
+    while (index < items.length) {
+      rows.push(items.slice(index, index + safeRowSize));
+      index += safeRowSize;
+    }
+    return rows;
+  }
+
+  function renderImageOrFallback(imageUrl, altText, height) {
     var boxHeight = height || '120px';
     if (imageUrl && toStr(imageUrl) !== '') {
       return (
-        <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; overflow: hidden; background: #f8fafc; border: 1px solid #dbe3ee;'}>
-          <img src={imageUrl} alt={altText} style="width: 100%; height: 100%; object-fit: cover; display: block;" />
+        <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; overflow: hidden; border: 1px solid #dbe3ee; background: #f8fafc;'}>
+          <s-image src={imageUrl} alt={altText} style="width: 100%; height: 100%; object-fit: cover;" />
         </div>
       );
     }
     return (
-      <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; background: linear-gradient(160deg, #f8fafc 0%, #edf3ff 55%, #e2e8f0 100%); border: 1px solid #dbe3ee; display: flex; align-items: center; justify-content: center; color: #475569; font-size: 12px; font-weight: 700; letter-spacing: 0.2px; text-transform: uppercase;'}>
-        Macron Teamwear
-      </div>
-    );
-  }
-
-  function renderTapCard(item) {
-    return (
-      <div
-        key={item.key}
-        style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 12px; box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04); text-align: left;"
-      >
-        <s-stack direction="block" gap="small">
-          {renderImageThumb(item.imageUrl, item.title, item.thumbHeight)}
-          <div style="padding: 2px 2px 0 2px;">
-            <div style="font-size: 16px; font-weight: 700; line-height: 1.35; margin-bottom: 6px;">
-              <s-text>{item.title}</s-text>
-            </div>
-            {item.subtitle ? (
-              <div style="line-height: 1.4; font-size: 13px; color: #64748b;">
-                <s-text appearance="subdued">{item.subtitle}</s-text>
-              </div>
-            ) : null}
-          </div>
-          <s-button variant={item.ctaVariant || 'primary'} onClick={item.onPress}>
-            {item.ctaLabel || 'Open'}
-          </s-button>
+      <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; border: 1px solid #dbe3ee; background: linear-gradient(160deg, #f8fafc 0%, #edf3ff 55%, #e2e8f0 100%);'}>
+        <s-stack direction="block" alignment="center" distribution="center" style="height: 100%;">
+          <s-text size="small" appearance="subdued">Macron Teamwear</s-text>
         </s-stack>
       </div>
     );
   }
 
+  function renderVariantChips(product) {
+    if (!product || !product.variants || product.variants.length === 0) {
+      return null;
+    }
+    var maxChips = product.variants.length > 4 ? 4 : product.variants.length;
+    return (
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        {product.variants.slice(0, maxChips).map(function (variant) {
+          return (
+            <div key={variant.id} style="padding: 4px 8px; border-radius: 999px; border: 1px solid #dbe3ee; background: #f8fafc;">
+              <s-text size="small" appearance="subdued">{variant.title}</s-text>
+            </div>
+          );
+        })}
+        {product.variants.length > maxChips ? (
+          <div style="padding: 4px 8px; border-radius: 999px; border: 1px solid #dbe3ee; background: #f8fafc;">
+            <s-text size="small" appearance="subdued">+{product.variants.length - maxChips}</s-text>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderClubTile(club) {
+    return (
+      <s-selectable key={club.name} onClick={function () { handleClubPress(club); }}>
+        <div style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 10px; min-height: 200px;">
+          <s-stack direction="block" gap="small">
+            {renderImageOrFallback(club.imageUrl, club.name, '106px')}
+            <s-stack direction="block" gap="micro">
+              <s-text>{club.name}</s-text>
+              <s-text size="small" appearance="subdued">{club.type === 'subsections' ? 'Browse sections' : 'Browse products'}</s-text>
+            </s-stack>
+            <s-stack direction="inline" alignment="center" distribution="equalSpacing">
+              <s-text size="small" appearance="subdued">Open</s-text>
+              <s-text size="small" appearance="subdued">›</s-text>
+            </s-stack>
+          </s-stack>
+        </div>
+      </s-selectable>
+    );
+  }
+
+  function renderSubsectionTile(subsection) {
+    return (
+      <s-selectable key={subsection.label} onClick={function () { handleSubsectionPress(subsection); }}>
+        <div style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 10px; min-height: 190px;">
+          <s-stack direction="block" gap="small">
+            {renderImageOrFallback(subsection.imageUrl, subsection.label, '104px')}
+            <s-stack direction="block" gap="micro">
+              <s-text>{subsection.label}</s-text>
+              <s-text size="small" appearance="subdued">Open section</s-text>
+            </s-stack>
+            <s-stack direction="inline" alignment="center" distribution="equalSpacing">
+              <s-text size="small" appearance="subdued">Select</s-text>
+              <s-text size="small" appearance="subdued">›</s-text>
+            </s-stack>
+          </s-stack>
+        </div>
+      </s-selectable>
+    );
+  }
+
+  function renderProductCard(product) {
+    return (
+      <s-selectable key={product.id} onClick={function () { handleProductPress(product); }}>
+        <div style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 10px;">
+          <s-stack direction="block" gap="small">
+            {renderImageOrFallback(product.imageUrl, product.title, '170px')}
+            <s-stack direction="block" gap="micro">
+              <s-text>{product.title}</s-text>
+              {renderVariantChips(product)}
+            </s-stack>
+            <s-stack direction="inline" alignment="center" distribution="equalSpacing">
+              <s-text size="small" appearance="subdued">View details</s-text>
+              <s-text size="small" appearance="subdued">›</s-text>
+            </s-stack>
+          </s-stack>
+        </div>
+      </s-selectable>
+    );
+  }
+
   function renderClubsScreen() {
+    var clubRows = chunkIntoRows(clubs, 2);
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
@@ -2608,22 +2681,21 @@ function Modal() {
           <s-section heading="Choose club">
             <s-stack direction="block" gap="small">
               <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
-              <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
-                {clubs.map(function (club) {
-                  return renderTapCard({
-                    key: club.name,
-                    title: club.name,
-                    subtitle: club.type === 'subsections' ? 'Browse sections' : 'Browse products',
-                    imageUrl: club.imageUrl,
-                    thumbHeight: '104px',
-                    ctaLabel: 'Open club',
-                    onPress: function () { handleClubPress(club); },
-                  });
+              <s-stack direction="block" gap="small">
+                {clubRows.map(function (row, rowIndex) {
+                  return (
+                    <s-stack key={'club-row-' + rowIndex} direction="inline" gap="small">
+                      {row.map(function (club) {
+                        return <div key={'club-cell-' + club.name} style="flex: 1 1 0;">{renderClubTile(club)}</div>;
+                      })}
+                      {row.length === 1 ? <div style="flex: 1 1 0;" /> : null}
+                    </s-stack>
+                  );
                 })}
-              </div>
+              </s-stack>
             </s-stack>
           </s-section>
-          <div style="margin-top: 12px; opacity: 0.7;">
+          <div style="margin-top: 8px; opacity: 0.55;">
             {renderDebugHeader()}
           </div>
         </ScreenScroll>
@@ -2635,26 +2707,26 @@ function Modal() {
     if (!selectedClub || !selectedClub.subsections) {
       return renderClubsScreen();
     }
+    var subsectionRows = chunkIntoRows(selectedClub.subsections, 2);
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
           {renderScreenIntro(selectedClub.name, 'Choose a subsection.')}
           <s-section heading="Sections">
-            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
-              {selectedClub.subsections.map(function (sub) {
-                return renderTapCard({
-                  key: sub.label,
-                  title: sub.label,
-                  subtitle: 'Select section',
-                  imageUrl: sub.imageUrl,
-                  thumbHeight: '102px',
-                  ctaLabel: 'Open section',
-                  onPress: function () { handleSubsectionPress(sub); },
-                });
+            <s-stack direction="block" gap="small">
+              {subsectionRows.map(function (row, rowIndex) {
+                return (
+                  <s-stack key={'sub-row-' + rowIndex} direction="inline" gap="small">
+                    {row.map(function (subsection) {
+                      return <div key={'sub-cell-' + subsection.label} style="flex: 1 1 0;">{renderSubsectionTile(subsection)}</div>;
+                    })}
+                    {row.length === 1 ? <div style="flex: 1 1 0;" /> : null}
+                  </s-stack>
+                );
               })}
-            </div>
+            </s-stack>
           </s-section>
-          <div style="margin-top: 12px; opacity: 0.7;">
+          <div style="margin-top: 8px; opacity: 0.55;">
             {renderDebugHeader()}
           </div>
         </ScreenScroll>
@@ -2687,20 +2759,12 @@ function Modal() {
               ) : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
               {products.map(function (product) {
-                return renderTapCard({
-                  key: product.id,
-                  title: product.title,
-                  subtitle: '',
-                  imageUrl: product.imageUrl,
-                  thumbHeight: '160px',
-                  ctaLabel: 'View product',
-                  onPress: function () { handleProductPress(product); },
-                });
+                return renderProductCard(product);
               })}
             </s-stack>
           </s-section>
           {renderProductDebug()}
-          <div style="margin-top: 12px; opacity: 0.7;">
+          <div style="margin-top: 8px; opacity: 0.55;">
             {renderDebugHeader()}
           </div>
         </ScreenScroll>
@@ -2755,7 +2819,7 @@ function Modal() {
         <ScreenScroll>
           <s-section>
             <s-stack direction="block" gap="small">
-              {renderImageThumb(selectedProduct.imageUrl, selectedProduct.title, '190px')}
+              {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '190px')}
               <div style="font-size: 20px; font-weight: 700; line-height: 1.3;"><s-text>{selectedProduct.title}</s-text></div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
                 <s-text appearance="subdued">Ready for standard product add to cart.</s-text>
