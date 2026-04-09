@@ -2373,7 +2373,7 @@ function Modal() {
 
   function renderDiagnosticsToggle() {
     return (
-      <div style="margin-top: 28px;">
+      <div style="margin-top: 36px; margin-bottom: 6px;">
         <s-section>
           <s-stack direction="inline" gap="small" alignment="center">
             <s-button
@@ -2620,18 +2620,22 @@ function Modal() {
     var width = tileWidth(columns);
     return (
       <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
-        <s-clickable onClick={onPress}>
-          <s-box padding="small" border="base" cornerRadius="large-100">
-            <s-stack direction="block" gap="small">
-              {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
-              <s-box padding="small">
-                <s-stack direction="block" gap="small" alignItems="center">
-                  <s-text emphasis="bold">{title}</s-text>
-                </s-stack>
-              </s-box>
-            </s-stack>
-          </s-box>
-        </s-clickable>
+        <div style="padding:6px;">
+          <s-clickable onClick={onPress}>
+            <div style="border:1px solid #d9dee7; border-radius:12px; background:#ffffff; min-height:164px; padding:10px; box-sizing:border-box;">
+              <s-stack direction="block" gap="small">
+                <div style="padding-bottom:8px; border-bottom:1px solid #eef2f6;">
+                  {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
+                </div>
+                <s-box padding="small">
+                  <s-stack direction="block" gap="small" alignItems="center">
+                    <s-text emphasis="bold">{title}</s-text>
+                  </s-stack>
+                </s-box>
+              </s-stack>
+            </div>
+          </s-clickable>
+        </div>
       </s-box>
     );
   }
@@ -2640,18 +2644,24 @@ function Modal() {
     var width = tileWidth(columns);
     return (
       <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
-        <s-clickable onClick={onPress}>
-          <s-box padding="small" border="base" cornerRadius="large-100">
-            <s-stack direction="block" gap="small">
-              {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
-              <s-box padding="small">
-                <s-stack direction="block" gap="small">
-                  <s-text emphasis="bold">{product.title}</s-text>
-                </s-stack>
-              </s-box>
-            </s-stack>
-          </s-box>
-        </s-clickable>
+        <div style="padding:6px;">
+          <s-clickable onClick={onPress}>
+            <div style="border:1px solid #d9dee7; border-radius:12px; background:#ffffff; min-height:208px; padding:10px; box-sizing:border-box;">
+              <s-stack direction="block" gap="small">
+                <div style="padding-bottom:8px; border-bottom:1px solid #eef2f6;">
+                  {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
+                </div>
+                <s-box padding="small">
+                  <s-stack direction="block" gap="small">
+                    <div style="display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.25; min-height:2.5em;">
+                      <s-text emphasis="bold">{product.title}</s-text>
+                    </div>
+                  </s-stack>
+                </s-box>
+              </s-stack>
+            </div>
+          </s-clickable>
+        </div>
       </s-box>
     );
   }
