@@ -1319,6 +1319,10 @@ function Modal() {
   var bundleAddError = bundleAddErrorState[0];
   var setBundleAddError = bundleAddErrorState[1];
 
+  var showDebugState = useState(false);
+  var showDebug = showDebugState[0];
+  var setShowDebug = showDebugState[1];
+
   async function loadProductsForCollection(collectionId) {
     if (!collectionId) {
       return;
@@ -2367,6 +2371,24 @@ function Modal() {
     );
   }
 
+  function renderDiagnosticsToggle() {
+    return (
+      <s-section>
+        <s-stack direction="inline" gap="small" alignment="center">
+          <s-button
+            variant="secondary"
+            onClick={function () {
+              setShowDebug(!showDebug);
+            }}
+          >
+            {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
+          </s-button>
+          {!showDebug && errorMessage ? <s-text size="small" appearance="critical">Diagnostics hidden · active warning</s-text> : null}
+        </s-stack>
+      </s-section>
+    );
+  }
+
   function renderBundleDebug(product) {
     if (!product || !product.bundleMeta) {
       return null;
@@ -2549,12 +2571,12 @@ function Modal() {
     var showBack = screen !== 'clubs';
     return (
       <s-section>
-        <s-stack direction="block" gap="base">
+        <s-stack direction="block" gap="small">
           <s-stack direction="inline" gap="small" alignment="center">
             {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
-            <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{title}</s-text></div>
+            <div style="font-size: 21px; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em;"><s-text>{title}</s-text></div>
           </s-stack>
-          <s-text appearance="subdued">{subtitle}</s-text>
+          {subtitle ? <s-text appearance="subdued">{subtitle}</s-text> : null}
         </s-stack>
       </s-section>
     );
@@ -2575,15 +2597,15 @@ function Modal() {
     var boxHeight = height || '96px';
     if (imageUrl && toStr(imageUrl) !== '') {
       return (
-        <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; overflow: hidden; border: 1px solid #dbe3ee; background: #f8fafc;'}>
-          <img src={imageUrl} alt={altText} style="width: 100%; height: 100%; display: block; object-fit: contain; object-position: center;" />
+        <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px 12px 10px 10px; overflow: hidden; border: 1px solid #e5eaf1; background: #f6f8fb;'}>
+          <img src={imageUrl} alt={altText} style="width: 100%; height: 100%; display: block; object-fit: cover; object-position: center;" />
         </div>
       );
     }
     return (
-      <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; border: 1px solid #dbe3ee; background: linear-gradient(160deg, #f8fafc 0%, #edf3ff 55%, #e2e8f0 100%); overflow: hidden;'}>
+      <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px 12px 10px 10px; border: 1px solid #e5eaf1; background: linear-gradient(165deg, #f9fbff 0%, #f1f5fb 58%, #ebf0f7 100%); overflow: hidden;'}>
         <s-stack direction="block" alignment="center" distribution="center" style="height: 100%;">
-          <s-text size="small" appearance="subdued">Macron Teamwear</s-text>
+          <s-text size="small" appearance="subdued">Macron Club Collection</s-text>
         </s-stack>
       </div>
     );
@@ -2591,16 +2613,19 @@ function Modal() {
 
   function renderClubTile(club) {
     return (
-      <div key={club.name} style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 10px; min-height: 196px;">
+      <div
+        key={club.name}
+        onClick={function () { handleClubPress(club); }}
+        style="width: 100%; border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff; overflow: hidden; min-height: 180px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);"
+      >
         <s-stack direction="block" gap="small">
-          {renderImageOrFallback(club.imageUrl, club.name, '92px')}
-          <s-stack direction="block" gap="micro">
-            <s-text>{club.name}</s-text>
-            <s-text size="small" appearance="subdued">{club.type === 'subsections' ? 'Browse sections' : 'Browse products'}</s-text>
-          </s-stack>
-          <s-button variant="secondary" onClick={function () { handleClubPress(club); }}>
-            Open club
-          </s-button>
+          {renderImageOrFallback(club.imageUrl, club.name, '122px')}
+          <div style="padding: 0 10px 10px 10px;">
+            <s-stack direction="block" gap="micro">
+              <div style="font-size: 15px; font-weight: 600; line-height: 1.3;"><s-text>{club.name}</s-text></div>
+              <s-text size="small" appearance="subdued">{club.type === 'subsections' ? 'Sections' : 'Products'}</s-text>
+            </s-stack>
+          </div>
         </s-stack>
       </div>
     );
@@ -2608,16 +2633,19 @@ function Modal() {
 
   function renderSubsectionTile(subsection) {
     return (
-      <div key={subsection.label} style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 10px; min-height: 190px;">
+      <div
+        key={subsection.label}
+        onClick={function () { handleSubsectionPress(subsection); }}
+        style="width: 100%; border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff; overflow: hidden; min-height: 180px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);"
+      >
         <s-stack direction="block" gap="small">
-          {renderImageOrFallback(subsection.imageUrl, subsection.label, '92px')}
-          <s-stack direction="block" gap="micro">
-            <s-text>{subsection.label}</s-text>
-            <s-text size="small" appearance="subdued">Browse products</s-text>
-          </s-stack>
-          <s-button variant="secondary" onClick={function () { handleSubsectionPress(subsection); }}>
-            Open section
-          </s-button>
+          {renderImageOrFallback(subsection.imageUrl, subsection.label, '122px')}
+          <div style="padding: 0 10px 10px 10px;">
+            <s-stack direction="block" gap="micro">
+              <div style="font-size: 15px; font-weight: 600; line-height: 1.3;"><s-text>{subsection.label}</s-text></div>
+              <s-text size="small" appearance="subdued">Shop products</s-text>
+            </s-stack>
+          </div>
         </s-stack>
       </div>
     );
@@ -2625,19 +2653,21 @@ function Modal() {
 
   function renderProductCard(product) {
     return (
-      <div key={product.id} style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 10px;">
-        <s-stack direction="inline" gap="small" alignment="start">
-          <div style="width: 104px; min-width: 104px;">
-            {renderImageOrFallback(product.imageUrl, product.title, '104px')}
+      <div
+        key={product.id}
+        onClick={function () { handleProductPress(product); }}
+        style="width: 100%; border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff; overflow: hidden; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);"
+      >
+        <s-stack direction="block" gap="small">
+          <div style="width: 100%;">
+            {renderImageOrFallback(product.imageUrl, product.title, '126px')}
           </div>
-          <s-stack direction="block" gap="small" style="flex: 1;">
+          <div style="padding: 0 10px 10px 10px;">
             <s-stack direction="block" gap="micro">
-              <s-text>{product.title}</s-text>
+              <div style="font-size: 14px; font-weight: 600; line-height: 1.35;"><s-text>{product.title}</s-text></div>
+              <s-text size="small" appearance="subdued">Tap to view options</s-text>
             </s-stack>
-            <s-button variant="secondary" onClick={function () { handleProductPress(product); }}>
-              View product
-            </s-button>
-          </s-stack>
+          </div>
         </s-stack>
       </div>
     );
@@ -2648,8 +2678,8 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderScreenIntro('Clubs', 'Select a club to begin.')}
-          <s-section heading="Choose club">
+          {renderScreenIntro('Club Shop', '')}
+          <s-section>
             <s-stack direction="block" gap="small">
               <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
               <s-stack direction="block" gap="small">
@@ -2666,9 +2696,8 @@ function Modal() {
               </s-stack>
             </s-stack>
           </s-section>
-          <div style="margin-top: 8px; opacity: 0.55;">
-            {renderDebugHeader()}
-          </div>
+          {renderDiagnosticsToggle()}
+          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2682,8 +2711,8 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderScreenIntro(selectedClub.name, 'Choose a subsection.')}
-          <s-section heading="Sections">
+          {renderScreenIntro(selectedClub.name, '')}
+          <s-section>
             <s-stack direction="block" gap="small">
               {subsectionRows.map(function (row, rowIndex) {
                 return (
@@ -2697,9 +2726,8 @@ function Modal() {
               })}
             </s-stack>
           </s-section>
-          <div style="margin-top: 8px; opacity: 0.55;">
-            {renderDebugHeader()}
-          </div>
+          {renderDiagnosticsToggle()}
+          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2718,8 +2746,8 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderScreenIntro(heading, 'Tap a product to view details.')}
-          <s-section heading="Products">
+          {renderScreenIntro(heading, '')}
+          <s-section>
             <s-stack direction="block" gap="base">
               {productListLoading ? (
                 <s-stack direction="block" gap="small">
@@ -2734,10 +2762,9 @@ function Modal() {
               })}
             </s-stack>
           </s-section>
-          {renderProductDebug()}
-          <div style="margin-top: 8px; opacity: 0.55;">
-            {renderDebugHeader()}
-          </div>
+          {renderDiagnosticsToggle()}
+          {showDebug ? renderProductDebug() : null}
+          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2789,12 +2816,12 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section>
-            <s-stack direction="block" gap="small">
-              {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '168px')}
-              <div style="font-size: 20px; font-weight: 700; line-height: 1.3;"><s-text>{selectedProduct.title}</s-text></div>
+            <s-stack direction="block" gap="base">
+              {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '196px')}
+              <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
-                <s-text appearance="subdued">Ready for standard product add to cart.</s-text>
-              ) : <s-text appearance="subdued">Bundle workflow available for this product.</s-text>}
+                <s-text appearance="subdued">Select size to continue.</s-text>
+              ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
             </s-stack>
           </s-section>
           <s-section heading="Size">
@@ -2818,15 +2845,15 @@ function Modal() {
                   Continue to personalisation
                 </s-button>
               ) : null)}
+              <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
             </s-stack>
           </s-section>
-          {renderPersonalisationDebug(selectedProduct)}
-          {renderBundleDebug(selectedProduct)}
-          {renderCartDebug()}
-          {renderProductDebug()}
-          <div style="margin-top: 12px; opacity: 0.7;">
-            {renderDebugHeader()}
-          </div>
+          {renderDiagnosticsToggle()}
+          {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
+          {showDebug ? renderBundleDebug(selectedProduct) : null}
+          {showDebug ? renderCartDebug() : null}
+          {showDebug ? renderProductDebug() : null}
+          {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2938,12 +2965,11 @@ function Modal() {
               </s-section>
             </s-stack>
           </s-section>
-          {renderBundleDebug(selectedProduct)}
-          {renderCartDebug()}
-          {renderProductDebug()}
-          <div style="margin-top: 12px; opacity: 0.7;">
-            {renderDebugHeader()}
-          </div>
+          {renderDiagnosticsToggle()}
+          {showDebug ? renderBundleDebug(selectedProduct) : null}
+          {showDebug ? renderCartDebug() : null}
+          {showDebug ? renderProductDebug() : null}
+          {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -3064,12 +3090,11 @@ function Modal() {
               </s-section>
             </s-stack>
           </s-section>
-          {renderPersonalisationDebug(selectedProduct)}
-          {renderCartDebug()}
-          {renderProductDebug()}
-          <div style="margin-top: 12px; opacity: 0.7;">
-            {renderDebugHeader()}
-          </div>
+          {renderDiagnosticsToggle()}
+          {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
+          {showDebug ? renderCartDebug() : null}
+          {showDebug ? renderProductDebug() : null}
+          {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
