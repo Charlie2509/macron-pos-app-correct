@@ -2582,17 +2582,6 @@ function Modal() {
     );
   }
 
-  function chunkIntoRows(items, rowSize) {
-    var rows = [];
-    var safeRowSize = rowSize > 0 ? rowSize : 1;
-    var index = 0;
-    while (index < items.length) {
-      rows.push(items.slice(index, index + safeRowSize));
-      index += safeRowSize;
-    }
-    return rows;
-  }
-
   function renderImageOrFallback(imageUrl, altText, height) {
     var boxHeight = height || '96px';
     if (imageUrl && toStr(imageUrl) !== '') {
@@ -2611,61 +2600,19 @@ function Modal() {
     );
   }
 
-  function renderClubTile(club) {
+  function renderTapCard(key, title, subtitle, imageUrl, onPress) {
     return (
       <div
-        key={club.name}
-        onClick={function () { handleClubPress(club); }}
-        style="width: 100%; border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff; overflow: hidden; min-height: 180px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);"
+        key={key}
+        onClick={onPress}
+        style="width: 100%; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff; overflow: hidden; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);"
       >
         <s-stack direction="block" gap="small">
-          {renderImageOrFallback(club.imageUrl, club.name, '122px')}
+          {renderImageOrFallback(imageUrl, title, '96px')}
           <div style="padding: 0 10px 10px 10px;">
             <s-stack direction="block" gap="micro">
-              <div style="font-size: 15px; font-weight: 600; line-height: 1.3;"><s-text>{club.name}</s-text></div>
-              <s-text size="small" appearance="subdued">{club.type === 'subsections' ? 'Sections' : 'Products'}</s-text>
-            </s-stack>
-          </div>
-        </s-stack>
-      </div>
-    );
-  }
-
-  function renderSubsectionTile(subsection) {
-    return (
-      <div
-        key={subsection.label}
-        onClick={function () { handleSubsectionPress(subsection); }}
-        style="width: 100%; border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff; overflow: hidden; min-height: 180px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);"
-      >
-        <s-stack direction="block" gap="small">
-          {renderImageOrFallback(subsection.imageUrl, subsection.label, '122px')}
-          <div style="padding: 0 10px 10px 10px;">
-            <s-stack direction="block" gap="micro">
-              <div style="font-size: 15px; font-weight: 600; line-height: 1.3;"><s-text>{subsection.label}</s-text></div>
-              <s-text size="small" appearance="subdued">Shop products</s-text>
-            </s-stack>
-          </div>
-        </s-stack>
-      </div>
-    );
-  }
-
-  function renderProductCard(product) {
-    return (
-      <div
-        key={product.id}
-        onClick={function () { handleProductPress(product); }}
-        style="width: 100%; border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff; overflow: hidden; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);"
-      >
-        <s-stack direction="block" gap="small">
-          <div style="width: 100%;">
-            {renderImageOrFallback(product.imageUrl, product.title, '126px')}
-          </div>
-          <div style="padding: 0 10px 10px 10px;">
-            <s-stack direction="block" gap="micro">
-              <div style="font-size: 14px; font-weight: 600; line-height: 1.35;"><s-text>{product.title}</s-text></div>
-              <s-text size="small" appearance="subdued">Tap to view options</s-text>
+              <div style="font-size: 15px; font-weight: 600; line-height: 1.3;"><s-text>{title}</s-text></div>
+              {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
             </s-stack>
           </div>
         </s-stack>
@@ -2674,7 +2621,6 @@ function Modal() {
   }
 
   function renderClubsScreen() {
-    var clubRows = chunkIntoRows(clubs, 2);
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
@@ -2683,14 +2629,13 @@ function Modal() {
             <s-stack direction="block" gap="small">
               <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
               <s-stack direction="block" gap="small">
-                {clubRows.map(function (row, rowIndex) {
-                  return (
-                    <s-stack key={'club-row-' + rowIndex} direction="inline" gap="small">
-                      {row.map(function (club) {
-                        return <div key={'club-cell-' + club.name} style="flex: 1 1 0;">{renderClubTile(club)}</div>;
-                      })}
-                      {row.length === 1 ? <div style="flex: 1 1 0;" /> : null}
-                    </s-stack>
+                {clubs.map(function (club) {
+                  return renderTapCard(
+                    'club-' + club.name,
+                    club.name,
+                    club.type === 'subsections' ? 'Sections' : 'Products',
+                    club.imageUrl,
+                    function () { handleClubPress(club); }
                   );
                 })}
               </s-stack>
@@ -2707,21 +2652,19 @@ function Modal() {
     if (!selectedClub || !selectedClub.subsections) {
       return renderClubsScreen();
     }
-    var subsectionRows = chunkIntoRows(selectedClub.subsections, 2);
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
           {renderScreenIntro(selectedClub.name, '')}
           <s-section>
             <s-stack direction="block" gap="small">
-              {subsectionRows.map(function (row, rowIndex) {
-                return (
-                  <s-stack key={'sub-row-' + rowIndex} direction="inline" gap="small">
-                    {row.map(function (subsection) {
-                      return <div key={'sub-cell-' + subsection.label} style="flex: 1 1 0;">{renderSubsectionTile(subsection)}</div>;
-                    })}
-                    {row.length === 1 ? <div style="flex: 1 1 0;" /> : null}
-                  </s-stack>
+              {selectedClub.subsections.map(function (subsection) {
+                return renderTapCard(
+                  'subsection-' + subsection.label,
+                  subsection.label,
+                  'Shop products',
+                  subsection.imageUrl,
+                  function () { handleSubsectionPress(subsection); }
                 );
               })}
             </s-stack>
@@ -2758,7 +2701,13 @@ function Modal() {
               ) : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
               {products.map(function (product) {
-                return renderProductCard(product);
+                return renderTapCard(
+                  'product-' + product.id,
+                  product.title,
+                  'Tap to view options',
+                  product.imageUrl,
+                  function () { handleProductPress(product); }
+                );
               })}
             </s-stack>
           </s-section>
