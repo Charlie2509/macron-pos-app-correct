@@ -1010,6 +1010,7 @@ async function fetchBundleComponentsByReferences(componentRefs) {
   }
   return result;
 }
+var productFetchPromises = {};
 // ---------------- UI ----------------
 export default async function () {
   render(<Modal />, document.body);
@@ -1323,6 +1324,59 @@ function Modal() {
   var showDebug = showDebugState[0];
   var setShowDebug = showDebugState[1];
 
+  async function fetchCollectionProductsWithCache(collectionId) {
+    if (!collectionId) {
+      return [];
+    }
+    if (productsCache[collectionId] && Array.isArray(productsCache[collectionId])) {
+      return productsCache[collectionId];
+    }
+    if (productFetchPromises[collectionId]) {
+      return productFetchPromises[collectionId];
+    }
+    productFetchPromises[collectionId] = fetchProductsForCollection(collectionId)
+      .then(function (products) {
+        delete productFetchPromises[collectionId];
+        return products;
+      })
+      .catch(function (err) {
+        delete productFetchPromises[collectionId];
+        throw err;
+      });
+    return productFetchPromises[collectionId];
+  }
+
+  function mergeProductsCache(collectionId, products) {
+    setProductsCache(function (prev) {
+      var current = prev || {};
+      if (current[collectionId] && Array.isArray(current[collectionId])) {
+        return current;
+      }
+      var next = {};
+      var cacheKeys = Object.keys(current);
+      for (var i = 0; i < cacheKeys.length; i += 1) {
+        next[cacheKeys[i]] = current[cacheKeys[i]];
+      }
+      next[collectionId] = products;
+      return next;
+    });
+  }
+
+  async function warmProductsForCollection(collectionId) {
+    if (!collectionId) {
+      return;
+    }
+    if (productsCache[collectionId] && Array.isArray(productsCache[collectionId])) {
+      return;
+    }
+    try {
+      var warmedProducts = await fetchCollectionProductsWithCache(collectionId);
+      mergeProductsCache(collectionId, warmedProducts);
+    } catch (err) {
+      // silent warm failure
+    }
+  }
+
   async function loadProductsForCollection(collectionId) {
     if (!collectionId) {
       return;
@@ -1337,15 +1391,9 @@ function Modal() {
     setCurrentProducts(currentProductsCollectionId === collectionId ? currentProducts : []);
     setCurrentProductsCollectionId(collectionId);
     try {
-      var products = await fetchProductsForCollection(collectionId);
+      var products = await fetchCollectionProductsWithCache(collectionId);
       setCurrentProducts(products);
-      var nextCache = {};
-      var cacheKeys = Object.keys(productsCache);
-      for (var k = 0; k < cacheKeys.length; k += 1) {
-        nextCache[cacheKeys[k]] = productsCache[cacheKeys[k]];
-      }
-      nextCache[collectionId] = products;
-      setProductsCache(nextCache);
+      mergeProductsCache(collectionId, products);
     } catch (err) {
       setErrorMessage(err && err.message ? err.message : String(err));
       setCurrentProducts([]);
@@ -1774,6 +1822,13 @@ function Modal() {
     resetBundleBuilderState();
     if (club.type === 'subsections') {
       setScreen('subsections');
+      if (dataSource === 'Live data' && club.subsections && Array.isArray(club.subsections)) {
+        for (var s = 0; s < club.subsections.length && s < 6; s += 1) {
+          if (club.subsections[s] && club.subsections[s].collectionId) {
+            warmProductsForCollection(club.subsections[s].collectionId);
+          }
+        }
+      }
       return;
     }
     if (dataSource === 'Mock data') {
@@ -1789,6 +1844,9 @@ function Modal() {
     } else {
       setCurrentProducts([]);
       setProductListLoading(true);
+      if (club.collectionId) {
+        warmProductsForCollection(club.collectionId);
+      }
     }
     setCurrentProductsCollectionId(club.collectionId ? club.collectionId : club.name);
     setScreen('products');
@@ -2585,74 +2643,76 @@ function Modal() {
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
     var boxHeight = height || '96px';
     var objectFit = fitMode || 'contain';
+    var wrapperStyle = 'width: 100%; height: ' + boxHeight + '; overflow: hidden; border-bottom: 1px solid #e5e7eb; background: #f8fafc;';
+    if (imageUrl && toStr(imageUrl) !== '') {
+      return (
+        <div style={wrapperStyle}>
+          <img
+            src={imageUrl}
+            alt={altText}
+            style={'width: 100%; height: 100%; display: block; object-fit: ' + objectFit + '; object-position: center;'}
+          />
+        </div>
+      );
+    }
     return (
-      <s-box blockSize={boxHeight} inlineSize="100%">
-        {imageUrl && toStr(imageUrl) !== '' ? (
-          <s-image src={imageUrl} alt={altText} inlineSize="100%" objectFit={objectFit} />
-        ) : (
-          <s-box blockSize={boxHeight} padding="base">
-            <s-stack direction="block" justifyContent="center" alignItems="center" gap="small">
-              <s-text type="small" color="subdued">Macron Club Collection</s-text>
-            </s-stack>
-          </s-box>
-        )}
-      </s-box>
+      <div style={wrapperStyle + ' display: flex; align-items: center; justify-content: center; padding: 10px; color: #667085; font-size: 12px; text-align: center;'}>
+        Macron Club Collection
+      </div>
     );
   }
 
-  function tileWidth(columns) {
-    if (columns === 4) {
-      return '24%';
+  function renderLoadingGrid(columns, count) {
+    var template = columns === 4 ? 'repeat(4, minmax(0, 1fr))' : (columns === 3 ? 'repeat(3, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))');
+    var items = [];
+    for (var i = 0; i < count; i += 1) {
+      items.push(
+        <div key={'loading-' + String(i)} style="background: #ffffff; border: 1px solid #d8e0ea; border-radius: 16px; overflow: hidden; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.06);">
+          <div style="height: 92px; background: linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%);"></div>
+          <div style="padding: 12px;">
+            <div style="height: 14px; border-radius: 7px; background: #eef2f6; margin-bottom: 8px;"></div>
+            <div style="height: 12px; width: 55%; border-radius: 6px; background: #f3f5f8;"></div>
+          </div>
+        </div>
+      );
     }
-    if (columns === 3) {
-      return '32%';
-    }
-    if (columns === 2) {
-      return '49%';
-    }
-    return '100%';
+    return (
+      <div style={'display: grid; grid-template-columns: ' + template + '; gap: 16px; align-items: start;'}>
+        {items}
+      </div>
+    );
   }
 
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-    var width = tileWidth(columns);
     return (
-      <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width}>
-        <s-clickable onClick={onPress}>
-          <s-pos-block>
-            <s-stack direction="block" gap="small">
-              {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
-              <s-box padding="small">
-                <s-stack direction="block" gap="small">
-                  <s-text type="strong">{title}</s-text>
-                  {subtitle ? <s-text type="small" color="subdued">{subtitle}</s-text> : null}
-                </s-stack>
-              </s-box>
-            </s-stack>
-          </s-pos-block>
-        </s-clickable>
-      </s-box>
+      <div
+        key={'collection-' + title}
+        onClick={onPress}
+        style="background: #ffffff; border: 1px solid #d5deea; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06); cursor: pointer; min-height: 186px;"
+      >
+        {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
+        <div style="padding: 12px 12px 14px 12px; text-align: center;">
+          <div style="font-size: 15px; font-weight: 700; line-height: 1.35; color: #111827; margin-bottom: 6px;">{title}</div>
+          {subtitle ? <div style="font-size: 12px; color: #6b7280; line-height: 1.3;">{subtitle}</div> : null}
+        </div>
+      </div>
     );
   }
 
   function renderProductTile(product, onPress, columns) {
-    var width = tileWidth(columns);
     return (
-      <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width}>
-        <s-clickable onClick={onPress}>
-          <s-pos-block>
-            <s-stack direction="block" gap="small">
-              {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
-              <s-box padding="small">
-                <s-stack direction="block" gap="small">
-                  <s-text type="strong">{product.title}</s-text>
-                  <s-text type="small" color="subdued">Tap to view options</s-text>
-                </s-stack>
-              </s-box>
-            </s-stack>
-          </s-pos-block>
-        </s-clickable>
-      </s-box>
+      <div
+        key={'product-' + product.id}
+        onClick={onPress}
+        style="background: #ffffff; border: 1px solid #d5deea; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06); cursor: pointer; min-height: 230px;"
+      >
+        {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
+        <div style="padding: 12px 12px 14px 12px;">
+          <div style="font-size: 14px; font-weight: 700; line-height: 1.35; color: #111827; margin-bottom: 8px;">{product.title}</div>
+          <div style="font-size: 12px; color: #6b7280; line-height: 1.3;">Tap to view options</div>
+        </div>
+      </div>
     );
   }
 
@@ -2661,12 +2721,13 @@ function Modal() {
     if (list.length === 0) {
       return null;
     }
+    var template = columns === 4 ? 'repeat(4, minmax(0, 1fr))' : (columns === 3 ? 'repeat(3, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))');
     return (
-      <s-stack direction="inline" gap="small" justifyContent="start" alignItems="start">
+      <div style={'display: grid; grid-template-columns: ' + template + '; gap: 16px; align-items: start;'}>
         {list.map(function (item) {
           return renderItem(item, columns);
         })}
-      </s-stack>
+      </div>
     );
   }
 
@@ -2677,7 +2738,7 @@ function Modal() {
           {renderScreenIntro('Club Shop', '')}
           <s-section>
             <s-stack direction="block" gap="base">
-              <s-text color="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
+              <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
               {renderGrid(clubs, function (club) {
                 return renderCollectionTile(
                   club,
@@ -2738,7 +2799,7 @@ function Modal() {
           {renderScreenIntro(heading, '')}
           <s-section>
             <s-stack direction="block" gap="base">
-              {productListLoading ? <s-text color="subdued">Loading products…</s-text> : null}
+              {productListLoading ? renderLoadingGrid(3, 6) : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
               {!productListLoading ? renderGrid(products, function (product) {
                 return renderProductTile(product, function () { handleProductPress(product); }, 3);
@@ -2774,16 +2835,18 @@ function Modal() {
       return null;
     }
     return (
-      <s-stack direction="inline" wrap="true" gap="small">
+      <div style="display: flex; flex-wrap: wrap; gap: 12px;">
         {product.variants.map(function (variant) {
           var active = selectedVariant && selectedVariant.id === variant.id;
           return (
-            <s-button key={variant.id} variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
-              {variant.title}
-            </s-button>
+            <div key={variant.id} style="min-width: 104px; flex: 0 0 auto;">
+              <s-button variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
+                {variant.title}
+              </s-button>
+            </div>
           );
         })}
-      </s-stack>
+      </div>
     );
   }
 
@@ -2960,11 +3023,11 @@ function Modal() {
 
   function fieldLabel(label, required, feeText) {
     return (
-      <s-stack direction="inline" gap="micro" wrap="true">
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 2px;">
         <s-text>{label}</s-text>
         {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
         {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
-      </s-stack>
+      </div>
     );
   }
 
