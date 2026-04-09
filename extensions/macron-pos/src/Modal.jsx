@@ -2373,7 +2373,7 @@ function Modal() {
 
   function renderDiagnosticsToggle() {
     return (
-      <div style="margin-top: 36px; margin-bottom: 6px;">
+      <div style="margin-top: 40px; padding-top: 8px;">
         <s-section>
           <s-stack direction="inline" gap="small" alignment="center">
             <s-button
@@ -2588,17 +2588,13 @@ function Modal() {
     var boxHeight = height || '96px';
     var objectFit = fitMode || 'contain';
     return (
-      <s-box blockSize={boxHeight} inlineSize="100%" padding="none">
+      <div style={'height:' + boxHeight + '; width:100%; display:flex; align-items:center; justify-content:center; background:#f8fafc; border-bottom:1px solid #e5e7eb; border-radius:10px 10px 0 0; overflow:hidden;'}>
         {imageUrl && toStr(imageUrl) !== '' ? (
           <s-image src={imageUrl} alt={altText} inlineSize="100%" blockSize={boxHeight} objectFit={objectFit} />
         ) : (
-          <s-box blockSize={boxHeight} inlineSize="100%" padding="base">
-            <s-stack direction="block" gap="small" alignItems="center">
-              <s-text appearance="subdued">No image</s-text>
-            </s-stack>
-          </s-box>
+          <div style="font-size:12px; color:#64748b; font-weight:600;">No image</div>
         )}
-      </s-box>
+      </div>
     );
   }
 
@@ -2620,48 +2616,35 @@ function Modal() {
     var width = tileWidth(columns);
     return (
       <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
-        <div style="padding:6px;">
-          <s-clickable onClick={onPress}>
-            <div style="border:1px solid #d9dee7; border-radius:12px; background:#ffffff; min-height:164px; padding:10px; box-sizing:border-box;">
-              <s-stack direction="block" gap="small">
-                <div style="padding-bottom:8px; border-bottom:1px solid #eef2f6;">
-                  {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
-                </div>
-                <s-box padding="small">
-                  <s-stack direction="block" gap="small" alignItems="center">
-                    <s-text emphasis="bold">{title}</s-text>
-                  </s-stack>
-                </s-box>
-              </s-stack>
+        <s-clickable onClick={onPress}>
+          <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:12px; overflow:hidden; min-height:148px; box-shadow:0 1px 2px rgba(15,23,42,0.04);">
+            {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
+            <div style="padding:12px 10px; text-align:center; display:flex; align-items:center; justify-content:center; min-height:58px;">
+              <div style="font-size:14px; font-weight:700; line-height:1.25; color:#111827;">{title}</div>
             </div>
-          </s-clickable>
-        </div>
+          </div>
+        </s-clickable>
       </s-box>
     );
   }
 
   function renderProductTile(product, onPress, columns) {
     var width = tileWidth(columns);
+    var title = toStr(product && product.title ? product.title : '');
+    var displayTitle = title;
+    if (displayTitle.length > 42) {
+      displayTitle = displayTitle.slice(0, 39) + '...';
+    }
     return (
       <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
-        <div style="padding:6px;">
-          <s-clickable onClick={onPress}>
-            <div style="border:1px solid #d9dee7; border-radius:12px; background:#ffffff; min-height:208px; padding:10px; box-sizing:border-box;">
-              <s-stack direction="block" gap="small">
-                <div style="padding-bottom:8px; border-bottom:1px solid #eef2f6;">
-                  {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
-                </div>
-                <s-box padding="small">
-                  <s-stack direction="block" gap="small">
-                    <div style="display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; line-height:1.25; min-height:2.5em;">
-                      <s-text emphasis="bold">{product.title}</s-text>
-                    </div>
-                  </s-stack>
-                </s-box>
-              </s-stack>
+        <s-clickable onClick={onPress}>
+          <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:12px; overflow:hidden; min-height:176px; box-shadow:0 1px 2px rgba(15,23,42,0.04);">
+            {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
+            <div style="padding:12px 10px; text-align:left; min-height:70px; display:flex; align-items:flex-start;">
+              <div style="font-size:14px; font-weight:700; line-height:1.3; color:#111827;">{displayTitle}</div>
             </div>
-          </s-clickable>
-        </div>
+          </div>
+        </s-clickable>
       </s-box>
     );
   }
