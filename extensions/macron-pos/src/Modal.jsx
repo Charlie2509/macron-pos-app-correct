@@ -1,4 +1,4 @@
-﻿import "@shopify/ui-extensions/preact";
+import "@shopify/ui-extensions/preact";
 import {render} from 'preact';
 import {useEffect, useState} from 'preact/hooks';
 
@@ -2867,13 +2867,26 @@ function Modal() {
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
     var boxHeight = height || '96px';
     var objectFit = fitMode || 'contain';
-    var wrapperStyle = 'height:' + boxHeight + '; width:100%; overflow:hidden; border-radius:14px 14px 0 0; background:#f8fafc; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:center;';
-    var imageStyle = 'width:100%; height:100%; display:block; object-fit:' + objectFit + '; object-position:center; background:#f8fafc;';
+    var wrapperStyle =
+      'height:' + boxHeight +
+      '; width:100%; overflow:hidden; border-radius:14px 14px 0 0;' +
+      ' background:#f8fafc; border-bottom:1px solid #e5e7eb;' +
+      ' display:flex; align-items:center; justify-content:center;';
+    var imageStyle =
+      'width:100%; height:100%; display:block;' +
+      ' object-fit:' + objectFit + '; object-position:center; background:#f8fafc;';
+
+    if (imageUrl && toStr(imageUrl) !== '') {
+      return (
+        <div style={wrapperStyle}>
+          <img src={imageUrl} alt={altText || ''} style={imageStyle} />
+        </div>
+      );
+    }
+
     return (
       <div style={wrapperStyle}>
-        {imageUrl && toStr(imageUrl) !== '' ? (
-          <img src={imageUrl} alt={altText || ''} style={imageStyle} />
-        ) : null}
+        <div style="font-size:12px; color:#64748b; font-weight:600;">No image</div>
       </div>
     );
   }
@@ -2896,9 +2909,9 @@ function Modal() {
     return (
       <s-box key={'collection-' + title} inlineSize="100%" minInlineSize="100%" maxInlineSize="100%">
         <s-clickable onClick={onPress}>
-          <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,0.08); overflow:hidden; min-height:182px;">
+          <div style="background:#ffffff; border:1px solid #cfd8e3; border-radius:16px; box-shadow:0 1px 4px rgba(15,23,42,0.08); overflow:hidden; min-height:182px;">
             {renderImageOrFallback(item ? item.imageUrl : '', title, '78px', 'contain')}
-            <div style="padding:14px 12px 16px; text-align:center; display:flex; flex-direction:column; justify-content:center; gap:6px; min-height:90px;">
+            <div style="padding:14px 12px 16px; text-align:center; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:6px; min-height:90px;">
               <div style="font-size:15px; font-weight:700; line-height:1.3; color:#111827;">{title}</div>
             </div>
           </div>
@@ -2911,7 +2924,7 @@ function Modal() {
     return (
       <s-box key={'product-' + product.id} inlineSize="100%" minInlineSize="100%" maxInlineSize="100%">
         <s-clickable onClick={onPress}>
-          <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,0.08); overflow:hidden; min-height:262px;">
+          <div style="background:#ffffff; border:1px solid #cfd8e3; border-radius:16px; box-shadow:0 1px 4px rgba(15,23,42,0.08); overflow:hidden; min-height:262px;">
             {renderImageOrFallback(product.imageUrl, product.title, '96px', 'contain')}
             <div style="padding:14px 14px 16px; display:flex; flex-direction:column; justify-content:flex-start; gap:8px; min-height:150px; text-align:left;">
               <div style="font-size:14px; font-weight:700; line-height:1.35; color:#111827;">{product.title}</div>
@@ -3099,7 +3112,7 @@ function Modal() {
               ) : null)}
             </s-stack>
           </s-section>
-          <div style="margin-top: 14px;">{renderDiagnosticsToggle()}</div>
+          <div style="margin-top: 18px;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderBundleDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
@@ -3229,11 +3242,11 @@ function Modal() {
   function fieldLabel(label, required, feeText) {
     return (
       <s-stack direction="block" gap="small">
-        <s-text>{label}</s-text>
-        <s-stack direction="inline" gap="small" wrap="true">
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px;">
+          <div style="font-weight:600; line-height:1.35;">{label}</div>
           {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
           {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
-        </s-stack>
+        </div>
       </s-stack>
     );
   }
