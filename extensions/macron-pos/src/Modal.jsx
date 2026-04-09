@@ -2583,248 +2583,391 @@ function Modal() {
   }
 
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
-  var boxHeight = height || '96px';
-  var objectFit = fitMode || 'contain';
-  return (
-    <div
-      style={
-        'height:' + boxHeight +
-        '; width:100%; overflow:hidden; border-radius:14px 14px 0 0;' +
-        ' background:#f8fafc; border-bottom:1px solid #e5e7eb;' +
-        ' display:flex; align-items:center; justify-content:center;'
-      }
-    >
-      {imageUrl && toStr(imageUrl) !== '' ? (
-        <s-image src={imageUrl} alt={altText} inlineSize="100%" blockSize={boxHeight} objectFit={objectFit} />
-      ) : (
-        <div style="font-size:12px; color:#64748b; font-weight:600;">No image</div>
-      )}
-    </div>
-  );
-}
-function renderCollectionTile(item, subtitle, onPress, columns) {
-  var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-  return (
-    <div key={'collection-' + title} style="min-width:0;">
-      <s-clickable onClick={onPress}>
-        <div
-          style="
-            background:#ffffff;
-            border:1px solid #cfd8e3;
-            border-radius:16px;
-            box-shadow:0 1px 4px rgba(15,23,42,0.08);
-            overflow:hidden;
-            min-height:182px;
-          "
-        >
-          {renderImageOrFallback(item ? item.imageUrl : '', title, '78px', 'contain')}
-          <div
-            style="
-              padding:14px 12px 16px;
-              text-align:center;
-              display:flex;
-              flex-direction:column;
-              justify-content:center;
-              align-items:center;
-              gap:6px;
-              min-height:92px;
-            "
-          >
-            <div style="font-size:15px; font-weight:700; line-height:1.3; color:#111827;">{title}</div>
-          </div>
-        </div>
-      </s-clickable>
-    </div>
-  );
-}
-function renderProductTile(product, onPress, columns) {
-  return (
-    <div key={'product-' + product.id} style="min-width:0;">
-      <s-clickable onClick={onPress}>
-        <div
-          style="
-            background:#ffffff;
-            border:1px solid #cfd8e3;
-            border-radius:16px;
-            box-shadow:0 1px 4px rgba(15,23,42,0.08);
-            overflow:hidden;
-            min-height:248px;
-          "
-        >
-          {renderImageOrFallback(product.imageUrl, product.title, '96px', 'contain')}
-          <div
-            style="
-              padding:14px 14px 16px;
-              display:flex;
-              flex-direction:column;
-              justify-content:flex-start;
-              gap:8px;
-              min-height:138px;
-              text-align:left;
-            "
-          >
-            <div style="font-size:14px; font-weight:700; line-height:1.35; color:#111827;">{product.title}</div>
-          </div>
-        </div>
-      </s-clickable>
-    </div>
-  );
-}
-function renderGrid(items, renderItem, columns) {
-  var list = items || [];
-  if (list.length === 0) {
-    return null;
+    var boxHeight = height || '96px';
+    var objectFit = fitMode || 'contain';
+    return (
+      <s-box blockSize={boxHeight} inlineSize="100%" padding="none">
+        {imageUrl && toStr(imageUrl) !== '' ? (
+          <s-image src={imageUrl} alt={altText} inlineSize="100%" blockSize={boxHeight} objectFit={objectFit} />
+        ) : (
+          <s-box blockSize={boxHeight} inlineSize="100%" padding="base">
+            <s-stack direction="block" gap="small" alignItems="center">
+              <s-text appearance="subdued">No image</s-text>
+            </s-stack>
+          </s-box>
+        )}
+      </s-box>
+    );
   }
-  return (
-    <div style={'display:grid; grid-template-columns:repeat(' + String(columns) + ', minmax(0, 1fr)); gap:14px; align-items:start;'}>
-      {list.map(function (item) {
-        return renderItem(item, columns);
-      })}
-    </div>
-  );
-}
-function renderClubsScreen() {
-  return (
-    <s-page heading="Macron POS">
-      <ScreenScroll>
-        {renderScreenIntro('Club Shop', '')}
-        <s-section>
-          <s-stack direction="block" gap="base">
-            <s-text color="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
-            {renderGrid(clubs, function (club) {
-              return renderCollectionTile(
-                club,
-                '',
-                function () { handleClubPress(club); },
-                4
-              );
-            }, 4)}
-          </s-stack>
-        </s-section>
-        {renderDiagnosticsToggle()}
-        {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
-      </ScreenScroll>
-    </s-page>
-  );
-}
-function renderSubsectionsScreen() {
-  if (!selectedClub || !selectedClub.subsections) {
-    return renderClubsScreen();
+
+  function tileWidth(columns) {
+    if (columns === 4) {
+      return '24%';
+    }
+    if (columns === 3) {
+      return '32%';
+    }
+    if (columns === 2) {
+      return '49%';
+    }
+    return '100%';
   }
-  return (
-    <s-page heading="Macron POS">
-      <ScreenScroll>
-        {renderScreenIntro(selectedClub.name, '')}
-        <s-section>
-          <s-stack direction="block" gap="base">
-            {renderGrid(selectedClub.subsections, function (subsection) {
-              return renderCollectionTile(
-                subsection,
-                '',
-                function () { handleSubsectionPress(subsection); },
-                4
-              );
-            }, 4)}
-          </s-stack>
-        </s-section>
-        {renderDiagnosticsToggle()}
-        {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
-      </ScreenScroll>
-    </s-page>
-  );
-}
-function renderProductsScreen() {
-  var products = productsForCurrentSelection();
-  var heading = selectedClub ? selectedClub.name : 'Products';
-  if (selectedSubsection) {
-    heading = selectedClub ? selectedClub.name + ' - ' + selectedSubsection.label : selectedSubsection.label;
+
+  function renderCollectionTile(item, subtitle, onPress, columns) {
+    var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
+    return (
+      <s-box key={'collection-' + title} inlineSize="100%" minInlineSize="0" padding="none">
+        <s-clickable onClick={onPress}>
+          <s-box padding="small" border="base" cornerRadius="large-100">
+            <s-stack direction="block" gap="small">
+              {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
+              <s-box padding="small">
+                <s-stack direction="block" gap="small" alignItems="center">
+                  <s-text emphasis="bold">{title}</s-text>
+                </s-stack>
+              </s-box>
+            </s-stack>
+          </s-box>
+        </s-clickable>
+      </s-box>
+    );
   }
-  return (
-    <s-page heading="Macron POS">
-      <ScreenScroll>
-        {renderScreenIntro(heading, '')}
-        <s-section>
-          <s-stack direction="block" gap="base">
-            {productListLoading ? <s-text color="subdued">Loading products…</s-text> : null}
-            {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
-            {!productListLoading ? renderGrid(products, function (product) {
-              return renderProductTile(product, function () { handleProductPress(product); }, 3);
-            }, 3) : null}
-          </s-stack>
-        </s-section>
-        {renderDiagnosticsToggle()}
-        {showDebug ? renderProductDebug() : null}
-        {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
-      </ScreenScroll>
-    </s-page>
-  );
-}
-function renderProductDetailScreen() {
-  if (!selectedProduct) {
-    return renderProductsScreen();
+
+  function renderProductTile(product, onPress, columns) {
+    return (
+      <s-box key={'product-' + product.id} inlineSize="100%" minInlineSize="0" padding="none">
+        <s-clickable onClick={onPress}>
+          <s-box padding="small" border="base" cornerRadius="large-100">
+            <s-stack direction="block" gap="small">
+              {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
+              <s-box padding="small">
+                <s-stack direction="block" gap="small">
+                  <s-text emphasis="bold">{product.title}</s-text>
+                </s-stack>
+              </s-box>
+            </s-stack>
+          </s-box>
+        </s-clickable>
+      </s-box>
+    );
   }
-  var meta = selectedProduct.personalisationMeta || {};
-  var hasPersonalisation = hasAnyPersonalisation(meta);
-  var isBundleProduct = selectedProduct.bundleMeta && selectedProduct.bundleMeta.isBundle;
-  var showAddToCart = !hasPersonalisation && !isBundleProduct;
-  return (
-    <s-page heading="Macron POS">
-      <ScreenScroll>
-        <s-section>
-          <s-stack direction="block" gap="base">
-            {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '196px')}
-            <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
-            {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
-              <s-text appearance="subdued">Select size to continue.</s-text>
-            ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
-          </s-stack>
-        </s-section>
-        <s-section heading="Size">
-          {renderVariants(selectedProduct)}
-        </s-section>
-        {renderBundleNote(selectedProduct)}
-        <s-section heading="Actions">
-          <s-stack direction="inline" gap="small" alignment="center">
-            <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
-            {showAddToCart ? (
-              <s-button
-                variant="primary"
-                onClick={function () {
-                  setLastEnteredPersonalisation(false);
-                  addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
-                }}
-              >
-                Add to cart
-              </s-button>
-            ) : (!isBundleProduct ? (
-              <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
-                Continue to personalisation
-              </s-button>
-            ) : null)}
-          </s-stack>
-        </s-section>
-        <div style="margin-top: 14px;">{renderDiagnosticsToggle()}</div>
-        {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
-        {showDebug ? renderBundleDebug(selectedProduct) : null}
-        {showDebug ? renderCartDebug() : null}
-        {showDebug ? renderProductDebug() : null}
-        {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
-      </ScreenScroll>
-    </s-page>
-  );
-}
-function fieldLabel(label, required, feeText) {
-  return (
-    <s-stack direction="block" gap="small">
-      <s-text>{label}</s-text>
-      <s-stack direction="inline" gap="small" wrap="true">
-        {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
-        {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
+
+  function renderGrid(items, renderItem, columns) {
+    var list = items || [];
+    if (list.length === 0) {
+      return null;
+    }
+    var gridTemplate = columns === 4 ? 'repeat(4, minmax(0, 1fr))' : (columns === 3 ? 'repeat(3, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))');
+    return (
+      <div style={'display:grid; grid-template-columns:' + gridTemplate + '; gap:12px; width:100%;'}>
+        {list.map(function (item) {
+          return renderItem(item, columns);
+        })}
+      </div>
+    );
+  }
+
+  function renderClubsScreen() {
+    return (
+      <s-page heading="Macron POS">
+        <ScreenScroll>
+          {renderScreenIntro('Club Shop', '')}
+          <s-section>
+            <s-stack direction="block" gap="base">
+              <s-text color="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
+              {renderGrid(clubs, function (club) {
+                return renderCollectionTile(
+                  club,
+                  '',
+                  function () { handleClubPress(club); },
+                  4
+                );
+              }, 4)}
+            </s-stack>
+          </s-section>
+          {renderDiagnosticsToggle()}
+          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
+        </ScreenScroll>
+      </s-page>
+    );
+  }
+
+  function renderSubsectionsScreen() {
+    if (!selectedClub || !selectedClub.subsections) {
+      return renderClubsScreen();
+    }
+    return (
+      <s-page heading="Macron POS">
+        <ScreenScroll>
+          {renderScreenIntro(selectedClub.name, '')}
+          <s-section>
+            <s-stack direction="block" gap="base">
+              {renderGrid(selectedClub.subsections, function (subsection) {
+                return renderCollectionTile(
+                  subsection,
+                  '',
+                  function () { handleSubsectionPress(subsection); },
+                  4
+                );
+              }, 4)}
+            </s-stack>
+          </s-section>
+          {renderDiagnosticsToggle()}
+          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
+        </ScreenScroll>
+      </s-page>
+    );
+  }
+
+  function productsForCurrentSelection() {
+    return currentProducts || [];
+  }
+
+  function renderProductsScreen() {
+    var products = productsForCurrentSelection();
+    var heading = selectedClub ? selectedClub.name : 'Products';
+    if (selectedSubsection) {
+      heading = selectedClub ? selectedClub.name + ' - ' + selectedSubsection.label : selectedSubsection.label;
+    }
+    return (
+      <s-page heading="Macron POS">
+        <ScreenScroll>
+          {renderScreenIntro(heading, '')}
+          <s-section>
+            <s-stack direction="block" gap="base">
+              {productListLoading ? <s-text color="subdued">Loading products…</s-text> : null}
+              {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
+              {!productListLoading ? renderGrid(products, function (product) {
+                return renderProductTile(product, function () { handleProductPress(product); }, 3);
+              }, 3) : null}
+            </s-stack>
+          </s-section>
+          {renderDiagnosticsToggle()}
+          {showDebug ? renderProductDebug() : null}
+          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
+        </ScreenScroll>
+      </s-page>
+    );
+  }
+
+  function renderBundleNote(product) {
+    if (!product || !product.bundleMeta || !product.bundleMeta.isBundle) {
+      return null;
+    }
+    return (
+      <s-section heading="Bundle">
+        <s-stack direction="block" gap="micro">
+          <s-text appearance="subdued">Bundle product detected.</s-text>
+          <s-button variant="secondary" onClick={handleBundleBuilderOpen}>
+            Continue to bundle builder
+          </s-button>
+        </s-stack>
+      </s-section>
+    );
+  }
+
+  function renderVariants(product) {
+    if (!product || !product.variants) {
+      return null;
+    }
+    return (
+      <s-stack direction="inline" wrap="true" gap="small">
+        {product.variants.map(function (variant) {
+          var active = selectedVariant && selectedVariant.id === variant.id;
+          return (
+            <s-button key={variant.id} variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
+              {variant.title}
+            </s-button>
+          );
+        })}
       </s-stack>
-    </s-stack>
-  );
-}
-function renderPersonalisationScreen() {
+    );
+  }
+
+  function renderProductDetailScreen() {
+    if (!selectedProduct) {
+      return renderProductsScreen();
+    }
+    var meta = selectedProduct.personalisationMeta || {};
+    var hasPersonalisation = hasAnyPersonalisation(meta);
+    var isBundleProduct = selectedProduct.bundleMeta && selectedProduct.bundleMeta.isBundle;
+    var showAddToCart = !hasPersonalisation && !isBundleProduct;
+    return (
+      <s-page heading="Macron POS">
+        <ScreenScroll>
+          <s-section>
+            <s-stack direction="block" gap="base">
+              {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '196px')}
+              <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
+              {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
+                <s-text appearance="subdued">Select size to continue.</s-text>
+              ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
+            </s-stack>
+          </s-section>
+          <s-section heading="Size">
+            {renderVariants(selectedProduct)}
+          </s-section>
+          {renderBundleNote(selectedProduct)}
+          <s-section heading="Actions">
+            <s-stack direction="inline" gap="small" alignment="center">
+              <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
+              {showAddToCart ? (
+                <s-button
+                  variant="primary"
+                  onClick={function () {
+                    setLastEnteredPersonalisation(false);
+                    addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
+                  }}
+                >
+                  Add to cart
+                </s-button>
+              ) : (!isBundleProduct ? (
+                <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
+                  Continue to personalisation
+                </s-button>
+              ) : null)}
+            </s-stack>
+          </s-section>
+          <s-box paddingBlockStart="base">{renderDiagnosticsToggle()}</s-box>
+          {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
+          {showDebug ? renderBundleDebug(selectedProduct) : null}
+          {showDebug ? renderCartDebug() : null}
+          {showDebug ? renderProductDebug() : null}
+          {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
+        </ScreenScroll>
+      </s-page>
+    );
+  }
+
+  function renderBundleBuilderScreen() {
+    if (!selectedProduct) {
+      return renderProductsScreen();
+    }
+    var meta = selectedProduct.personalisationMeta || {};
+    var feeDisplay = parseFeeDisplay(meta.personalisationFeeRaw);
+    var maxChars = parseMaxChars(meta.personalisationMaxCharsRaw);
+    return (
+      <s-page heading="Macron POS">
+        <ScreenScroll>
+          <s-section heading="Bundle builder">
+            <s-stack direction="block" gap="small">
+              <s-text>Bundle parent: {selectedProduct.title}</s-text>
+              <s-text appearance="subdued">Parent variant: {selectedVariant ? selectedVariant.title : 'none selected'}</s-text>
+              <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
+              {bundleLoading ? <s-text>Loading bundle components…</s-text> : null}
+              {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
+              {bundleComponents.map(function (component) {
+                var chosen = bundleSelections[component.key];
+                return (
+                  <s-section key={component.key} heading={component.title}>
+                    <s-stack direction="block" gap="small">
+                      <s-text appearance="subdued">{chosen ? ('Selected: ' + chosen.title) : 'Choose one variant'}</s-text>
+                      {component.variants && component.variants.length > 0 ? (
+                        <s-stack direction="inline" wrap="true" gap="small">
+                          {component.variants.map(function (variant) {
+                            var active = chosen && chosen.id === variant.id;
+                            return (
+                              <s-button
+                                key={variant.id}
+                                variant={active ? 'primary' : 'secondary'}
+                                onClick={function () { handleBundleVariantSelect(component.key, variant); }}
+                              >
+                                {variant.title}
+                              </s-button>
+                            );
+                          })}
+                        </s-stack>
+                      ) : (
+                        <s-text appearance="critical">No variants available for this component</s-text>
+                      )}
+                    </s-stack>
+                  </s-section>
+                );
+              })}
+              {hasAnyPersonalisation(meta) ? (
+                <s-section heading="Bundle personalisation">
+                  <s-stack direction="block" gap="small">
+                    {meta.enablePersonalisation ? (
+                      <s-stack direction="block" gap="small">
+                        {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
+                        <s-text-field
+                          value={primaryFieldValue}
+                          maxLength={maxChars === null ? undefined : maxChars}
+                          onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
+                          placeholder="Enter text"
+                        />
+                      </s-stack>
+                    ) : null}
+
+                    {meta.extraField1Enabled ? (
+                      <s-stack direction="block" gap="small">
+                        {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
+                        <s-text-field
+                          value={extraField1Value}
+                          onInput={function (event) { setExtraField1Value(event.target.value); }}
+                          placeholder="Enter text"
+                        />
+                      </s-stack>
+                    ) : null}
+
+                    {meta.extraField2Enabled ? (
+                      <s-stack direction="block" gap="small">
+                        {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
+                        <s-text-field
+                          value={extraField2Value}
+                          onInput={function (event) { setExtraField2Value(event.target.value); }}
+                          placeholder="Enter text"
+                        />
+                      </s-stack>
+                    ) : null}
+
+                    {meta.enableFileUpload ? (
+                      <s-stack direction="block" gap="small">
+                        {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
+                        <s-text appearance="critical">File upload is not available in POS V1 for bundle personalisation.</s-text>
+                        <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
+                      </s-stack>
+                    ) : null}
+                  </s-stack>
+                </s-section>
+              ) : null}
+              <s-section heading="Actions">
+                <s-stack direction="block" gap="small">
+                  <s-button
+                    variant="primary"
+                    onClick={addBundleParentToCart}
+                    disabled={bundleLoading}
+                  >
+                    Add bundle to cart
+                  </s-button>
+                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+                </s-stack>
+              </s-section>
+            </s-stack>
+          </s-section>
+          {renderDiagnosticsToggle()}
+          {showDebug ? renderBundleDebug(selectedProduct) : null}
+          {showDebug ? renderCartDebug() : null}
+          {showDebug ? renderProductDebug() : null}
+          {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
+        </ScreenScroll>
+      </s-page>
+    );
+  }
+
+  function fieldLabel(label, required, feeText) {
+    return (
+      <s-stack direction="block" gap="small">
+        <s-text>{label}</s-text>
+        <s-stack direction="inline" gap="small" wrap="true">
+          {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
+          {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
+        </s-stack>
+      </s-stack>
+    );
+  }
+
+  function renderPersonalisationScreen() {
     if (!selectedProduct) {
       return renderProductsScreen();
     }
@@ -2918,12 +3061,12 @@ function renderPersonalisationScreen() {
                 </s-stack>
               ) : null}
               <s-section heading="Actions">
-                <s-stack direction="block" gap="small">
-                  <s-button variant="primary" onClick={submitPersonalisation}>
-                    Add to cart
-                  </s-button>
+                <s-stack direction="inline" gap="small" alignment="center">
                   <s-button variant="secondary" onClick={handleBack}>
                     Back
+                  </s-button>
+                  <s-button variant="primary" onClick={submitPersonalisation}>
+                    Add to cart
                   </s-button>
                 </s-stack>
               </s-section>
