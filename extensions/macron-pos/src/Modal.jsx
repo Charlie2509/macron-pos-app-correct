@@ -2332,7 +2332,7 @@ function Modal() {
 
   function renderLiveDebugPanel() {
     return (
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.88;">
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.72;">
         <s-stack direction="block" gap="micro">
           <s-text size="small" appearance="subdued">Live fetch started: {liveFetchStarted ? 'yes' : 'no'}</s-text>
           <s-text size="small" appearance="subdued">Live fetch succeeded: {liveFetchSucceeded ? 'yes' : 'no'}</s-text>
@@ -2353,9 +2353,9 @@ function Modal() {
   }
   function renderDebugHeader() {
     return (
-      <s-section heading="Diagnostics (optional)">
+      <s-section heading="Diagnostics">
         <s-stack direction="block" gap="micro">
-          <s-text size="small" appearance="subdued">Debug snapshot</s-text>
+          <s-text size="small" appearance="subdued">Optional debug snapshot</s-text>
           <s-text size="small" appearance="subdued">Screen: {screen}</s-text>
           <s-text size="small" appearance="subdued">{dataSource}</s-text>
           {loading ? <s-text size="small" appearance="subdued">Loading…</s-text> : null}
@@ -2405,7 +2405,7 @@ function Modal() {
     }
     return (
       <s-section heading="Bundle debug">
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.84;">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.72;">
           <s-stack direction="block" gap="micro">
           <s-text>bundle parent: {product.title}</s-text>
           <s-text>parent variant: {selectedVariant ? selectedVariant.title : 'none'}</s-text>
@@ -2440,7 +2440,7 @@ function Modal() {
     var summary = hasAnyPersonalisation(meta) ? 'yes' : 'no';
     return (
       <s-section heading="Personalisation debug">
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.84;">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.72;">
           <s-stack direction="block" gap="micro">
           <s-text>Product supports personalisation: {summary}</s-text>
           <s-text>Parsed max chars: {parsedMax === null ? 'none' : parsedMax}</s-text>
@@ -2470,7 +2470,7 @@ function Modal() {
     var variantId = selectedVariant ? selectedVariant.id : '';
     return (
       <s-section heading="Cart debug">
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.84;">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.72;">
           <s-stack direction="block" gap="micro">
           <s-text>Selected product: {selectedProduct ? selectedProduct.title : ''}</s-text>
           <s-text>Selected variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
@@ -2531,7 +2531,7 @@ function Modal() {
   function renderProductDebug() {
     return (
       <s-section heading="Product debug">
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.84;">
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.72;">
           <s-stack direction="block" gap="micro">
           <s-text>Selected club: {selectedClub ? selectedClub.name : ''}</s-text>
           <s-text>Selected subsection: {selectedSubsection ? selectedSubsection.label : ''}</s-text>
@@ -2548,10 +2548,10 @@ function Modal() {
     var showBack = screen !== 'clubs';
     return (
       <s-section>
-        <s-stack direction="block" gap="small">
+        <s-stack direction="block" gap="base">
           <s-stack direction="inline" gap="small" alignment="center">
             {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
-            <div style="font-size: 17px; font-weight: 700; line-height: 1.3;"><s-text>{title}</s-text></div>
+            <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{title}</s-text></div>
           </s-stack>
           <s-text appearance="subdued">{subtitle}</s-text>
         </s-stack>
@@ -2560,7 +2560,7 @@ function Modal() {
   }
 
   function renderImageThumb(imageUrl, altText, height) {
-    var boxHeight = height || '88px';
+    var boxHeight = height || '120px';
     if (imageUrl && toStr(imageUrl) !== '') {
       return (
         <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; overflow: hidden; background: #f8fafc; border: 1px solid #e2e8f0;'}>
@@ -2569,8 +2569,8 @@ function Modal() {
       );
     }
     return (
-      <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%); border: 1px dashed #cbd5e1; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 12px; font-weight: 600;'}>
-        Image unavailable
+      <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px; background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%); border: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 12px; font-weight: 600; letter-spacing: 0.2px;'}>
+        No image available
       </div>
     );
   }
@@ -2581,22 +2581,19 @@ function Modal() {
         type="button"
         key={item.key}
         onClick={item.onPress}
-        style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 10px; box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04); text-align: left;"
+        style="width: 100%; border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 12px; box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04); text-align: left; cursor: pointer;"
       >
-        <s-stack direction="block" gap="small">
+        <s-stack direction="block" gap="base">
           {renderImageThumb(item.imageUrl, item.title, item.thumbHeight)}
           <div style="padding: 2px 2px 0 2px;">
-            <div style="font-size: 15px; font-weight: 700; line-height: 1.35; margin-bottom: 4px;">
+            <div style="font-size: 16px; font-weight: 700; line-height: 1.35; margin-bottom: 6px;">
               <s-text>{item.title}</s-text>
             </div>
             {item.subtitle ? (
-              <div style="line-height: 1.35;">
+              <div style="line-height: 1.4; font-size: 13px; color: #64748b;">
                 <s-text appearance="subdued">{item.subtitle}</s-text>
               </div>
             ) : null}
-          </div>
-          <div style="padding-top: 2px;">
-            <s-button variant="secondary" onClick={item.onPress}>Open</s-button>
           </div>
         </s-stack>
       </button>
@@ -2609,7 +2606,7 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro('Clubs', 'Select a club to begin.')}
           <s-section heading="Club list">
-            <s-stack direction="block" gap="small">
+            <s-stack direction="block" gap="base">
               <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
               {clubs.map(function (club) {
                 return renderTapCard({
@@ -2638,7 +2635,7 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro(selectedClub.name, 'Choose a subsection.')}
           <s-section heading="Subsections">
-            <s-stack direction="block" gap="small">
+            <s-stack direction="block" gap="base">
               {selectedClub.subsections.map(function (sub) {
                 return renderTapCard({
                   key: sub.label,
@@ -2672,12 +2669,12 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro(heading, 'Tap a product to view details.')}
           <s-section heading="Products">
-            <s-stack direction="block" gap="small">
+            <s-stack direction="block" gap="base">
               {productListLoading ? (
                 <s-stack direction="block" gap="small">
                   <s-text appearance="subdued">Loading products…</s-text>
-                  <div style="height: 90px; border-radius: 12px; background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);" />
-                  <div style="height: 90px; border-radius: 12px; background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);" />
+                  <div style="height: 120px; border-radius: 12px; background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);" />
+                  <div style="height: 120px; border-radius: 12px; background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);" />
                 </s-stack>
               ) : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
@@ -2726,10 +2723,7 @@ function Modal() {
           var active = selectedVariant && selectedVariant.id === variant.id;
           return (
             <s-button key={variant.id} variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
-              <s-stack direction="block" gap="micro">
-                <s-text>{variant.title}</s-text>
-                <s-text appearance="subdued">{active ? 'Selected' : 'Tap to select'}</s-text>
-              </s-stack>
+              <s-text>{variant.title}</s-text>
             </s-button>
           );
         })}
@@ -2748,43 +2742,39 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          <s-section heading="Product detail">
+          <s-section>
             <s-stack direction="block" gap="base">
-              <div style="border: 1px solid #dbe3ee; border-radius: 14px; background: #ffffff; padding: 10px;">
-                <s-stack direction="block" gap="small">
-                  {renderImageThumb(selectedProduct.imageUrl, selectedProduct.title, '150px')}
-                  <div style="font-size: 16px; font-weight: 700; line-height: 1.35;"><s-text>{selectedProduct.title}</s-text></div>
-                  {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
-                    <s-text appearance="subdued">Ready for standard product add to cart.</s-text>
-                  ) : <s-text appearance="subdued">Bundle workflow available for this product.</s-text>}
-                </s-stack>
-              </div>
-              <s-section heading="Select variant">
-                <s-stack direction="block" gap="small">
-                  <s-text appearance="subdued">Choose one variant to continue.</s-text>
-                  {renderVariants(selectedProduct)}
-                </s-stack>
-              </s-section>
-              {renderBundleNote(selectedProduct)}
-              <s-section heading="Actions">
-                <s-stack direction="block" gap="small">
-                  {showAddToCart ? (
-                    <s-button
-                      variant="primary"
-                      onClick={function () {
-                        setLastEnteredPersonalisation(false);
-                        addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
-                      }}
-                    >
-                      Add to cart
-                    </s-button>
-                  ) : (!isBundleProduct ? (
-                    <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
-                      Continue to personalisation
-                    </s-button>
-                  ) : null)}
-                </s-stack>
-              </s-section>
+              {renderImageThumb(selectedProduct.imageUrl, selectedProduct.title, '190px')}
+              <div style="font-size: 20px; font-weight: 700; line-height: 1.3;"><s-text>{selectedProduct.title}</s-text></div>
+              {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
+                <s-text appearance="subdued">Ready for standard product add to cart.</s-text>
+              ) : <s-text appearance="subdued">Bundle workflow available for this product.</s-text>}
+            </s-stack>
+          </s-section>
+          <s-section heading="Variant">
+            <s-stack direction="block" gap="small">
+              <s-text appearance="subdued">Choose one variant to continue.</s-text>
+              {renderVariants(selectedProduct)}
+            </s-stack>
+          </s-section>
+          {renderBundleNote(selectedProduct)}
+          <s-section heading="Actions">
+            <s-stack direction="block" gap="small">
+              {showAddToCart ? (
+                <s-button
+                  variant="primary"
+                  onClick={function () {
+                    setLastEnteredPersonalisation(false);
+                    addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
+                  }}
+                >
+                  Add to cart
+                </s-button>
+              ) : (!isBundleProduct ? (
+                <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
+                  Continue to personalisation
+                </s-button>
+              ) : null)}
             </s-stack>
           </s-section>
           {renderPersonalisationDebug(selectedProduct)}
@@ -2819,8 +2809,7 @@ function Modal() {
                 return (
                   <s-section key={component.key} heading={component.title}>
                     <s-stack direction="block" gap="small">
-                      <s-text appearance="subdued">Select one variant</s-text>
-                      <s-text>{chosen ? ('Selected: ' + chosen.title) : 'Nothing selected yet'}</s-text>
+                      <s-text appearance="subdued">{chosen ? ('Selected: ' + chosen.title) : 'Choose one variant'}</s-text>
                       {component.variants && component.variants.length > 0 ? (
                         <s-stack direction="inline" wrap="true" gap="small">
                           {component.variants.map(function (variant) {
