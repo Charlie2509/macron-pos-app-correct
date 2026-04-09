@@ -1010,7 +1010,6 @@ async function fetchBundleComponentsByReferences(componentRefs) {
   }
   return result;
 }
-var productFetchPromises = {};
 // ---------------- UI ----------------
 export default async function () {
   render(<Modal />, document.body);
@@ -1324,59 +1323,6 @@ function Modal() {
   var showDebug = showDebugState[0];
   var setShowDebug = showDebugState[1];
 
-  async function fetchCollectionProductsWithCache(collectionId) {
-    if (!collectionId) {
-      return [];
-    }
-    if (productsCache[collectionId] && Array.isArray(productsCache[collectionId])) {
-      return productsCache[collectionId];
-    }
-    if (productFetchPromises[collectionId]) {
-      return productFetchPromises[collectionId];
-    }
-    productFetchPromises[collectionId] = fetchProductsForCollection(collectionId)
-      .then(function (products) {
-        delete productFetchPromises[collectionId];
-        return products;
-      })
-      .catch(function (err) {
-        delete productFetchPromises[collectionId];
-        throw err;
-      });
-    return productFetchPromises[collectionId];
-  }
-
-  function mergeProductsCache(collectionId, products) {
-    setProductsCache(function (prev) {
-      var current = prev || {};
-      if (current[collectionId] && Array.isArray(current[collectionId])) {
-        return current;
-      }
-      var next = {};
-      var cacheKeys = Object.keys(current);
-      for (var i = 0; i < cacheKeys.length; i += 1) {
-        next[cacheKeys[i]] = current[cacheKeys[i]];
-      }
-      next[collectionId] = products;
-      return next;
-    });
-  }
-
-  async function warmProductsForCollection(collectionId) {
-    if (!collectionId) {
-      return;
-    }
-    if (productsCache[collectionId] && Array.isArray(productsCache[collectionId])) {
-      return;
-    }
-    try {
-      var warmedProducts = await fetchCollectionProductsWithCache(collectionId);
-      mergeProductsCache(collectionId, warmedProducts);
-    } catch (err) {
-      // silent warm failure
-    }
-  }
-
   async function loadProductsForCollection(collectionId) {
     if (!collectionId) {
       return;
@@ -1391,9 +1337,15 @@ function Modal() {
     setCurrentProducts(currentProductsCollectionId === collectionId ? currentProducts : []);
     setCurrentProductsCollectionId(collectionId);
     try {
-      var products = await fetchCollectionProductsWithCache(collectionId);
+      var products = await fetchProductsForCollection(collectionId);
       setCurrentProducts(products);
-      mergeProductsCache(collectionId, products);
+      var nextCache = {};
+      var cacheKeys = Object.keys(productsCache);
+      for (var k = 0; k < cacheKeys.length; k += 1) {
+        nextCache[cacheKeys[k]] = productsCache[cacheKeys[k]];
+      }
+      nextCache[collectionId] = products;
+      setProductsCache(nextCache);
     } catch (err) {
       setErrorMessage(err && err.message ? err.message : String(err));
       setCurrentProducts([]);
@@ -1822,13 +1774,6 @@ function Modal() {
     resetBundleBuilderState();
     if (club.type === 'subsections') {
       setScreen('subsections');
-      if (dataSource === 'Live data' && club.subsections && Array.isArray(club.subsections)) {
-        for (var s = 0; s < club.subsections.length && s < 6; s += 1) {
-          if (club.subsections[s] && club.subsections[s].collectionId) {
-            warmProductsForCollection(club.subsections[s].collectionId);
-          }
-        }
-      }
       return;
     }
     if (dataSource === 'Mock data') {
@@ -1844,9 +1789,6 @@ function Modal() {
     } else {
       setCurrentProducts([]);
       setProductListLoading(true);
-      if (club.collectionId) {
-        warmProductsForCollection(club.collectionId);
-      }
     }
     setCurrentProductsCollectionId(club.collectionId ? club.collectionId : club.name);
     setScreen('products');
@@ -2430,6 +2372,9 @@ function Modal() {
   }
 
   function renderDiagnosticsToggle() {
+    if (screen === 'clubs' || screen === 'subsections' || screen === 'products') {
+      return null;
+    }
     return (
       <s-section>
         <s-stack direction="inline" gap="small" alignment="center">
@@ -2640,24 +2585,53 @@ function Modal() {
     );
   }
 
-  function renderImageOrFallback(imageUrl, altText, height, fitMode) {
-    var boxHeight = height || '96px';
+  function renderImageOrFallback(imageUrl, altText, height, fitMode, fallbackText) {
+    var boxHeight = height || '88px';
     var objectFit = fitMode || 'contain';
-    var wrapperStyle = 'width: 100%; height: ' + boxHeight + '; overflow: hidden; border-bottom: 1px solid #e5e7eb; background: #f8fafc;';
+    var fallback = fallbackText || 'Macron Club Collection';
     if (imageUrl && toStr(imageUrl) !== '') {
       return (
-        <div style={wrapperStyle}>
-          <img
-            src={imageUrl}
-            alt={altText}
-            style={'width: 100%; height: 100%; display: block; object-fit: ' + objectFit + '; object-position: center;'}
-          />
+        <div style={'width: 100%; height: ' + boxHeight + '; border-bottom: 1px solid #e5eaf1; background: #f8fafc; overflow: hidden; display: flex; align-items: center; justify-content: center;'}>
+          <img src={imageUrl} alt={altText} loading="lazy" style={'max-width: 100%; width: 100%; height: 100%; display: block; object-fit: ' + objectFit + '; object-position: center;'} />
         </div>
       );
     }
     return (
-      <div style={wrapperStyle + ' display: flex; align-items: center; justify-content: center; padding: 10px; color: #667085; font-size: 12px; text-align: center;'}>
-        Macron Club Collection
+      <div style={'width: 100%; height: ' + boxHeight + '; border-bottom: 1px solid #e5eaf1; background: linear-gradient(165deg, #fbfcfe 0%, #f2f5fa 60%, #edf2f8 100%); overflow: hidden; display: flex; align-items: center; justify-content: center; text-align: center; color: #667085; font-size: 12px; padding: 10px;'}>
+        {fallback}
+      </div>
+    );
+  }
+
+  function renderCollectionTile(item, subtitle, onPress) {
+    var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
+    return (
+      <div
+        key={'collection-' + title}
+        onClick={onPress}
+        style="background: #ffffff; border: 1px solid #d7dfeb; border-radius: 16px; overflow: hidden; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05); cursor: pointer; min-height: 180px;"
+      >
+        {renderImageOrFallback(item ? item.imageUrl : '', title, '78px', 'contain', 'Macron Club Collection')}
+        <div style="padding: 12px 12px 14px 12px; text-align: center;">
+          <div style="font-size: 15px; font-weight: 700; line-height: 1.35; color: #111827; margin-bottom: 6px;">{title}</div>
+          {subtitle ? <div style="font-size: 12px; color: #6b7280; line-height: 1.3;">{subtitle}</div> : null}
+        </div>
+      </div>
+    );
+  }
+
+  function renderProductTile(product, onPress) {
+    return (
+      <div
+        key={'product-' + product.id}
+        onClick={onPress}
+        style="background: #ffffff; border: 1px solid #d7dfeb; border-radius: 16px; overflow: hidden; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05); cursor: pointer; min-height: 214px;"
+      >
+        {renderImageOrFallback(product.imageUrl, product.title, '96px', 'contain', 'Macron product')}
+        <div style="padding: 12px 12px 14px 12px; text-align: left;">
+          <div style="font-size: 14px; font-weight: 700; line-height: 1.38; color: #111827; margin-bottom: 8px;">{product.title}</div>
+          <div style="font-size: 12px; color: #6b7280; line-height: 1.3;">Tap to view options</div>
+        </div>
       </div>
     );
   }
@@ -2667,8 +2641,8 @@ function Modal() {
     var items = [];
     for (var i = 0; i < count; i += 1) {
       items.push(
-        <div key={'loading-' + String(i)} style="background: #ffffff; border: 1px solid #d8e0ea; border-radius: 16px; overflow: hidden; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.06);">
-          <div style="height: 92px; background: linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%);"></div>
+        <div key={'loading-' + String(i)} style="background: #ffffff; border: 1px solid #d7dfeb; border-radius: 16px; overflow: hidden; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);">
+          <div style="height: 96px; background: linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%);"></div>
           <div style="padding: 12px;">
             <div style="height: 14px; border-radius: 7px; background: #eef2f6; margin-bottom: 8px;"></div>
             <div style="height: 12px; width: 55%; border-radius: 6px; background: #f3f5f8;"></div>
@@ -2676,44 +2650,7 @@ function Modal() {
         </div>
       );
     }
-    return (
-      <div style={'display: grid; grid-template-columns: ' + template + '; gap: 16px; align-items: start;'}>
-        {items}
-      </div>
-    );
-  }
-
-  function renderCollectionTile(item, subtitle, onPress, columns) {
-    var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-    return (
-      <div
-        key={'collection-' + title}
-        onClick={onPress}
-        style="background: #ffffff; border: 1px solid #d5deea; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06); cursor: pointer; min-height: 186px;"
-      >
-        {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
-        <div style="padding: 12px 12px 14px 12px; text-align: center;">
-          <div style="font-size: 15px; font-weight: 700; line-height: 1.35; color: #111827; margin-bottom: 6px;">{title}</div>
-          {subtitle ? <div style="font-size: 12px; color: #6b7280; line-height: 1.3;">{subtitle}</div> : null}
-        </div>
-      </div>
-    );
-  }
-
-  function renderProductTile(product, onPress, columns) {
-    return (
-      <div
-        key={'product-' + product.id}
-        onClick={onPress}
-        style="background: #ffffff; border: 1px solid #d5deea; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06); cursor: pointer; min-height: 230px;"
-      >
-        {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
-        <div style="padding: 12px 12px 14px 12px;">
-          <div style="font-size: 14px; font-weight: 700; line-height: 1.35; color: #111827; margin-bottom: 8px;">{product.title}</div>
-          <div style="font-size: 12px; color: #6b7280; line-height: 1.3;">Tap to view options</div>
-        </div>
-      </div>
-    );
+    return <div style={'display: grid; grid-template-columns: ' + template + '; gap: 16px; align-items: start;'}>{items}</div>;
   }
 
   function renderGrid(items, renderItem, columns) {
@@ -2725,7 +2662,7 @@ function Modal() {
     return (
       <div style={'display: grid; grid-template-columns: ' + template + '; gap: 16px; align-items: start;'}>
         {list.map(function (item) {
-          return renderItem(item, columns);
+          return renderItem(item);
         })}
       </div>
     );
@@ -2743,14 +2680,11 @@ function Modal() {
                 return renderCollectionTile(
                   club,
                   club.type === 'subsections' ? 'Sections' : 'Products',
-                  function () { handleClubPress(club); },
-                  4
+                  function () { handleClubPress(club); }
                 );
               }, 4)}
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
-          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2770,14 +2704,11 @@ function Modal() {
                 return renderCollectionTile(
                   subsection,
                   'Shop products',
-                  function () { handleSubsectionPress(subsection); },
-                  4
+                  function () { handleSubsectionPress(subsection); }
                 );
               }, 4)}
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
-          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2802,13 +2733,10 @@ function Modal() {
               {productListLoading ? renderLoadingGrid(3, 6) : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
               {!productListLoading ? renderGrid(products, function (product) {
-                return renderProductTile(product, function () { handleProductPress(product); }, 3);
+                return renderProductTile(product, function () { handleProductPress(product); });
               }, 3) : null}
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
-          {showDebug ? renderProductDebug() : null}
-          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2835,15 +2763,13 @@ function Modal() {
       return null;
     }
     return (
-      <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+      <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start;">
         {product.variants.map(function (variant) {
           var active = selectedVariant && selectedVariant.id === variant.id;
           return (
-            <div key={variant.id} style="min-width: 104px; flex: 0 0 auto;">
-              <s-button variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
-                {variant.title}
-              </s-button>
-            </div>
+            <s-button key={variant.id} variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
+              {variant.title}
+            </s-button>
           );
         })}
       </div>
