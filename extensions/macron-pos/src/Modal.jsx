@@ -2373,19 +2373,21 @@ function Modal() {
 
   function renderDiagnosticsToggle() {
     return (
-      <s-section>
-        <s-stack direction="inline" gap="small" alignment="center">
-          <s-button
-            variant="secondary"
-            onClick={function () {
-              setShowDebug(!showDebug);
-            }}
-          >
-            {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
-          </s-button>
-          {!showDebug && errorMessage ? <s-text size="small" appearance="critical">Diagnostics hidden · active warning</s-text> : null}
-        </s-stack>
-      </s-section>
+      <div style="margin-top: 28px;">
+        <s-section>
+          <s-stack direction="inline" gap="small" alignment="center">
+            <s-button
+              variant="secondary"
+              onClick={function () {
+                setShowDebug(!showDebug);
+              }}
+            >
+              {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
+            </s-button>
+            {!showDebug && errorMessage ? <s-text size="small" appearance="critical">Diagnostics hidden · active warning</s-text> : null}
+          </s-stack>
+        </s-section>
+      </div>
     );
   }
 
@@ -2615,8 +2617,9 @@ function Modal() {
 
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
+    var width = tileWidth(columns);
     return (
-      <s-box key={'collection-' + title} inlineSize="100%" minInlineSize="0" padding="none">
+      <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
           <s-box padding="small" border="base" cornerRadius="large-100">
             <s-stack direction="block" gap="small">
@@ -2634,8 +2637,9 @@ function Modal() {
   }
 
   function renderProductTile(product, onPress, columns) {
+    var width = tileWidth(columns);
     return (
-      <s-box key={'product-' + product.id} inlineSize="100%" minInlineSize="0" padding="none">
+      <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
           <s-box padding="small" border="base" cornerRadius="large-100">
             <s-stack direction="block" gap="small">
@@ -2657,13 +2661,12 @@ function Modal() {
     if (list.length === 0) {
       return null;
     }
-    var gridTemplate = columns === 4 ? 'repeat(4, minmax(0, 1fr))' : (columns === 3 ? 'repeat(3, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))');
     return (
-      <div style={'display:grid; grid-template-columns:' + gridTemplate + '; gap:12px; width:100%;'}>
+      <s-stack direction="inline" gap="small" wrap="true" alignItems="start">
         {list.map(function (item) {
           return renderItem(item, columns);
         })}
-      </div>
+      </s-stack>
     );
   }
 
@@ -2797,7 +2800,7 @@ function Modal() {
         <ScreenScroll>
           <s-section>
             <s-stack direction="block" gap="base">
-              {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '196px')}
+              {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '168px')}
               <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
                 <s-text appearance="subdued">Select size to continue.</s-text>
@@ -2828,7 +2831,7 @@ function Modal() {
               ) : null)}
             </s-stack>
           </s-section>
-          <s-box paddingBlockStart="base">{renderDiagnosticsToggle()}</s-box>
+          {renderDiagnosticsToggle()}
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderBundleDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
