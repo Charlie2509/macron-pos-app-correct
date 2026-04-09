@@ -542,7 +542,20 @@ function mapVariants(variantEdges) {
     for (var i = 0; i < variantEdges.length; i += 1) {
       var edge = variantEdges[i];
       if (edge && edge.node) {
-        list.push({id: edge.node.id, title: edge.node.title});
+        var selectedOptions = [];
+        var optionMap = {};
+        if (edge.node.selectedOptions && Array.isArray(edge.node.selectedOptions)) {
+          for (var s = 0; s < edge.node.selectedOptions.length; s += 1) {
+            var optionNode = edge.node.selectedOptions[s];
+            var optionName = toStr(optionNode && optionNode.name ? optionNode.name : '');
+            var optionValue = toStr(optionNode && optionNode.value ? optionNode.value : '');
+            if (optionName !== '') {
+              selectedOptions.push({name: optionName, value: optionValue});
+              optionMap[optionName] = optionValue;
+            }
+          }
+        }
+        list.push({id: edge.node.id, title: edge.node.title, selectedOptions: selectedOptions, optionMap: optionMap});
       }
     }
   }
@@ -828,7 +841,14 @@ async function fetchProductsForCollection(collectionId) {
             }
             variants(first: 20) {
               edges {
-                node { id title }
+                node {
+                  id
+                  title
+                  selectedOptions {
+                    name
+                    value
+                  }
+                }
               }
             }
             enablePersonalisation: metafield(namespace: "custom", key: "enable_personalisation") { value }
@@ -1010,6 +1030,23 @@ async function fetchBundleComponentsByReferences(componentRefs) {
   }
   return result;
 }
+var collectionProductsRequestCache = {};
+
+async function getCollectionProductsCached(collectionId) {
+  if (!collectionId) {
+    return [];
+  }
+  if (!collectionProductsRequestCache[collectionId]) {
+    collectionProductsRequestCache[collectionId] = fetchProductsForCollection(collectionId).then(function (products) {
+      return products || [];
+    }).catch(function (err) {
+      delete collectionProductsRequestCache[collectionId];
+      throw err;
+    });
+  }
+  return collectionProductsRequestCache[collectionId];
+}
+
 // ---------------- UI ----------------
 export default async function () {
   render(<Modal />, document.body);
@@ -1259,6 +1296,10 @@ function Modal() {
   var selectedVariant = variantState[0];
   var setSelectedVariant = variantState[1];
 
+  var selectedOptionValuesState = useState({});
+  var selectedOptionValues = selectedOptionValuesState[0];
+  var setSelectedOptionValues = selectedOptionValuesState[1];
+
   var primaryState = useState('');
   var primaryFieldValue = primaryState[0];
   var setPrimaryFieldValue = primaryState[1];
@@ -1337,21 +1378,63 @@ function Modal() {
     setCurrentProducts(currentProductsCollectionId === collectionId ? currentProducts : []);
     setCurrentProductsCollectionId(collectionId);
     try {
-      var products = await fetchProductsForCollection(collectionId);
+      var products = await getCollectionProductsCached(collectionId);
       setCurrentProducts(products);
-      var nextCache = {};
-      var cacheKeys = Object.keys(productsCache);
-      for (var k = 0; k < cacheKeys.length; k += 1) {
-        nextCache[cacheKeys[k]] = productsCache[cacheKeys[k]];
-      }
-      nextCache[collectionId] = products;
-      setProductsCache(nextCache);
+      setProductsCache(function (previousCache) {
+        var nextCache = {};
+        var previousKeys = Object.keys(previousCache || {});
+        for (var k = 0; k < previousKeys.length; k += 1) {
+          nextCache[previousKeys[k]] = previousCache[previousKeys[k]];
+        }
+        nextCache[collectionId] = products;
+        return nextCache;
+      });
     } catch (err) {
       setErrorMessage(err && err.message ? err.message : String(err));
       setCurrentProducts([]);
     }
     setProductListLoading(false);
   }
+
+
+  useEffect(function () {
+    if (dataSource !== 'Live data') {
+      return;
+    }
+    if (screen !== 'subsections') {
+      return;
+    }
+    if (!selectedClub || !selectedClub.subsections || !Array.isArray(selectedClub.subsections)) {
+      return;
+    }
+    function warmSubsectionCollection(subsectionCollectionId) {
+      if (!subsectionCollectionId) {
+        return;
+      }
+      if (productsCache[subsectionCollectionId] && Array.isArray(productsCache[subsectionCollectionId])) {
+        return;
+      }
+      getCollectionProductsCached(subsectionCollectionId).then(function (products) {
+        setProductsCache(function (previousCache) {
+          var nextCache = {};
+          var previousKeys = Object.keys(previousCache || {});
+          for (var p = 0; p < previousKeys.length; p += 1) {
+            nextCache[previousKeys[p]] = previousCache[previousKeys[p]];
+          }
+          if (!nextCache[subsectionCollectionId]) {
+            nextCache[subsectionCollectionId] = products;
+          }
+          return nextCache;
+        });
+      }).catch(function () {
+        return null;
+      });
+    }
+    for (var i = 0; i < selectedClub.subsections.length; i += 1) {
+      var subsection = selectedClub.subsections[i];
+      warmSubsectionCollection(subsection && subsection.collectionId ? subsection.collectionId : null);
+    }
+  }, [dataSource, screen, selectedClub, productsCache]);
 
   useEffect(function () {
     var cancelled = false;
@@ -1481,6 +1564,7 @@ function Modal() {
     setSelectedSubsection(null);
     setSelectedProduct(null);
     setSelectedVariant(null);
+    setSelectedOptionValues({});
     setPrimaryFieldValue('');
     setExtraField1Value('');
     setExtraField2Value('');
@@ -1771,6 +1855,7 @@ function Modal() {
     setSelectedSubsection(null);
     setSelectedProduct(null);
     setSelectedVariant(null);
+    setSelectedOptionValues({});
     resetBundleBuilderState();
     if (club.type === 'subsections') {
       setScreen('subsections');
@@ -1799,6 +1884,7 @@ function Modal() {
     setSelectedSubsection(subsection);
     setSelectedProduct(null);
     setSelectedVariant(null);
+    setSelectedOptionValues({});
     resetBundleBuilderState();
     if (dataSource === 'Mock data') {
       setProductListLoading(false);
@@ -1822,12 +1908,21 @@ function Modal() {
   function handleProductPress(product) {
     setSelectedProduct(product);
     setSelectedVariant(null);
+    setSelectedOptionValues({});
     resetBundleBuilderState();
     setScreen('productDetail');
   }
 
   function handleVariantSelect(variant) {
     setSelectedVariant(variant);
+    if (variant && variant.optionMap) {
+      var nextOptionValues = {};
+      var optionKeys = Object.keys(variant.optionMap);
+      for (var i = 0; i < optionKeys.length; i += 1) {
+        nextOptionValues[optionKeys[i]] = variant.optionMap[optionKeys[i]];
+      }
+      setSelectedOptionValues(nextOptionValues);
+    }
   }
 
   function toast(msg) {
@@ -2306,6 +2401,7 @@ function Modal() {
     if (screen === 'productDetail') {
       setSelectedProduct(null);
       setSelectedVariant(null);
+      setSelectedOptionValues({});
       setPrimaryFieldValue('');
       setExtraField1Value('');
       setExtraField2Value('');
@@ -2316,6 +2412,7 @@ function Modal() {
     if (screen === 'products') {
       setSelectedProduct(null);
       setSelectedVariant(null);
+      setSelectedOptionValues({});
       if (selectedClub && selectedClub.type === 'subsections') {
         setScreen('subsections');
         return;
@@ -2372,9 +2469,6 @@ function Modal() {
   }
 
   function renderDiagnosticsToggle() {
-    if (screen === 'clubs' || screen === 'subsections' || screen === 'products') {
-      return null;
-    }
     return (
       <s-section>
         <s-stack direction="inline" gap="small" alignment="center">
@@ -2585,72 +2679,247 @@ function Modal() {
     );
   }
 
-  function renderImageOrFallback(imageUrl, altText, height, fitMode, fallbackText) {
-    var boxHeight = height || '88px';
-    var objectFit = fitMode || 'contain';
-    var fallback = fallbackText || 'Macron Club Collection';
-    if (imageUrl && toStr(imageUrl) !== '') {
-      return (
-        <div style={'width: 100%; height: ' + boxHeight + '; border-bottom: 1px solid #e5eaf1; background: #f8fafc; overflow: hidden; display: flex; align-items: center; justify-content: center;'}>
-          <img src={imageUrl} alt={altText} loading="lazy" style={'max-width: 100%; width: 100%; height: 100%; display: block; object-fit: ' + objectFit + '; object-position: center;'} />
-        </div>
-      );
+
+  function productTileColumns() {
+    return 3;
+  }
+
+  function productCardMinHeight() {
+    return '260px';
+  }
+
+  function deriveVariantOptionNames(product) {
+    var variants = product && product.variants ? product.variants : [];
+    var optionNames = [];
+    for (var i = 0; i < variants.length; i += 1) {
+      var selectedOptions = variants[i] && variants[i].selectedOptions ? variants[i].selectedOptions : [];
+      for (var s = 0; s < selectedOptions.length; s += 1) {
+        var optionName = toStr(selectedOptions[s] && selectedOptions[s].name ? selectedOptions[s].name : '');
+        if (optionName === '' || optionName === 'Title') {
+          continue;
+        }
+        if (optionNames.indexOf(optionName) === -1) {
+          optionNames.push(optionName);
+        }
+      }
     }
+    return optionNames;
+  }
+
+  function productUsesSeparateOptions(product) {
+    if (!product || !product.variants || !Array.isArray(product.variants)) {
+      return false;
+    }
+    if (product.bundleMeta && product.bundleMeta.isBundle) {
+      return false;
+    }
+    return deriveVariantOptionNames(product).length > 1;
+  }
+
+  function getCurrentVariantOptionSelections(product) {
+    var currentSelections = {};
+    if (selectedVariant && selectedVariant.optionMap) {
+      var selectedKeys = Object.keys(selectedVariant.optionMap);
+      for (var i = 0; i < selectedKeys.length; i += 1) {
+        currentSelections[selectedKeys[i]] = selectedVariant.optionMap[selectedKeys[i]];
+      }
+    }
+    var stateKeys = Object.keys(selectedOptionValues || {});
+    for (var s = 0; s < stateKeys.length; s += 1) {
+      currentSelections[stateKeys[s]] = selectedOptionValues[stateKeys[s]];
+    }
+    return currentSelections;
+  }
+
+  function getOptionValuesForProduct(product, optionName) {
+    var values = [];
+    var variants = product && product.variants ? product.variants : [];
+    for (var i = 0; i < variants.length; i += 1) {
+      var optionMap = variants[i] && variants[i].optionMap ? variants[i].optionMap : {};
+      var value = toStr(optionMap[optionName]);
+      if (value !== '' && values.indexOf(value) === -1) {
+        values.push(value);
+      }
+    }
+    return values;
+  }
+
+  function optionValueIsAvailable(product, optionName, optionValue, currentSelections) {
+    var variants = product && product.variants ? product.variants : [];
+    for (var i = 0; i < variants.length; i += 1) {
+      var optionMap = variants[i] && variants[i].optionMap ? variants[i].optionMap : {};
+      if (toStr(optionMap[optionName]) !== toStr(optionValue)) {
+        continue;
+      }
+      var matchesOtherSelections = true;
+      var selectionKeys = Object.keys(currentSelections || {});
+      for (var s = 0; s < selectionKeys.length; s += 1) {
+        var selectionKey = selectionKeys[s];
+        if (selectionKey === optionName) {
+          continue;
+        }
+        var selectionValue = toStr(currentSelections[selectionKey]);
+        if (selectionValue !== '' && toStr(optionMap[selectionKey]) !== selectionValue) {
+          matchesOtherSelections = false;
+          break;
+        }
+      }
+      if (matchesOtherSelections) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function handleVariantOptionValueSelect(product, optionName, optionValue) {
+    var nextSelections = {};
+    var existingKeys = Object.keys(selectedOptionValues || {});
+    for (var i = 0; i < existingKeys.length; i += 1) {
+      nextSelections[existingKeys[i]] = selectedOptionValues[existingKeys[i]];
+    }
+    nextSelections[optionName] = optionValue;
+    setSelectedOptionValues(nextSelections);
+
+    var optionNames = deriveVariantOptionNames(product);
+    var variants = product && product.variants ? product.variants : [];
+    var matches = [];
+    for (var v = 0; v < variants.length; v += 1) {
+      var optionMap = variants[v] && variants[v].optionMap ? variants[v].optionMap : {};
+      var isMatch = true;
+      for (var s = 0; s < optionNames.length; s += 1) {
+        var currentOptionName = optionNames[s];
+        var chosenValue = toStr(nextSelections[currentOptionName]);
+        if (chosenValue !== '' && toStr(optionMap[currentOptionName]) !== chosenValue) {
+          isMatch = false;
+          break;
+        }
+      }
+      if (isMatch) {
+        matches.push(variants[v]);
+      }
+    }
+
+    var allChosen = true;
+    for (var o = 0; o < optionNames.length; o += 1) {
+      if (toStr(nextSelections[optionNames[o]]) === '') {
+        allChosen = false;
+        break;
+      }
+    }
+
+    if (allChosen && matches.length === 1) {
+      setSelectedVariant(matches[0]);
+      return;
+    }
+    if (selectedVariant) {
+      var selectedStillMatches = false;
+      for (var m = 0; m < matches.length; m += 1) {
+        if (matches[m].id === selectedVariant.id) {
+          selectedStillMatches = true;
+          break;
+        }
+      }
+      if (!selectedStillMatches) {
+        setSelectedVariant(null);
+      }
+    }
+  }
+
+  function renderVariantSelectors(product) {
+    if (!product || !product.variants) {
+      return null;
+    }
+    if (!productUsesSeparateOptions(product)) {
+      return renderVariants(product);
+    }
+    var optionNames = deriveVariantOptionNames(product);
+    var currentSelections = getCurrentVariantOptionSelections(product);
     return (
-      <div style={'width: 100%; height: ' + boxHeight + '; border-bottom: 1px solid #e5eaf1; background: linear-gradient(165deg, #fbfcfe 0%, #f2f5fa 60%, #edf2f8 100%); overflow: hidden; display: flex; align-items: center; justify-content: center; text-align: center; color: #667085; font-size: 12px; padding: 10px;'}>
-        {fallback}
+      <s-stack direction="block" gap="base">
+        {optionNames.map(function (optionName) {
+          var values = getOptionValuesForProduct(product, optionName);
+          return (
+            <s-stack key={optionName} direction="block" gap="small">
+              <s-text>{optionName}</s-text>
+              <s-stack direction="inline" wrap="true" gap="small">
+                {values.map(function (value) {
+                  var active = toStr(currentSelections[optionName]) === toStr(value);
+                  var available = optionValueIsAvailable(product, optionName, value, currentSelections);
+                  return (
+                    <s-button
+                      key={optionName + '-' + value}
+                      variant={active ? 'primary' : 'secondary'}
+                      disabled={!available}
+                      onClick={function () { handleVariantOptionValueSelect(product, optionName, value); }}
+                    >
+                      {value}
+                    </s-button>
+                  );
+                })}
+              </s-stack>
+            </s-stack>
+          );
+        })}
+      </s-stack>
+    );
+  }
+
+  function renderImageOrFallback(imageUrl, altText, height, fitMode) {
+    var boxHeight = height || '96px';
+    var objectFit = fitMode || 'contain';
+    var wrapperStyle = 'height:' + boxHeight + '; width:100%; overflow:hidden; border-radius:14px 14px 0 0; background:#f8fafc; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:center;';
+    var imageStyle = 'width:100%; height:100%; display:block; object-fit:' + objectFit + '; object-position:center; background:#f8fafc;';
+    return (
+      <div style={wrapperStyle}>
+        {imageUrl && toStr(imageUrl) !== '' ? (
+          <img src={imageUrl} alt={altText || ''} style={imageStyle} />
+        ) : null}
       </div>
     );
   }
 
-  function renderCollectionTile(item, subtitle, onPress) {
+  function tileWidth(columns) {
+    if (columns === 4) {
+      return '24%';
+    }
+    if (columns === 3) {
+      return '32%';
+    }
+    if (columns === 2) {
+      return '49%';
+    }
+    return '100%';
+  }
+
+  function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
     return (
-      <div
-        key={'collection-' + title}
-        onClick={onPress}
-        style="background: #ffffff; border: 1px solid #d7dfeb; border-radius: 16px; overflow: hidden; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05); cursor: pointer; min-height: 180px;"
-      >
-        {renderImageOrFallback(item ? item.imageUrl : '', title, '78px', 'contain', 'Macron Club Collection')}
-        <div style="padding: 12px 12px 14px 12px; text-align: center;">
-          <div style="font-size: 15px; font-weight: 700; line-height: 1.35; color: #111827; margin-bottom: 6px;">{title}</div>
-          {subtitle ? <div style="font-size: 12px; color: #6b7280; line-height: 1.3;">{subtitle}</div> : null}
-        </div>
-      </div>
-    );
-  }
-
-  function renderProductTile(product, onPress) {
-    return (
-      <div
-        key={'product-' + product.id}
-        onClick={onPress}
-        style="background: #ffffff; border: 1px solid #d7dfeb; border-radius: 16px; overflow: hidden; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05); cursor: pointer; min-height: 214px;"
-      >
-        {renderImageOrFallback(product.imageUrl, product.title, '96px', 'contain', 'Macron product')}
-        <div style="padding: 12px 12px 14px 12px; text-align: left;">
-          <div style="font-size: 14px; font-weight: 700; line-height: 1.38; color: #111827; margin-bottom: 8px;">{product.title}</div>
-          <div style="font-size: 12px; color: #6b7280; line-height: 1.3;">Tap to view options</div>
-        </div>
-      </div>
-    );
-  }
-
-  function renderLoadingGrid(columns, count) {
-    var template = columns === 4 ? 'repeat(4, minmax(0, 1fr))' : (columns === 3 ? 'repeat(3, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))');
-    var items = [];
-    for (var i = 0; i < count; i += 1) {
-      items.push(
-        <div key={'loading-' + String(i)} style="background: #ffffff; border: 1px solid #d7dfeb; border-radius: 16px; overflow: hidden; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05);">
-          <div style="height: 96px; background: linear-gradient(90deg, #f3f4f6 0%, #e5e7eb 50%, #f3f4f6 100%);"></div>
-          <div style="padding: 12px;">
-            <div style="height: 14px; border-radius: 7px; background: #eef2f6; margin-bottom: 8px;"></div>
-            <div style="height: 12px; width: 55%; border-radius: 6px; background: #f3f5f8;"></div>
+      <s-box key={'collection-' + title} inlineSize="100%" minInlineSize="100%" maxInlineSize="100%">
+        <s-clickable onClick={onPress}>
+          <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,0.08); overflow:hidden; min-height:182px;">
+            {renderImageOrFallback(item ? item.imageUrl : '', title, '78px', 'contain')}
+            <div style="padding:14px 12px 16px; text-align:center; display:flex; flex-direction:column; justify-content:center; gap:6px; min-height:90px;">
+              <div style="font-size:15px; font-weight:700; line-height:1.3; color:#111827;">{title}</div>
+            </div>
           </div>
-        </div>
-      );
-    }
-    return <div style={'display: grid; grid-template-columns: ' + template + '; gap: 16px; align-items: start;'}>{items}</div>;
+        </s-clickable>
+      </s-box>
+    );
+  }
+
+  function renderProductTile(product, onPress, columns) {
+    return (
+      <s-box key={'product-' + product.id} inlineSize="100%" minInlineSize="100%" maxInlineSize="100%">
+        <s-clickable onClick={onPress}>
+          <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,0.08); overflow:hidden; min-height:262px;">
+            {renderImageOrFallback(product.imageUrl, product.title, '96px', 'contain')}
+            <div style="padding:14px 14px 16px; display:flex; flex-direction:column; justify-content:flex-start; gap:8px; min-height:150px; text-align:left;">
+              <div style="font-size:14px; font-weight:700; line-height:1.35; color:#111827;">{product.title}</div>
+            </div>
+          </div>
+        </s-clickable>
+      </s-box>
+    );
   }
 
   function renderGrid(items, renderItem, columns) {
@@ -2658,11 +2927,10 @@ function Modal() {
     if (list.length === 0) {
       return null;
     }
-    var template = columns === 4 ? 'repeat(4, minmax(0, 1fr))' : (columns === 3 ? 'repeat(3, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))');
     return (
-      <div style={'display: grid; grid-template-columns: ' + template + '; gap: 16px; align-items: start;'}>
+      <div style={'display:grid; grid-template-columns:repeat(' + String(columns) + ', minmax(0, 1fr)); gap:14px; align-items:start;'}>
         {list.map(function (item) {
-          return renderItem(item);
+          return renderItem(item, columns);
         })}
       </div>
     );
@@ -2675,16 +2943,19 @@ function Modal() {
           {renderScreenIntro('Club Shop', '')}
           <s-section>
             <s-stack direction="block" gap="base">
-              <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
+              <s-text color="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
               {renderGrid(clubs, function (club) {
                 return renderCollectionTile(
                   club,
-                  club.type === 'subsections' ? 'Sections' : 'Products',
-                  function () { handleClubPress(club); }
+                  '',
+                  function () { handleClubPress(club); },
+                  4
                 );
               }, 4)}
             </s-stack>
           </s-section>
+          {renderDiagnosticsToggle()}
+          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2703,12 +2974,15 @@ function Modal() {
               {renderGrid(selectedClub.subsections, function (subsection) {
                 return renderCollectionTile(
                   subsection,
-                  'Shop products',
-                  function () { handleSubsectionPress(subsection); }
+                  '',
+                  function () { handleSubsectionPress(subsection); },
+                  4
                 );
               }, 4)}
             </s-stack>
           </s-section>
+          {renderDiagnosticsToggle()}
+          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2730,13 +3004,16 @@ function Modal() {
           {renderScreenIntro(heading, '')}
           <s-section>
             <s-stack direction="block" gap="base">
-              {productListLoading ? renderLoadingGrid(3, 6) : null}
+              {productListLoading ? <s-text color="subdued">Loading products…</s-text> : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
               {!productListLoading ? renderGrid(products, function (product) {
-                return renderProductTile(product, function () { handleProductPress(product); });
-              }, 3) : null}
+                return renderProductTile(product, function () { handleProductPress(product); }, productTileColumns());
+              }, productTileColumns()) : null}
             </s-stack>
           </s-section>
+          {renderDiagnosticsToggle()}
+          {showDebug ? renderProductDebug() : null}
+          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2763,16 +3040,18 @@ function Modal() {
       return null;
     }
     return (
-      <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start;">
+      <s-stack direction="inline" wrap="true" gap="small">
         {product.variants.map(function (variant) {
           var active = selectedVariant && selectedVariant.id === variant.id;
           return (
-            <s-button key={variant.id} variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
-              {variant.title}
-            </s-button>
+            <s-box key={variant.id} padding="none">
+              <s-button variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
+                {variant.title}
+              </s-button>
+            </s-box>
           );
         })}
-      </div>
+      </s-stack>
     );
   }
 
@@ -2796,12 +3075,13 @@ function Modal() {
               ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
             </s-stack>
           </s-section>
-          <s-section heading="Size">
-            {renderVariants(selectedProduct)}
+          <s-section heading={productUsesSeparateOptions(selectedProduct) ? 'Options' : 'Size'}>
+            {renderVariantSelectors(selectedProduct)}
           </s-section>
           {renderBundleNote(selectedProduct)}
           <s-section heading="Actions">
-            <s-stack direction="block" gap="small">
+            <s-stack direction="inline" gap="small" alignment="center">
+              <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
               {showAddToCart ? (
                 <s-button
                   variant="primary"
@@ -2817,10 +3097,9 @@ function Modal() {
                   Continue to personalisation
                 </s-button>
               ) : null)}
-              <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <div style="margin-top: 14px;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderBundleDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
@@ -2949,11 +3228,13 @@ function Modal() {
 
   function fieldLabel(label, required, feeText) {
     return (
-      <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 2px;">
+      <s-stack direction="block" gap="small">
         <s-text>{label}</s-text>
-        {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
-        {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
-      </div>
+        <s-stack direction="inline" gap="small" wrap="true">
+          {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
+          {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
+        </s-stack>
+      </s-stack>
     );
   }
 
@@ -3051,18 +3332,18 @@ function Modal() {
                 </s-stack>
               ) : null}
               <s-section heading="Actions">
-                <s-stack direction="block" gap="small">
-                  <s-button variant="primary" onClick={submitPersonalisation}>
-                    Add to cart
-                  </s-button>
+                <s-stack direction="inline" gap="small" alignment="center">
                   <s-button variant="secondary" onClick={handleBack}>
                     Back
+                  </s-button>
+                  <s-button variant="primary" onClick={submitPersonalisation}>
+                    Add to cart
                   </s-button>
                 </s-stack>
               </s-section>
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <div style="margin-top: 14px;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
           {showDebug ? renderProductDebug() : null}
