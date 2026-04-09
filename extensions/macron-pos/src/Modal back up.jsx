@@ -2582,110 +2582,97 @@ function Modal() {
     );
   }
 
-  function renderImageOrFallback(imageUrl, altText, height, fitMode) {
+  function chunkIntoRows(items, rowSize) {
+    var source = items || [];
+    var size = rowSize && rowSize > 0 ? rowSize : 1;
+    var rows = [];
+    for (var index = 0; index < source.length; index += size) {
+      rows.push(source.slice(index, index + size));
+    }
+    return rows;
+  }
+
+  function renderImageOrFallback(imageUrl, altText, height, imageKind) {
     var boxHeight = height || '96px';
-    var objectFit = fitMode || 'contain';
+    var fit = imageKind === 'collection' || imageKind === 'product' ? 'contain' : 'cover';
+    if (imageUrl && toStr(imageUrl) !== '') {
+      return (
+        <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px 12px 0 0; overflow: hidden; border-bottom: 1px solid #e5eaf1; background: #f8fafc;'}>
+          <img src={imageUrl} alt={altText} style={'width: 100%; height: 100%; display: block; object-fit: ' + fit + '; object-position: center;'} />
+        </div>
+      );
+    }
     return (
-      <s-box blockSize={boxHeight} inlineSize="100%">
-        {imageUrl && toStr(imageUrl) !== '' ? (
-          <s-image src={imageUrl} alt={altText} inlineSize="100%" objectFit={objectFit} />
-        ) : (
-          <s-box blockSize={boxHeight} padding="base">
-            <s-stack direction="block" justifyContent="center" alignItems="center" gap="small">
-              <s-text type="small" color="subdued">Macron Club Collection</s-text>
-            </s-stack>
-          </s-box>
-        )}
-      </s-box>
+      <div style={'width: 100%; height: ' + boxHeight + '; border-radius: 12px 12px 0 0; border-bottom: 1px solid #e5eaf1; background: #f3f6fa; overflow: hidden;'}>
+        <s-stack direction="block" alignment="center" distribution="center" style="height: 100%;">
+          <s-text size="small" appearance="subdued">Image unavailable</s-text>
+        </s-stack>
+      </div>
     );
   }
 
-  function tileWidth(columns) {
-    if (columns === 4) {
-      return '24%';
-    }
-    if (columns === 3) {
-      return '32%';
-    }
-    if (columns === 2) {
-      return '49%';
-    }
-    return '100%';
-  }
-
-  function renderCollectionTile(item, subtitle, onPress, columns) {
+  function renderCollectionTile(item, subtitle, onPress) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-    var width = tileWidth(columns);
+    var keyPart = item && item.name ? item.name : (item && item.label ? item.label : title);
     return (
-      <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width}>
-        <s-clickable onClick={onPress}>
-          <s-pos-block>
-            <s-stack direction="block" gap="small">
-              {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
-              <s-box padding="small">
-                <s-stack direction="block" gap="small">
-                  <s-text type="strong">{title}</s-text>
-                  {subtitle ? <s-text type="small" color="subdued">{subtitle}</s-text> : null}
-                </s-stack>
-              </s-box>
-            </s-stack>
-          </s-pos-block>
-        </s-clickable>
-      </s-box>
+      <div
+        key={'collection-' + keyPart}
+        onClick={onPress}
+        style="flex: 0 0 calc((100% - 20px) / 3); max-width: calc((100% - 20px) / 3); border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff; overflow: hidden; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.07);"
+      >
+        {renderImageOrFallback(item ? item.imageUrl : '', title, '80px', 'collection')}
+        <div style="padding: 8px 10px 10px 10px;">
+          <s-stack direction="block" gap="micro">
+            <div style="font-size: 14px; font-weight: 600; line-height: 1.28;"><s-text>{title}</s-text></div>
+            {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
+          </s-stack>
+        </div>
+      </div>
     );
   }
 
-  function renderProductTile(product, onPress, columns) {
-    var width = tileWidth(columns);
+  function renderProductTile(product, onPress) {
     return (
-      <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width}>
-        <s-clickable onClick={onPress}>
-          <s-pos-block>
-            <s-stack direction="block" gap="small">
-              {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
-              <s-box padding="small">
-                <s-stack direction="block" gap="small">
-                  <s-text type="strong">{product.title}</s-text>
-                  <s-text type="small" color="subdued">Tap to view options</s-text>
-                </s-stack>
-              </s-box>
-            </s-stack>
-          </s-pos-block>
-        </s-clickable>
-      </s-box>
-    );
-  }
-
-  function renderGrid(items, renderItem, columns) {
-    var list = items || [];
-    if (list.length === 0) {
-      return null;
-    }
-    return (
-      <s-stack direction="inline" gap="small" justifyContent="start" alignItems="start">
-        {list.map(function (item) {
-          return renderItem(item, columns);
-        })}
-      </s-stack>
+      <div
+        key={'product-' + product.id}
+        onClick={onPress}
+        style="flex: 0 0 calc((100% - 12px) / 2); max-width: calc((100% - 12px) / 2); border: 1px solid #e2e8f0; border-radius: 14px; background: #ffffff; overflow: hidden; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.07);"
+      >
+        {renderImageOrFallback(product.imageUrl, product.title, '96px', 'product')}
+        <div style="padding: 8px 10px 10px 10px;">
+          <s-stack direction="block" gap="micro">
+            <div style="font-size: 14px; font-weight: 600; line-height: 1.28;"><s-text>{product.title}</s-text></div>
+            <s-text size="small" appearance="subdued">Tap to view options</s-text>
+          </s-stack>
+        </div>
+      </div>
     );
   }
 
   function renderClubsScreen() {
+    var clubRows = chunkIntoRows(clubs, 3);
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
           {renderScreenIntro('Club Shop', '')}
           <s-section>
-            <s-stack direction="block" gap="base">
-              <s-text color="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
-              {renderGrid(clubs, function (club) {
-                return renderCollectionTile(
-                  club,
-                  club.type === 'subsections' ? 'Sections' : 'Products',
-                  function () { handleClubPress(club); },
-                  4
-                );
-              }, 4)}
+            <s-stack direction="block" gap="small">
+              <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
+              <s-stack direction="block" gap="small">
+                {clubRows.map(function (row, rowIndex) {
+                  return (
+                    <div key={'club-row-' + rowIndex} style="display: flex; flex-wrap: nowrap; gap: 10px; align-items: stretch;">
+                      {row.map(function (club) {
+                        return renderCollectionTile(
+                          club,
+                          club.type === 'subsections' ? 'Sections' : 'Products',
+                          function () { handleClubPress(club); }
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </s-stack>
             </s-stack>
           </s-section>
           {renderDiagnosticsToggle()}
@@ -2699,20 +2686,26 @@ function Modal() {
     if (!selectedClub || !selectedClub.subsections) {
       return renderClubsScreen();
     }
+    var subsectionRows = chunkIntoRows(selectedClub.subsections, 3);
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
           {renderScreenIntro(selectedClub.name, '')}
           <s-section>
-            <s-stack direction="block" gap="base">
-              {renderGrid(selectedClub.subsections, function (subsection) {
-                return renderCollectionTile(
-                  subsection,
-                  'Shop products',
-                  function () { handleSubsectionPress(subsection); },
-                  4
+            <s-stack direction="block" gap="small">
+              {subsectionRows.map(function (row, rowIndex) {
+                return (
+                  <div key={'subsection-row-' + rowIndex} style="display: flex; flex-wrap: nowrap; gap: 10px; align-items: stretch;">
+                    {row.map(function (subsection) {
+                      return renderCollectionTile(
+                        subsection,
+                        'Shop products',
+                        function () { handleSubsectionPress(subsection); }
+                      );
+                    })}
+                  </div>
                 );
-              }, 4)}
+              })}
             </s-stack>
           </s-section>
           {renderDiagnosticsToggle()}
@@ -2728,6 +2721,7 @@ function Modal() {
 
   function renderProductsScreen() {
     var products = productsForCurrentSelection();
+    var productRows = chunkIntoRows(products, 2);
     var heading = selectedClub ? selectedClub.name : 'Products';
     if (selectedSubsection) {
       heading = selectedClub ? selectedClub.name + ' - ' + selectedSubsection.label : selectedSubsection.label;
@@ -2738,11 +2732,23 @@ function Modal() {
           {renderScreenIntro(heading, '')}
           <s-section>
             <s-stack direction="block" gap="base">
-              {productListLoading ? <s-text color="subdued">Loading products…</s-text> : null}
+              {productListLoading ? (
+                <s-stack direction="block" gap="small">
+                  <s-text appearance="subdued">Loading products…</s-text>
+                  <div style="height: 112px; border-radius: 12px; background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);" />
+                  <div style="height: 112px; border-radius: 12px; background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);" />
+                </s-stack>
+              ) : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
-              {!productListLoading ? renderGrid(products, function (product) {
-                return renderProductTile(product, function () { handleProductPress(product); }, 3);
-              }, 3) : null}
+              {productRows.map(function (row, rowIndex) {
+                return (
+                  <div key={'product-row-' + rowIndex} style="display: flex; flex-wrap: nowrap; gap: 12px; align-items: stretch;">
+                    {row.map(function (product) {
+                      return renderProductTile(product, function () { handleProductPress(product); });
+                    })}
+                  </div>
+                );
+              })}
             </s-stack>
           </s-section>
           {renderDiagnosticsToggle()}
