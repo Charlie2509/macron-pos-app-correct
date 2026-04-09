@@ -1,4 +1,4 @@
-import "@shopify/ui-extensions/preact";
+﻿import "@shopify/ui-extensions/preact";
 import {render} from 'preact';
 import {useEffect, useState} from 'preact/hooks';
 
@@ -542,20 +542,7 @@ function mapVariants(variantEdges) {
     for (var i = 0; i < variantEdges.length; i += 1) {
       var edge = variantEdges[i];
       if (edge && edge.node) {
-        var selectedOptions = [];
-        var optionMap = {};
-        if (edge.node.selectedOptions && Array.isArray(edge.node.selectedOptions)) {
-          for (var s = 0; s < edge.node.selectedOptions.length; s += 1) {
-            var optionNode = edge.node.selectedOptions[s];
-            var optionName = toStr(optionNode && optionNode.name ? optionNode.name : '');
-            var optionValue = toStr(optionNode && optionNode.value ? optionNode.value : '');
-            if (optionName !== '') {
-              selectedOptions.push({name: optionName, value: optionValue});
-              optionMap[optionName] = optionValue;
-            }
-          }
-        }
-        list.push({id: edge.node.id, title: edge.node.title, selectedOptions: selectedOptions, optionMap: optionMap});
+        list.push({id: edge.node.id, title: edge.node.title});
       }
     }
   }
@@ -841,14 +828,7 @@ async function fetchProductsForCollection(collectionId) {
             }
             variants(first: 20) {
               edges {
-                node {
-                  id
-                  title
-                  selectedOptions {
-                    name
-                    value
-                  }
-                }
+                node { id title }
               }
             }
             enablePersonalisation: metafield(namespace: "custom", key: "enable_personalisation") { value }
@@ -1030,23 +1010,6 @@ async function fetchBundleComponentsByReferences(componentRefs) {
   }
   return result;
 }
-var collectionProductsRequestCache = {};
-
-async function getCollectionProductsCached(collectionId) {
-  if (!collectionId) {
-    return [];
-  }
-  if (!collectionProductsRequestCache[collectionId]) {
-    collectionProductsRequestCache[collectionId] = fetchProductsForCollection(collectionId).then(function (products) {
-      return products || [];
-    }).catch(function (err) {
-      delete collectionProductsRequestCache[collectionId];
-      throw err;
-    });
-  }
-  return collectionProductsRequestCache[collectionId];
-}
-
 // ---------------- UI ----------------
 export default async function () {
   render(<Modal />, document.body);
@@ -1296,10 +1259,6 @@ function Modal() {
   var selectedVariant = variantState[0];
   var setSelectedVariant = variantState[1];
 
-  var selectedOptionValuesState = useState({});
-  var selectedOptionValues = selectedOptionValuesState[0];
-  var setSelectedOptionValues = selectedOptionValuesState[1];
-
   var primaryState = useState('');
   var primaryFieldValue = primaryState[0];
   var setPrimaryFieldValue = primaryState[1];
@@ -1378,63 +1337,21 @@ function Modal() {
     setCurrentProducts(currentProductsCollectionId === collectionId ? currentProducts : []);
     setCurrentProductsCollectionId(collectionId);
     try {
-      var products = await getCollectionProductsCached(collectionId);
+      var products = await fetchProductsForCollection(collectionId);
       setCurrentProducts(products);
-      setProductsCache(function (previousCache) {
-        var nextCache = {};
-        var previousKeys = Object.keys(previousCache || {});
-        for (var k = 0; k < previousKeys.length; k += 1) {
-          nextCache[previousKeys[k]] = previousCache[previousKeys[k]];
-        }
-        nextCache[collectionId] = products;
-        return nextCache;
-      });
+      var nextCache = {};
+      var cacheKeys = Object.keys(productsCache);
+      for (var k = 0; k < cacheKeys.length; k += 1) {
+        nextCache[cacheKeys[k]] = productsCache[cacheKeys[k]];
+      }
+      nextCache[collectionId] = products;
+      setProductsCache(nextCache);
     } catch (err) {
       setErrorMessage(err && err.message ? err.message : String(err));
       setCurrentProducts([]);
     }
     setProductListLoading(false);
   }
-
-
-  useEffect(function () {
-    if (dataSource !== 'Live data') {
-      return;
-    }
-    if (screen !== 'subsections') {
-      return;
-    }
-    if (!selectedClub || !selectedClub.subsections || !Array.isArray(selectedClub.subsections)) {
-      return;
-    }
-    function warmSubsectionCollection(subsectionCollectionId) {
-      if (!subsectionCollectionId) {
-        return;
-      }
-      if (productsCache[subsectionCollectionId] && Array.isArray(productsCache[subsectionCollectionId])) {
-        return;
-      }
-      getCollectionProductsCached(subsectionCollectionId).then(function (products) {
-        setProductsCache(function (previousCache) {
-          var nextCache = {};
-          var previousKeys = Object.keys(previousCache || {});
-          for (var p = 0; p < previousKeys.length; p += 1) {
-            nextCache[previousKeys[p]] = previousCache[previousKeys[p]];
-          }
-          if (!nextCache[subsectionCollectionId]) {
-            nextCache[subsectionCollectionId] = products;
-          }
-          return nextCache;
-        });
-      }).catch(function () {
-        return null;
-      });
-    }
-    for (var i = 0; i < selectedClub.subsections.length; i += 1) {
-      var subsection = selectedClub.subsections[i];
-      warmSubsectionCollection(subsection && subsection.collectionId ? subsection.collectionId : null);
-    }
-  }, [dataSource, screen, selectedClub, productsCache]);
 
   useEffect(function () {
     var cancelled = false;
@@ -1564,7 +1481,6 @@ function Modal() {
     setSelectedSubsection(null);
     setSelectedProduct(null);
     setSelectedVariant(null);
-    setSelectedOptionValues({});
     setPrimaryFieldValue('');
     setExtraField1Value('');
     setExtraField2Value('');
@@ -1855,7 +1771,6 @@ function Modal() {
     setSelectedSubsection(null);
     setSelectedProduct(null);
     setSelectedVariant(null);
-    setSelectedOptionValues({});
     resetBundleBuilderState();
     if (club.type === 'subsections') {
       setScreen('subsections');
@@ -1884,7 +1799,6 @@ function Modal() {
     setSelectedSubsection(subsection);
     setSelectedProduct(null);
     setSelectedVariant(null);
-    setSelectedOptionValues({});
     resetBundleBuilderState();
     if (dataSource === 'Mock data') {
       setProductListLoading(false);
@@ -1908,21 +1822,12 @@ function Modal() {
   function handleProductPress(product) {
     setSelectedProduct(product);
     setSelectedVariant(null);
-    setSelectedOptionValues({});
     resetBundleBuilderState();
     setScreen('productDetail');
   }
 
   function handleVariantSelect(variant) {
     setSelectedVariant(variant);
-    if (variant && variant.optionMap) {
-      var nextOptionValues = {};
-      var optionKeys = Object.keys(variant.optionMap);
-      for (var i = 0; i < optionKeys.length; i += 1) {
-        nextOptionValues[optionKeys[i]] = variant.optionMap[optionKeys[i]];
-      }
-      setSelectedOptionValues(nextOptionValues);
-    }
   }
 
   function toast(msg) {
@@ -2401,7 +2306,6 @@ function Modal() {
     if (screen === 'productDetail') {
       setSelectedProduct(null);
       setSelectedVariant(null);
-      setSelectedOptionValues({});
       setPrimaryFieldValue('');
       setExtraField1Value('');
       setExtraField2Value('');
@@ -2412,7 +2316,6 @@ function Modal() {
     if (screen === 'products') {
       setSelectedProduct(null);
       setSelectedVariant(null);
-      setSelectedOptionValues({});
       if (selectedClub && selectedClub.type === 'subsections') {
         setScreen('subsections');
         return;
@@ -2679,579 +2582,249 @@ function Modal() {
     );
   }
 
-
-  function productTileColumns() {
-    return 3;
-  }
-
-  function productCardMinHeight() {
-    return '260px';
-  }
-
-  function deriveVariantOptionNames(product) {
-    var variants = product && product.variants ? product.variants : [];
-    var optionNames = [];
-    for (var i = 0; i < variants.length; i += 1) {
-      var selectedOptions = variants[i] && variants[i].selectedOptions ? variants[i].selectedOptions : [];
-      for (var s = 0; s < selectedOptions.length; s += 1) {
-        var optionName = toStr(selectedOptions[s] && selectedOptions[s].name ? selectedOptions[s].name : '');
-        if (optionName === '' || optionName === 'Title') {
-          continue;
-        }
-        if (optionNames.indexOf(optionName) === -1) {
-          optionNames.push(optionName);
-        }
-      }
-    }
-    return optionNames;
-  }
-
-  function productUsesSeparateOptions(product) {
-    if (!product || !product.variants || !Array.isArray(product.variants)) {
-      return false;
-    }
-    if (product.bundleMeta && product.bundleMeta.isBundle) {
-      return false;
-    }
-    return deriveVariantOptionNames(product).length > 1;
-  }
-
-  function getCurrentVariantOptionSelections(product) {
-    var currentSelections = {};
-    if (selectedVariant && selectedVariant.optionMap) {
-      var selectedKeys = Object.keys(selectedVariant.optionMap);
-      for (var i = 0; i < selectedKeys.length; i += 1) {
-        currentSelections[selectedKeys[i]] = selectedVariant.optionMap[selectedKeys[i]];
-      }
-    }
-    var stateKeys = Object.keys(selectedOptionValues || {});
-    for (var s = 0; s < stateKeys.length; s += 1) {
-      currentSelections[stateKeys[s]] = selectedOptionValues[stateKeys[s]];
-    }
-    return currentSelections;
-  }
-
-  function getOptionValuesForProduct(product, optionName) {
-    var values = [];
-    var variants = product && product.variants ? product.variants : [];
-    for (var i = 0; i < variants.length; i += 1) {
-      var optionMap = variants[i] && variants[i].optionMap ? variants[i].optionMap : {};
-      var value = toStr(optionMap[optionName]);
-      if (value !== '' && values.indexOf(value) === -1) {
-        values.push(value);
-      }
-    }
-    return values;
-  }
-
-  function optionValueIsAvailable(product, optionName, optionValue, currentSelections) {
-    var variants = product && product.variants ? product.variants : [];
-    for (var i = 0; i < variants.length; i += 1) {
-      var optionMap = variants[i] && variants[i].optionMap ? variants[i].optionMap : {};
-      if (toStr(optionMap[optionName]) !== toStr(optionValue)) {
-        continue;
-      }
-      var matchesOtherSelections = true;
-      var selectionKeys = Object.keys(currentSelections || {});
-      for (var s = 0; s < selectionKeys.length; s += 1) {
-        var selectionKey = selectionKeys[s];
-        if (selectionKey === optionName) {
-          continue;
-        }
-        var selectionValue = toStr(currentSelections[selectionKey]);
-        if (selectionValue !== '' && toStr(optionMap[selectionKey]) !== selectionValue) {
-          matchesOtherSelections = false;
-          break;
-        }
-      }
-      if (matchesOtherSelections) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function handleVariantOptionValueSelect(product, optionName, optionValue) {
-    var nextSelections = {};
-    var existingKeys = Object.keys(selectedOptionValues || {});
-    for (var i = 0; i < existingKeys.length; i += 1) {
-      nextSelections[existingKeys[i]] = selectedOptionValues[existingKeys[i]];
-    }
-    nextSelections[optionName] = optionValue;
-    setSelectedOptionValues(nextSelections);
-
-    var optionNames = deriveVariantOptionNames(product);
-    var variants = product && product.variants ? product.variants : [];
-    var matches = [];
-    for (var v = 0; v < variants.length; v += 1) {
-      var optionMap = variants[v] && variants[v].optionMap ? variants[v].optionMap : {};
-      var isMatch = true;
-      for (var s = 0; s < optionNames.length; s += 1) {
-        var currentOptionName = optionNames[s];
-        var chosenValue = toStr(nextSelections[currentOptionName]);
-        if (chosenValue !== '' && toStr(optionMap[currentOptionName]) !== chosenValue) {
-          isMatch = false;
-          break;
-        }
-      }
-      if (isMatch) {
-        matches.push(variants[v]);
-      }
-    }
-
-    var allChosen = true;
-    for (var o = 0; o < optionNames.length; o += 1) {
-      if (toStr(nextSelections[optionNames[o]]) === '') {
-        allChosen = false;
-        break;
-      }
-    }
-
-    if (allChosen && matches.length === 1) {
-      setSelectedVariant(matches[0]);
-      return;
-    }
-    if (selectedVariant) {
-      var selectedStillMatches = false;
-      for (var m = 0; m < matches.length; m += 1) {
-        if (matches[m].id === selectedVariant.id) {
-          selectedStillMatches = true;
-          break;
-        }
-      }
-      if (!selectedStillMatches) {
-        setSelectedVariant(null);
-      }
-    }
-  }
-
-  function renderVariantSelectors(product) {
-    if (!product || !product.variants) {
-      return null;
-    }
-    if (!productUsesSeparateOptions(product)) {
-      return renderVariants(product);
-    }
-    var optionNames = deriveVariantOptionNames(product);
-    var currentSelections = getCurrentVariantOptionSelections(product);
-    return (
-      <s-stack direction="block" gap="base">
-        {optionNames.map(function (optionName) {
-          var values = getOptionValuesForProduct(product, optionName);
-          return (
-            <s-stack key={optionName} direction="block" gap="small">
-              <s-text>{optionName}</s-text>
-              <s-stack direction="inline" wrap="true" gap="small">
-                {values.map(function (value) {
-                  var active = toStr(currentSelections[optionName]) === toStr(value);
-                  var available = optionValueIsAvailable(product, optionName, value, currentSelections);
-                  return (
-                    <s-button
-                      key={optionName + '-' + value}
-                      variant={active ? 'primary' : 'secondary'}
-                      disabled={!available}
-                      onClick={function () { handleVariantOptionValueSelect(product, optionName, value); }}
-                    >
-                      {value}
-                    </s-button>
-                  );
-                })}
-              </s-stack>
-            </s-stack>
-          );
-        })}
-      </s-stack>
-    );
-  }
-
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
-    var boxHeight = height || '96px';
-    var objectFit = fitMode || 'contain';
-    var wrapperStyle =
-      'height:' + boxHeight +
-      '; width:100%; overflow:hidden; border-radius:14px 14px 0 0;' +
-      ' background:#f8fafc; border-bottom:1px solid #e5e7eb;' +
-      ' display:flex; align-items:center; justify-content:center;';
-    var imageStyle =
-      'width:100%; height:100%; display:block;' +
-      ' object-fit:' + objectFit + '; object-position:center; background:#f8fafc;';
-
-    if (imageUrl && toStr(imageUrl) !== '') {
-      return (
-        <div style={wrapperStyle}>
-          <img src={imageUrl} alt={altText || ''} style={imageStyle} />
-        </div>
-      );
-    }
-
-    return (
-      <div style={wrapperStyle}>
+  var boxHeight = height || '96px';
+  var objectFit = fitMode || 'contain';
+  return (
+    <div
+      style={
+        'height:' + boxHeight +
+        '; width:100%; overflow:hidden; border-radius:14px 14px 0 0;' +
+        ' background:#f8fafc; border-bottom:1px solid #e5e7eb;' +
+        ' display:flex; align-items:center; justify-content:center;'
+      }
+    >
+      {imageUrl && toStr(imageUrl) !== '' ? (
+        <s-image src={imageUrl} alt={altText} inlineSize="100%" blockSize={boxHeight} objectFit={objectFit} />
+      ) : (
         <div style="font-size:12px; color:#64748b; font-weight:600;">No image</div>
-      </div>
-    );
-  }
-
-  function tileWidth(columns) {
-    if (columns === 4) {
-      return '24%';
-    }
-    if (columns === 3) {
-      return '32%';
-    }
-    if (columns === 2) {
-      return '49%';
-    }
-    return '100%';
-  }
-
-  function renderCollectionTile(item, subtitle, onPress, columns) {
-    var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-    return (
-      <s-box key={'collection-' + title} inlineSize="100%" minInlineSize="100%" maxInlineSize="100%">
-        <s-clickable onClick={onPress}>
-          <div style="background:#ffffff; border:1px solid #cfd8e3; border-radius:16px; box-shadow:0 1px 4px rgba(15,23,42,0.08); overflow:hidden; min-height:182px;">
-            {renderImageOrFallback(item ? item.imageUrl : '', title, '78px', 'contain')}
-            <div style="padding:14px 12px 16px; text-align:center; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:6px; min-height:90px;">
-              <div style="font-size:15px; font-weight:700; line-height:1.3; color:#111827;">{title}</div>
-            </div>
+      )}
+    </div>
+  );
+}
+function renderCollectionTile(item, subtitle, onPress, columns) {
+  var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
+  return (
+    <div key={'collection-' + title} style="min-width:0;">
+      <s-clickable onClick={onPress}>
+        <div
+          style="
+            background:#ffffff;
+            border:1px solid #cfd8e3;
+            border-radius:16px;
+            box-shadow:0 1px 4px rgba(15,23,42,0.08);
+            overflow:hidden;
+            min-height:182px;
+          "
+        >
+          {renderImageOrFallback(item ? item.imageUrl : '', title, '78px', 'contain')}
+          <div
+            style="
+              padding:14px 12px 16px;
+              text-align:center;
+              display:flex;
+              flex-direction:column;
+              justify-content:center;
+              align-items:center;
+              gap:6px;
+              min-height:92px;
+            "
+          >
+            <div style="font-size:15px; font-weight:700; line-height:1.3; color:#111827;">{title}</div>
           </div>
-        </s-clickable>
-      </s-box>
-    );
-  }
-
-  function renderProductTile(product, onPress, columns) {
-    return (
-      <s-box key={'product-' + product.id} inlineSize="100%" minInlineSize="100%" maxInlineSize="100%">
-        <s-clickable onClick={onPress}>
-          <div style="background:#ffffff; border:1px solid #cfd8e3; border-radius:16px; box-shadow:0 1px 4px rgba(15,23,42,0.08); overflow:hidden; min-height:262px;">
-            {renderImageOrFallback(product.imageUrl, product.title, '96px', 'contain')}
-            <div style="padding:14px 14px 16px; display:flex; flex-direction:column; justify-content:flex-start; gap:8px; min-height:150px; text-align:left;">
-              <div style="font-size:14px; font-weight:700; line-height:1.35; color:#111827;">{product.title}</div>
-            </div>
-          </div>
-        </s-clickable>
-      </s-box>
-    );
-  }
-
-  function renderGrid(items, renderItem, columns) {
-    var list = items || [];
-    if (list.length === 0) {
-      return null;
-    }
-    return (
-      <div style={'display:grid; grid-template-columns:repeat(' + String(columns) + ', minmax(0, 1fr)); gap:14px; align-items:start;'}>
-        {list.map(function (item) {
-          return renderItem(item, columns);
-        })}
-      </div>
-    );
-  }
-
-  function renderClubsScreen() {
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          {renderScreenIntro('Club Shop', '')}
-          <s-section>
-            <s-stack direction="block" gap="base">
-              <s-text color="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
-              {renderGrid(clubs, function (club) {
-                return renderCollectionTile(
-                  club,
-                  '',
-                  function () { handleClubPress(club); },
-                  4
-                );
-              }, 4)}
-            </s-stack>
-          </s-section>
-          {renderDiagnosticsToggle()}
-          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
-        </ScreenScroll>
-      </s-page>
-    );
-  }
-
-  function renderSubsectionsScreen() {
-    if (!selectedClub || !selectedClub.subsections) {
-      return renderClubsScreen();
-    }
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          {renderScreenIntro(selectedClub.name, '')}
-          <s-section>
-            <s-stack direction="block" gap="base">
-              {renderGrid(selectedClub.subsections, function (subsection) {
-                return renderCollectionTile(
-                  subsection,
-                  '',
-                  function () { handleSubsectionPress(subsection); },
-                  4
-                );
-              }, 4)}
-            </s-stack>
-          </s-section>
-          {renderDiagnosticsToggle()}
-          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
-        </ScreenScroll>
-      </s-page>
-    );
-  }
-
-  function productsForCurrentSelection() {
-    return currentProducts || [];
-  }
-
-  function renderProductsScreen() {
-    var products = productsForCurrentSelection();
-    var heading = selectedClub ? selectedClub.name : 'Products';
-    if (selectedSubsection) {
-      heading = selectedClub ? selectedClub.name + ' - ' + selectedSubsection.label : selectedSubsection.label;
-    }
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          {renderScreenIntro(heading, '')}
-          <s-section>
-            <s-stack direction="block" gap="base">
-              {productListLoading ? <s-text color="subdued">Loading products…</s-text> : null}
-              {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
-              {!productListLoading ? renderGrid(products, function (product) {
-                return renderProductTile(product, function () { handleProductPress(product); }, productTileColumns());
-              }, productTileColumns()) : null}
-            </s-stack>
-          </s-section>
-          {renderDiagnosticsToggle()}
-          {showDebug ? renderProductDebug() : null}
-          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
-        </ScreenScroll>
-      </s-page>
-    );
-  }
-
-  function renderBundleNote(product) {
-    if (!product || !product.bundleMeta || !product.bundleMeta.isBundle) {
-      return null;
-    }
-    return (
-      <s-section heading="Bundle">
-        <s-stack direction="block" gap="micro">
-          <s-text appearance="subdued">Bundle product detected.</s-text>
-          <s-button variant="secondary" onClick={handleBundleBuilderOpen}>
-            Continue to bundle builder
-          </s-button>
-        </s-stack>
-      </s-section>
-    );
-  }
-
-  function renderVariants(product) {
-    if (!product || !product.variants) {
-      return null;
-    }
-    return (
-      <s-stack direction="inline" wrap="true" gap="small">
-        {product.variants.map(function (variant) {
-          var active = selectedVariant && selectedVariant.id === variant.id;
-          return (
-            <s-box key={variant.id} padding="none">
-              <s-button variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
-                {variant.title}
-              </s-button>
-            </s-box>
-          );
-        })}
-      </s-stack>
-    );
-  }
-
-  function renderProductDetailScreen() {
-    if (!selectedProduct) {
-      return renderProductsScreen();
-    }
-    var meta = selectedProduct.personalisationMeta || {};
-    var hasPersonalisation = hasAnyPersonalisation(meta);
-    var isBundleProduct = selectedProduct.bundleMeta && selectedProduct.bundleMeta.isBundle;
-    var showAddToCart = !hasPersonalisation && !isBundleProduct;
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          <s-section>
-            <s-stack direction="block" gap="base">
-              {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '196px')}
-              <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
-              {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
-                <s-text appearance="subdued">Select size to continue.</s-text>
-              ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
-            </s-stack>
-          </s-section>
-          <s-section heading={productUsesSeparateOptions(selectedProduct) ? 'Options' : 'Size'}>
-            {renderVariantSelectors(selectedProduct)}
-          </s-section>
-          {renderBundleNote(selectedProduct)}
-          <s-section heading="Actions">
-            <s-stack direction="inline" gap="small" alignment="center">
-              <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
-              {showAddToCart ? (
-                <s-button
-                  variant="primary"
-                  onClick={function () {
-                    setLastEnteredPersonalisation(false);
-                    addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
-                  }}
-                >
-                  Add to cart
-                </s-button>
-              ) : (!isBundleProduct ? (
-                <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
-                  Continue to personalisation
-                </s-button>
-              ) : null)}
-            </s-stack>
-          </s-section>
-          <div style="margin-top: 18px;">{renderDiagnosticsToggle()}</div>
-          {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
-          {showDebug ? renderBundleDebug(selectedProduct) : null}
-          {showDebug ? renderCartDebug() : null}
-          {showDebug ? renderProductDebug() : null}
-          {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
-        </ScreenScroll>
-      </s-page>
-    );
-  }
-
-  function renderBundleBuilderScreen() {
-    if (!selectedProduct) {
-      return renderProductsScreen();
-    }
-    var meta = selectedProduct.personalisationMeta || {};
-    var feeDisplay = parseFeeDisplay(meta.personalisationFeeRaw);
-    var maxChars = parseMaxChars(meta.personalisationMaxCharsRaw);
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          <s-section heading="Bundle builder">
-            <s-stack direction="block" gap="small">
-              <s-text>Bundle parent: {selectedProduct.title}</s-text>
-              <s-text appearance="subdued">Parent variant: {selectedVariant ? selectedVariant.title : 'none selected'}</s-text>
-              <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
-              {bundleLoading ? <s-text>Loading bundle components…</s-text> : null}
-              {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
-              {bundleComponents.map(function (component) {
-                var chosen = bundleSelections[component.key];
-                return (
-                  <s-section key={component.key} heading={component.title}>
-                    <s-stack direction="block" gap="small">
-                      <s-text appearance="subdued">{chosen ? ('Selected: ' + chosen.title) : 'Choose one variant'}</s-text>
-                      {component.variants && component.variants.length > 0 ? (
-                        <s-stack direction="inline" wrap="true" gap="small">
-                          {component.variants.map(function (variant) {
-                            var active = chosen && chosen.id === variant.id;
-                            return (
-                              <s-button
-                                key={variant.id}
-                                variant={active ? 'primary' : 'secondary'}
-                                onClick={function () { handleBundleVariantSelect(component.key, variant); }}
-                              >
-                                {variant.title}
-                              </s-button>
-                            );
-                          })}
-                        </s-stack>
-                      ) : (
-                        <s-text appearance="critical">No variants available for this component</s-text>
-                      )}
-                    </s-stack>
-                  </s-section>
-                );
-              })}
-              {hasAnyPersonalisation(meta) ? (
-                <s-section heading="Bundle personalisation">
-                  <s-stack direction="block" gap="small">
-                    {meta.enablePersonalisation ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
-                        <s-text-field
-                          value={primaryFieldValue}
-                          maxLength={maxChars === null ? undefined : maxChars}
-                          onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
-
-                    {meta.extraField1Enabled ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
-                        <s-text-field
-                          value={extraField1Value}
-                          onInput={function (event) { setExtraField1Value(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
-
-                    {meta.extraField2Enabled ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
-                        <s-text-field
-                          value={extraField2Value}
-                          onInput={function (event) { setExtraField2Value(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
-
-                    {meta.enableFileUpload ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
-                        <s-text appearance="critical">File upload is not available in POS V1 for bundle personalisation.</s-text>
-                        <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
-                      </s-stack>
-                    ) : null}
-                  </s-stack>
-                </s-section>
-              ) : null}
-              <s-section heading="Actions">
-                <s-stack direction="block" gap="small">
-                  <s-button
-                    variant="primary"
-                    onClick={addBundleParentToCart}
-                    disabled={bundleLoading}
-                  >
-                    Add bundle to cart
-                  </s-button>
-                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
-                </s-stack>
-              </s-section>
-            </s-stack>
-          </s-section>
-          {renderDiagnosticsToggle()}
-          {showDebug ? renderBundleDebug(selectedProduct) : null}
-          {showDebug ? renderCartDebug() : null}
-          {showDebug ? renderProductDebug() : null}
-          {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
-        </ScreenScroll>
-      </s-page>
-    );
-  }
-
-  function fieldLabel(label, required, feeText) {
-    return (
-      <s-stack direction="block" gap="small">
-        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px;">
-          <div style="font-weight:600; line-height:1.35;">{label}</div>
-          {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
-          {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
         </div>
-      </s-stack>
-    );
+      </s-clickable>
+    </div>
+  );
+}
+function renderProductTile(product, onPress, columns) {
+  return (
+    <div key={'product-' + product.id} style="min-width:0;">
+      <s-clickable onClick={onPress}>
+        <div
+          style="
+            background:#ffffff;
+            border:1px solid #cfd8e3;
+            border-radius:16px;
+            box-shadow:0 1px 4px rgba(15,23,42,0.08);
+            overflow:hidden;
+            min-height:248px;
+          "
+        >
+          {renderImageOrFallback(product.imageUrl, product.title, '96px', 'contain')}
+          <div
+            style="
+              padding:14px 14px 16px;
+              display:flex;
+              flex-direction:column;
+              justify-content:flex-start;
+              gap:8px;
+              min-height:138px;
+              text-align:left;
+            "
+          >
+            <div style="font-size:14px; font-weight:700; line-height:1.35; color:#111827;">{product.title}</div>
+          </div>
+        </div>
+      </s-clickable>
+    </div>
+  );
+}
+function renderGrid(items, renderItem, columns) {
+  var list = items || [];
+  if (list.length === 0) {
+    return null;
   }
-
-  function renderPersonalisationScreen() {
+  return (
+    <div style={'display:grid; grid-template-columns:repeat(' + String(columns) + ', minmax(0, 1fr)); gap:14px; align-items:start;'}>
+      {list.map(function (item) {
+        return renderItem(item, columns);
+      })}
+    </div>
+  );
+}
+function renderClubsScreen() {
+  return (
+    <s-page heading="Macron POS">
+      <ScreenScroll>
+        {renderScreenIntro('Club Shop', '')}
+        <s-section>
+          <s-stack direction="block" gap="base">
+            <s-text color="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
+            {renderGrid(clubs, function (club) {
+              return renderCollectionTile(
+                club,
+                '',
+                function () { handleClubPress(club); },
+                4
+              );
+            }, 4)}
+          </s-stack>
+        </s-section>
+        {renderDiagnosticsToggle()}
+        {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
+      </ScreenScroll>
+    </s-page>
+  );
+}
+function renderSubsectionsScreen() {
+  if (!selectedClub || !selectedClub.subsections) {
+    return renderClubsScreen();
+  }
+  return (
+    <s-page heading="Macron POS">
+      <ScreenScroll>
+        {renderScreenIntro(selectedClub.name, '')}
+        <s-section>
+          <s-stack direction="block" gap="base">
+            {renderGrid(selectedClub.subsections, function (subsection) {
+              return renderCollectionTile(
+                subsection,
+                '',
+                function () { handleSubsectionPress(subsection); },
+                4
+              );
+            }, 4)}
+          </s-stack>
+        </s-section>
+        {renderDiagnosticsToggle()}
+        {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
+      </ScreenScroll>
+    </s-page>
+  );
+}
+function renderProductsScreen() {
+  var products = productsForCurrentSelection();
+  var heading = selectedClub ? selectedClub.name : 'Products';
+  if (selectedSubsection) {
+    heading = selectedClub ? selectedClub.name + ' - ' + selectedSubsection.label : selectedSubsection.label;
+  }
+  return (
+    <s-page heading="Macron POS">
+      <ScreenScroll>
+        {renderScreenIntro(heading, '')}
+        <s-section>
+          <s-stack direction="block" gap="base">
+            {productListLoading ? <s-text color="subdued">Loading products…</s-text> : null}
+            {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
+            {!productListLoading ? renderGrid(products, function (product) {
+              return renderProductTile(product, function () { handleProductPress(product); }, 3);
+            }, 3) : null}
+          </s-stack>
+        </s-section>
+        {renderDiagnosticsToggle()}
+        {showDebug ? renderProductDebug() : null}
+        {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
+      </ScreenScroll>
+    </s-page>
+  );
+}
+function renderProductDetailScreen() {
+  if (!selectedProduct) {
+    return renderProductsScreen();
+  }
+  var meta = selectedProduct.personalisationMeta || {};
+  var hasPersonalisation = hasAnyPersonalisation(meta);
+  var isBundleProduct = selectedProduct.bundleMeta && selectedProduct.bundleMeta.isBundle;
+  var showAddToCart = !hasPersonalisation && !isBundleProduct;
+  return (
+    <s-page heading="Macron POS">
+      <ScreenScroll>
+        <s-section>
+          <s-stack direction="block" gap="base">
+            {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '196px')}
+            <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
+            {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
+              <s-text appearance="subdued">Select size to continue.</s-text>
+            ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
+          </s-stack>
+        </s-section>
+        <s-section heading="Size">
+          {renderVariants(selectedProduct)}
+        </s-section>
+        {renderBundleNote(selectedProduct)}
+        <s-section heading="Actions">
+          <s-stack direction="inline" gap="small" alignment="center">
+            <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
+            {showAddToCart ? (
+              <s-button
+                variant="primary"
+                onClick={function () {
+                  setLastEnteredPersonalisation(false);
+                  addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
+                }}
+              >
+                Add to cart
+              </s-button>
+            ) : (!isBundleProduct ? (
+              <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
+                Continue to personalisation
+              </s-button>
+            ) : null)}
+          </s-stack>
+        </s-section>
+        <div style="margin-top: 14px;">{renderDiagnosticsToggle()}</div>
+        {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
+        {showDebug ? renderBundleDebug(selectedProduct) : null}
+        {showDebug ? renderCartDebug() : null}
+        {showDebug ? renderProductDebug() : null}
+        {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
+      </ScreenScroll>
+    </s-page>
+  );
+}
+function fieldLabel(label, required, feeText) {
+  return (
+    <s-stack direction="block" gap="small">
+      <s-text>{label}</s-text>
+      <s-stack direction="inline" gap="small" wrap="true">
+        {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
+        {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
+      </s-stack>
+    </s-stack>
+  );
+}
+function renderPersonalisationScreen() {
     if (!selectedProduct) {
       return renderProductsScreen();
     }
@@ -3345,18 +2918,18 @@ function Modal() {
                 </s-stack>
               ) : null}
               <s-section heading="Actions">
-                <s-stack direction="inline" gap="small" alignment="center">
-                  <s-button variant="secondary" onClick={handleBack}>
-                    Back
-                  </s-button>
+                <s-stack direction="block" gap="small">
                   <s-button variant="primary" onClick={submitPersonalisation}>
                     Add to cart
+                  </s-button>
+                  <s-button variant="secondary" onClick={handleBack}>
+                    Back
                   </s-button>
                 </s-stack>
               </s-section>
             </s-stack>
           </s-section>
-          <div style="margin-top: 14px;">{renderDiagnosticsToggle()}</div>
+          {renderDiagnosticsToggle()}
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
           {showDebug ? renderProductDebug() : null}
