@@ -2551,7 +2551,7 @@ function Modal() {
 
   function renderDiagnosticsToggle() {
     return (
-      <div style="margin-top: 72px; opacity: 0.62;">
+      <div style="margin-top: 116px; opacity: 0.52;">
         <s-section>
           <s-stack direction="inline" gap="small" alignment="center">
             <s-button
@@ -2799,15 +2799,13 @@ function Modal() {
     return (
       <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
-          <div style="background:#ffffff; border-radius:18px; overflow:hidden; min-height:184px; box-shadow:0 0 0 1px #e6ebf1, 0 4px 14px rgba(15,23,42,0.06);">
-            <div style="padding:14px 14px 10px 14px; background:linear-gradient(180deg,#f8fafc 0%,#f3f6fa 100%); display:flex; justify-content:center; align-items:center; min-height:104px;">
-              <div style="width:100%; max-width:98px; border-radius:14px; background:#ffffff; box-shadow:inset 0 0 0 1px #edf2f7; padding:10px; display:flex; justify-content:center; align-items:center;">
+          <div style="padding:10px 6px 8px 6px; min-height:156px; display:flex; flex-direction:column; align-items:center; justify-content:flex-start;">
+            <div style="width:100%; min-height:84px; display:flex; align-items:center; justify-content:center;">
+              <div style="width:100%; max-width:98px; display:flex; align-items:center; justify-content:center;">
                 {renderImageOrFallback(item ? item.imageUrl : '', title, '72px', 'contain')}
               </div>
             </div>
-            <div style="padding:12px 12px 14px 12px; text-align:center; display:flex; align-items:center; justify-content:center; min-height:66px;">
-              <div style="display:inline-block; padding:8px 10px; border-radius:12px; background:#f8fafc; font-size:13px; font-weight:700; line-height:1.28; color:#111827;">{title}</div>
-            </div>
+            <div style="margin-top:10px; text-align:center; font-size:14px; font-weight:700; line-height:1.25; color:#111827;">{title}</div>
           </div>
         </s-clickable>
       </s-box>
@@ -2819,15 +2817,13 @@ function Modal() {
     return (
       <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
-          <div style="background:#ffffff; border-radius:18px; overflow:hidden; min-height:228px; box-shadow:0 0 0 1px #e6ebf1, 0 4px 14px rgba(15,23,42,0.06);">
-            <div style="padding:14px 12px 10px 12px; background:linear-gradient(180deg,#f8fafc 0%,#f3f6fa 100%); display:flex; justify-content:center; align-items:center; min-height:118px;">
-              <div style="width:100%; max-width:112px; border-radius:14px; background:#ffffff; box-shadow:inset 0 0 0 1px #edf2f7; padding:10px; display:flex; justify-content:center; align-items:center;">
+          <div style="padding:10px 6px 10px 6px; min-height:214px; display:flex; flex-direction:column; align-items:center; justify-content:flex-start;">
+            <div style="width:100%; min-height:104px; display:flex; align-items:center; justify-content:center;">
+              <div style="width:100%; max-width:112px; display:flex; align-items:center; justify-content:center;">
                 {renderImageOrFallback(product.imageUrl, product.title, '88px', 'contain')}
               </div>
             </div>
-            <div style="padding:12px 12px 14px 12px; min-height:96px; display:flex; align-items:flex-start;">
-              <div style="font-size:13px; font-weight:700; line-height:1.3; color:#111827;">{product.title}</div>
-            </div>
+            <div style="margin-top:10px; width:100%; text-align:center; font-size:14px; font-weight:700; line-height:1.28; color:#111827;">{product.title}</div>
           </div>
         </s-clickable>
       </s-box>
@@ -2840,7 +2836,7 @@ function Modal() {
       return null;
     }
     return (
-      <s-stack direction="inline" gap="base" wrap="true" alignItems="start">
+      <s-stack direction="inline" gap="large" wrap="true" alignItems="start">
         {list.map(function (item) {
           return renderItem(item, columns);
         })}
@@ -2977,7 +2973,7 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section>
-            <s-stack direction="block" gap="base">
+            <s-stack direction="block" gap="large">
               {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '168px')}
               <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
               {hideVariantSelector ? (
@@ -2986,15 +2982,22 @@ function Modal() {
             </s-stack>
           </s-section>
           {!hideVariantSelector ? (
-            <s-section heading="Size">
-              {renderVariants(selectedProduct)}
-            </s-section>
+            <div style="margin-top:10px;">
+              <s-section heading="Size">
+                {renderVariants(selectedProduct)}
+              </s-section>
+            </div>
           ) : null}
-          {renderOrderWorkflowSelector()}
-          {!isBundleProduct ? renderSingleFulfilmentSelector() : null}
-          {renderBundleNote(selectedProduct)}
-          <s-section heading="Actions">
-            <s-stack direction="inline" gap="small" alignment="center">
+          <div style="margin-top:14px;">
+            {renderOrderWorkflowSelector()}
+          </div>
+          {!isBundleProduct ? <div style="margin-top:12px;">{renderSingleFulfilmentSelector()}</div> : null}
+          <div style="margin-top:14px;">
+            {renderBundleNote(selectedProduct)}
+          </div>
+          <div style="margin-top:18px;">
+            <s-section heading="Actions">
+              <s-stack direction="inline" gap="base" wrap="true" alignment="center">
               <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
               {showAddToCart ? (
                 <s-button
@@ -3011,8 +3014,9 @@ function Modal() {
                   Continue
                 </s-button>
               ) : null)}
-            </s-stack>
-          </s-section>
+              </s-stack>
+            </s-section>
+          </div>
           {renderDiagnosticsToggle()}
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderBundleDebug(selectedProduct) : null}
@@ -3037,8 +3041,8 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section>
-            <s-stack direction="block" gap="base">
-              <div style="border-radius:20px; background:#ffffff; padding:16px; box-shadow:0 0 0 1px #e6ebf1, 0 4px 14px rgba(15,23,42,0.06);">
+            <s-stack direction="block" gap="large">
+              <div style="padding-bottom:4px;">
                 <s-stack direction="block" gap="small">
                   <div style="font-size:20px; font-weight:700; line-height:1.2;"><s-text>{selectedProduct.title}</s-text></div>
                   <s-stack direction="inline" gap="small" wrap="true">
@@ -3049,13 +3053,17 @@ function Modal() {
               </div>
 
               {!hideVariantSelector ? (
-                <s-section heading="Bundle size">
-                  {renderVariants(selectedProduct)}
-                </s-section>
+                <div style="margin-top:4px;">
+                  <s-section heading="Bundle size">
+                    {renderVariants(selectedProduct)}
+                  </s-section>
+                </div>
               ) : null}
 
-              {renderOrderWorkflowSelector()}
-              {selectedOrderWorkflow === 'save_for_later' ? renderSingleFulfilmentSelector() : null}
+              <div style="margin-top:8px;">
+                {renderOrderWorkflowSelector()}
+              </div>
+              {selectedOrderWorkflow === 'save_for_later' ? <div style="margin-top:10px;">{renderSingleFulfilmentSelector()}</div> : null}
 
               {bundleLoading ? <s-text>Loading…</s-text> : null}
               {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
@@ -3063,14 +3071,14 @@ function Modal() {
               {bundleComponents.map(function (component) {
                 var chosen = bundleSelections[component.key];
                 return (
-                  <div key={component.key} style="border-radius:18px; background:#ffffff; padding:14px 14px 12px 14px; box-shadow:0 0 0 1px #e6ebf1, 0 4px 12px rgba(15,23,42,0.05); margin-bottom:12px;">
-                    <s-stack direction="block" gap="small">
+                  <div key={component.key} style="border-radius:18px; background:#ffffff; padding:16px 16px 14px 16px; box-shadow:0 0 0 1px #e6ebf1, 0 4px 12px rgba(15,23,42,0.05); margin-bottom:18px;">
+                    <s-stack direction="block" gap="base">
                       <s-stack direction="inline" gap="small" alignment="center">
                         <div style="font-size:15px; font-weight:700; line-height:1.3; flex:1;"><s-text>{component.title}</s-text></div>
                         {chosen ? <s-text appearance="subdued">{normalizeVariantTitleForDisplay(chosen.title)}</s-text> : null}
                       </s-stack>
                       {component.variants && component.variants.length > 0 ? (
-                        <s-stack direction="inline" wrap="true" gap="small">
+                        <s-stack direction="inline" wrap="true" gap="base">
                           {component.variants.map(function (variant) {
                             var active = chosen && chosen.id === variant.id;
                             return (
@@ -3087,16 +3095,16 @@ function Modal() {
                       ) : (
                         <s-text appearance="critical">No variants</s-text>
                       )}
-                      {selectedOrderWorkflow === 'split_fulfilment' ? renderBundleFulfilmentSelector(component) : null}
+                      {selectedOrderWorkflow === 'split_fulfilment' ? <div style="margin-top:4px;">{renderBundleFulfilmentSelector(component)}</div> : null}
                     </s-stack>
                   </div>
                 );
               })}
 
               {hasAnyPersonalisation(meta) ? (
-                <div style="border-radius:18px; background:#ffffff; padding:14px; box-shadow:0 0 0 1px #e6ebf1, 0 4px 12px rgba(15,23,42,0.05);">
+                <div style="border-radius:18px; background:#ffffff; padding:16px; box-shadow:0 0 0 1px #e6ebf1, 0 4px 12px rgba(15,23,42,0.05); margin-top:4px;">
                   <s-section heading="Personalisation">
-                    <s-stack direction="block" gap="small">
+                    <s-stack direction="block" gap="base">
                       {meta.enablePersonalisation ? (
                         <s-stack direction="block" gap="small">
                           {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
@@ -3142,18 +3150,20 @@ function Modal() {
                 </div>
               ) : null}
 
-              <s-section heading="Actions">
-                <s-stack direction="inline" gap="small" alignment="center">
-                  <s-button
-                    variant="primary"
-                    onClick={addBundleParentToCart}
-                    disabled={bundleLoading}
-                  >
-                    Add bundle to cart
-                  </s-button>
-                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
-                </s-stack>
-              </s-section>
+              <div style="margin-top:10px;">
+                <s-section heading="Actions">
+                  <s-stack direction="inline" gap="base" wrap="true" alignment="center">
+                    <s-button
+                      variant="primary"
+                      onClick={addBundleParentToCart}
+                      disabled={bundleLoading}
+                    >
+                      Add bundle to cart
+                    </s-button>
+                    <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+                  </s-stack>
+                </s-section>
+              </div>
             </s-stack>
           </s-section>
           {renderDiagnosticsToggle()}
