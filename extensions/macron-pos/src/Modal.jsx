@@ -1435,8 +1435,7 @@ function Modal() {
     return (
       <s-section heading="Order handling">
         <s-stack direction="block" gap="small">
-          <s-text appearance="subdued">Choose whether this is going now, needs saving for later, or has mixed fulfilment.</s-text>
-          <s-stack direction="inline" gap="small" wrap="true">
+                    <s-stack direction="inline" gap="small" wrap="true">
             <s-button variant={selectedOrderWorkflow === 'take_now' ? 'primary' : 'secondary'} onClick={function () { setSelectedOrderWorkflow('take_now'); }}>
               Take today
             </s-button>
@@ -2563,7 +2562,7 @@ function Modal() {
 
   function renderDiagnosticsToggle() {
     return (
-      <div style="margin-top: 34px; opacity: 0.82;">
+      <div style="margin-top: 52px; opacity:0.78;">
         <s-section>
           <s-stack direction="inline" gap="small" alignment="center">
             <s-button
@@ -2774,79 +2773,73 @@ function Modal() {
     );
   }
 
-  function renderImageOrFallback(imageUrl, altText, imageSize, fitMode) {
-    var size = imageSize || '84px';
+  function renderImageOrFallback(imageUrl, altText, height, fitMode) {
+    var boxHeight = height || '96px';
     var objectFit = fitMode || 'contain';
     return (
-      <div style={'width:100%; display:flex; align-items:center; justify-content:center; min-height:' + size + ';'}>
+      <s-box blockSize={boxHeight} inlineSize="100%" padding="none">
         {imageUrl && toStr(imageUrl) !== '' ? (
-          <div style={{width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-            <s-image src={imageUrl} alt={altText} aspectRatio={1} objectFit={objectFit} />
-          </div>
+          <s-image src={imageUrl} alt={altText} inlineSize="100%" blockSize={boxHeight} objectFit={objectFit} />
         ) : (
-          <div style={{width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-            <s-text appearance="subdued">No image</s-text>
-          </div>
+          <s-box blockSize={boxHeight} inlineSize="100%" padding="base">
+            <s-stack direction="block" gap="small" alignItems="center">
+              <s-text appearance="subdued">No image</s-text>
+            </s-stack>
+          </s-box>
         )}
-      </div>
+      </s-box>
     );
   }
 
-  function tilePixelWidth(columns) {
+  function tileWidth(columns) {
     if (columns === 4) {
-      return '168px';
+      return '24%';
     }
     if (columns === 3) {
-      return '212px';
+      return '32%';
     }
     if (columns === 2) {
-      return '320px';
+      return '49%';
     }
     return '100%';
   }
 
-  function tileImageSize(columns, isProduct) {
-    if (isProduct) {
-      return columns === 3 ? '96px' : '88px';
-    }
-    return columns === 4 ? '84px' : '92px';
-  }
-
-
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-    var width = tilePixelWidth(columns);
-    var imageSize = tileImageSize(columns, false);
+    var width = tileWidth(columns);
     return (
-      <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
+      <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width}>
         <s-clickable onClick={onPress}>
-          <div style={{padding: '10px 8px 16px 8px', minHeight: '154px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start'}}>
-            <div style={{minHeight: '96px', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-              {renderImageOrFallback(item ? item.imageUrl : '', title, imageSize, 'contain')}
-            </div>
-            <div style={{paddingTop: '8px', textAlign: 'center', fontWeight: '600', lineHeight: '1.25', fontSize: '14px', maxWidth: '156px'}}>
-              {title}
-            </div>
-          </div>
+          <s-pos-block>
+            <s-stack direction="block" gap="small">
+              {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
+              <s-box padding="small">
+                <s-stack direction="block" gap="small" alignItems="center">
+                  <s-text emphasis="bold">{title}</s-text>
+                </s-stack>
+              </s-box>
+            </s-stack>
+          </s-pos-block>
         </s-clickable>
       </s-box>
     );
   }
 
   function renderProductTile(product, onPress, columns) {
-    var width = tilePixelWidth(columns);
-    var imageSize = tileImageSize(columns, true);
+    var width = tileWidth(columns);
     return (
-      <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
+      <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width}>
         <s-clickable onClick={onPress}>
-          <div style={{padding: '10px 10px 18px 10px', minHeight: '208px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start'}}>
-            <div style={{minHeight: '110px', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-              {renderImageOrFallback(product.imageUrl, product.title, imageSize, 'contain')}
-            </div>
-            <div style={{paddingTop: '10px', textAlign: 'center', fontWeight: '600', lineHeight: '1.28', fontSize: '14px', maxWidth: '192px'}}>
-              {product.title}
-            </div>
-          </div>
+          <s-pos-block>
+            <s-stack direction="block" gap="small">
+              {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
+              <s-box padding="small">
+                <s-stack direction="block" gap="small" alignItems="center">
+                  <s-text emphasis="bold">{product.title}</s-text>
+                </s-stack>
+              </s-box>
+            </s-stack>
+          </s-pos-block>
         </s-clickable>
       </s-box>
     );
@@ -2858,7 +2851,7 @@ function Modal() {
       return null;
     }
     return (
-      <s-stack direction="inline" gap="base" alignItems="start">
+      <s-stack direction="inline" gap="base" wrap="true" alignItems="start">
         {list.map(function (item) {
           return renderItem(item, columns);
         })}
@@ -2958,7 +2951,7 @@ function Modal() {
         <s-stack direction="block" gap="micro">
           <s-text appearance="subdued">Bundle product detected.</s-text>
           <s-button variant="secondary" onClick={handleBundleBuilderOpen}>
-            Continue to bundle builder
+            Build bundle
           </s-button>
         </s-stack>
       </s-section>
@@ -3001,13 +2994,13 @@ function Modal() {
               {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '168px')}
               <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
-                <s-text appearance="subdued">{hideVariantSelector ? ('Variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : 'Select size to continue.'}</s-text>
-              ) : <s-text appearance="subdued">{hideVariantSelector ? ('Bundle variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : 'Bundle options available for this item.'}</s-text>}
+                <s-text appearance="subdued">{hideVariantSelector ? ('Variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : ''}</s-text>
+              ) : <s-text appearance="subdued">{hideVariantSelector ? ('Bundle variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : ''}</s-text>}
             </s-stack>
           </s-section>
           {!hideVariantSelector ? (
             <s-section heading="Size">
-              <div style="margin-top:6px;">{renderVariants(selectedProduct)}</div>
+              {renderVariants(selectedProduct)}
             </s-section>
           ) : null}
           {renderOrderWorkflowSelector()}
@@ -3015,6 +3008,8 @@ function Modal() {
           {renderBundleNote(selectedProduct)}
           <s-section heading="Actions">
             <s-stack direction="block" gap="base">
+              <s-stack direction="inline" gap="base" alignment="center">
+              <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
               {showAddToCart ? (
                 <s-button
                   variant="primary"
@@ -3030,7 +3025,6 @@ function Modal() {
                   Continue to personalisation
                 </s-button>
               ) : null)}
-              <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
             </s-stack>
           </s-section>
           {renderDiagnosticsToggle()}
@@ -3057,7 +3051,7 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section heading="Bundle builder">
-            <s-stack direction="block" gap="small">
+            <s-stack direction="block" gap="base">
               <s-text emphasis="bold">{selectedProduct.title}</s-text>
               <s-text appearance="subdued">{hideVariantSelector ? ('Bundle variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : ('Selected bundle size: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'None'))}</s-text>
               {!hideVariantSelector ? (
@@ -3065,7 +3059,6 @@ function Modal() {
                   {renderVariants(selectedProduct)}
                 </s-section>
               ) : null}
-              <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
               {renderOrderWorkflowSelector()}
               {selectedOrderWorkflow === 'save_for_later' ? renderSingleFulfilmentSelector() : null}
               {bundleLoading ? <s-text>Loading bundle components…</s-text> : null}
@@ -3155,7 +3148,7 @@ function Modal() {
                   >
                     Add bundle to cart
                   </s-button>
-                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+                  <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
                 </s-stack>
               </s-section>
             </s-stack>
