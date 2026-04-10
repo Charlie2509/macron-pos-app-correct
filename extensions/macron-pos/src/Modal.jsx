@@ -1323,6 +1323,121 @@ function Modal() {
   var showDebug = showDebugState[0];
   var setShowDebug = showDebugState[1];
 
+  var selectedOrderWorkflowState = useState('take_now');
+  var selectedOrderWorkflow = selectedOrderWorkflowState[0];
+  var setSelectedOrderWorkflow = selectedOrderWorkflowState[1];
+
+  var selectedFulfilmentChoiceState = useState('take_now');
+  var selectedFulfilmentChoice = selectedFulfilmentChoiceState[0];
+  var setSelectedFulfilmentChoice = selectedFulfilmentChoiceState[1];
+
+  var bundleFulfilmentChoicesState = useState({});
+  var bundleFulfilmentChoices = bundleFulfilmentChoicesState[0];
+  var setBundleFulfilmentChoices = bundleFulfilmentChoicesState[1];
+
+  function workflowLabel(value) {
+    if (value === 'save_for_later') {
+      return 'Order for later';
+    }
+    if (value === 'split_fulfilment') {
+      return 'Split fulfilment';
+    }
+    return 'Take today';
+  }
+
+  function fulfilmentLabel(value) {
+    if (value === 'order_later') {
+      return 'Order later';
+    }
+    return 'Take now';
+  }
+
+  function buildWorkflowProperties(workflow, fulfilmentChoice) {
+    var props = {};
+    props['POS Workflow'] = workflowLabel(workflow || 'take_now');
+    props['Fulfilment Status'] = fulfilmentLabel(fulfilmentChoice || 'take_now');
+    return props;
+  }
+
+  function mergeProperties(baseProps, extraProps) {
+    var next = {};
+    var key;
+    if (baseProps) {
+      for (key in baseProps) {
+        if (Object.prototype.hasOwnProperty.call(baseProps, key)) {
+          next[key] = baseProps[key];
+        }
+      }
+    }
+    if (extraProps) {
+      for (key in extraProps) {
+        if (Object.prototype.hasOwnProperty.call(extraProps, key)) {
+          next[key] = extraProps[key];
+        }
+      }
+    }
+    return next;
+  }
+
+  function renderOrderWorkflowSelector() {
+    return (
+      <s-section heading="Order handling">
+        <s-stack direction="block" gap="small">
+          <s-text appearance="subdued">Choose whether this is going now, needs saving for later, or has mixed fulfilment.</s-text>
+          <s-stack direction="inline" gap="small" wrap="true">
+            <s-button variant={selectedOrderWorkflow === 'take_now' ? 'primary' : 'secondary'} onClick={function () { setSelectedOrderWorkflow('take_now'); }}>
+              Take today
+            </s-button>
+            <s-button variant={selectedOrderWorkflow === 'save_for_later' ? 'primary' : 'secondary'} onClick={function () { setSelectedOrderWorkflow('save_for_later'); }}>
+              Order for later
+            </s-button>
+            <s-button variant={selectedOrderWorkflow === 'split_fulfilment' ? 'primary' : 'secondary'} onClick={function () { setSelectedOrderWorkflow('split_fulfilment'); }}>
+              Split fulfilment
+            </s-button>
+          </s-stack>
+          {selectedOrderWorkflow === 'save_for_later' ? (
+            <s-text appearance="subdued">This stays flagged for a later order workflow so it can be pushed through to Orders/admin next.</s-text>
+          ) : null}
+          {selectedOrderWorkflow === 'split_fulfilment' ? (
+            <s-text appearance="subdued">Use this when some items go now and others need ordering in later.</s-text>
+          ) : null}
+        </s-stack>
+      </s-section>
+    );
+  }
+
+  function renderSingleFulfilmentSelector() {
+    return (
+      <s-section heading="Stock / fulfilment">
+        <s-stack direction="block" gap="small">
+          <s-text appearance="subdued">Flag whether this item is leaving with the customer now or needs ordering in.</s-text>
+          <s-stack direction="inline" gap="small" wrap="true">
+            <s-button variant={selectedFulfilmentChoice === 'take_now' ? 'primary' : 'secondary'} onClick={function () { setSelectedFulfilmentChoice('take_now'); }}>
+              Take now
+            </s-button>
+            <s-button variant={selectedFulfilmentChoice === 'order_later' ? 'primary' : 'secondary'} onClick={function () { setSelectedFulfilmentChoice('order_later'); }}>
+              Order later
+            </s-button>
+          </s-stack>
+        </s-stack>
+      </s-section>
+    );
+  }
+
+  function renderBundleFulfilmentSelector(component) {
+    var current = bundleFulfilmentChoices && bundleFulfilmentChoices[component.key] ? bundleFulfilmentChoices[component.key] : 'take_now';
+    return (
+      <s-stack direction="inline" gap="small" wrap="true">
+        <s-button variant={current === 'take_now' ? 'primary' : 'secondary'} onClick={function () { handleBundleFulfilmentChoice(component.key, 'take_now'); }}>
+          Take now
+        </s-button>
+        <s-button variant={current === 'order_later' ? 'primary' : 'secondary'} onClick={function () { handleBundleFulfilmentChoice(component.key, 'order_later'); }}>
+          Order later
+        </s-button>
+      </s-stack>
+    );
+  }
+
   async function loadProductsForCollection(collectionId) {
     if (!collectionId) {
       return;
@@ -1499,6 +1614,9 @@ function Modal() {
     setBundleDebugFetchErrors([]);
     setBundleAddStatus('idle');
     setBundleAddError('');
+    setSelectedOrderWorkflow('take_now');
+    setSelectedFulfilmentChoice('take_now');
+    setBundleFulfilmentChoices({});
     setScreen('clubs');
   }
 
@@ -1515,6 +1633,7 @@ function Modal() {
     setBundleDebugFetchErrors([]);
     setBundleAddStatus('idle');
     setBundleAddError('');
+    setBundleFulfilmentChoices({});
   }
 
   async function loadBundleComponentsForProduct(product) {
@@ -1661,6 +1780,16 @@ function Modal() {
     setBundleSelections(next);
   }
 
+  function handleBundleFulfilmentChoice(componentKey, choice) {
+    var next = {};
+    var keys = Object.keys(bundleFulfilmentChoices || {});
+    for (var i = 0; i < keys.length; i += 1) {
+      next[keys[i]] = bundleFulfilmentChoices[keys[i]];
+    }
+    next[componentKey] = choice;
+    setBundleFulfilmentChoices(next);
+  }
+
   async function addBundleParentToCart() {
     if (!selectedProduct || !selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle) {
       toast('No bundle selected');
@@ -1721,12 +1850,13 @@ function Modal() {
       bundleFeeAmount = parsedBundleFee;
     }
 
-    var bundleProps = {};
+    var bundleProps = buildWorkflowProperties(selectedOrderWorkflow, selectedFulfilmentChoice);
     bundleProps.Bundle = selectedProduct.title;
     for (var idx = 0; idx < bundleComponents.length; idx += 1) {
       var item = bundleComponents[idx];
       var selected = bundleSelections[item.key];
       bundleProps['Item ' + String(idx + 1)] = item.title + ' — ' + selected.title;
+      bundleProps['Fulfilment Item ' + String(idx + 1)] = fulfilmentLabel(bundleFulfilmentChoices && bundleFulfilmentChoices[item.key] ? bundleFulfilmentChoices[item.key] : 'take_now');
     }
 
     var personalisationProps = buildPersonalisationProperties(
@@ -2373,7 +2503,7 @@ function Modal() {
 
   function renderDiagnosticsToggle() {
     return (
-      <div style="margin-top: 36px;">
+      <div style="margin-top: 28px;">
         <s-section>
           <s-stack direction="inline" gap="small" alignment="center">
             <s-button
@@ -2587,16 +2717,18 @@ function Modal() {
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
     var boxHeight = height || '96px';
     var objectFit = fitMode || 'contain';
-    var outerStyle = 'height:' + boxHeight + '; width:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; background:#ffffff;';
-    var imgStyle = 'max-width:100%; max-height:100%; width:auto; height:auto; object-fit:' + objectFit + '; display:block;';
     return (
-      <div style={outerStyle}>
+      <s-box blockSize={boxHeight} inlineSize="100%" padding="none">
         {imageUrl && toStr(imageUrl) !== '' ? (
-          <img src={imageUrl} alt={altText || ''} style={imgStyle} />
+          <s-image src={imageUrl} alt={altText} inlineSize="100%" blockSize={boxHeight} objectFit={objectFit} />
         ) : (
-          <div style="font-size:12px; color:#6b7280;">No image</div>
+          <s-box blockSize={boxHeight} inlineSize="100%" padding="base">
+            <s-stack direction="block" gap="small" alignItems="center">
+              <s-text appearance="subdued">No image</s-text>
+            </s-stack>
+          </s-box>
         )}
-      </div>
+      </s-box>
     );
   }
 
@@ -2619,14 +2751,16 @@ function Modal() {
     return (
       <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
-          <div style="border:1px solid #d9dee7; border-radius:12px; background:#ffffff; overflow:hidden; padding:10px; min-height:170px; display:flex; flex-direction:column; justify-content:flex-start;">
-            <div style="height:82px; display:flex; align-items:center; justify-content:center;">
-              {renderImageOrFallback(item ? item.imageUrl : '', title, '72px', 'contain')}
-            </div>
-            <div style="margin-top:10px; padding-top:10px; border-top:1px solid #edf0f3; text-align:center; font-size:14px; font-weight:600; line-height:1.3;">
-              {title}
-            </div>
-          </div>
+          <s-box padding="small" border="base" cornerRadius="large-100">
+            <s-stack direction="block" gap="small">
+              {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
+              <s-box padding="small">
+                <s-stack direction="block" gap="small" alignItems="center">
+                  <s-text emphasis="bold">{title}</s-text>
+                </s-stack>
+              </s-box>
+            </s-stack>
+          </s-box>
         </s-clickable>
       </s-box>
     );
@@ -2637,14 +2771,16 @@ function Modal() {
     return (
       <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
-          <div style="border:1px solid #d9dee7; border-radius:12px; background:#ffffff; overflow:hidden; padding:10px; min-height:190px; display:flex; flex-direction:column; justify-content:flex-start;">
-            <div style="height:96px; display:flex; align-items:center; justify-content:center;">
-              {renderImageOrFallback(product.imageUrl, product.title, '86px', 'contain')}
-            </div>
-            <div style="margin-top:10px; padding-top:10px; border-top:1px solid #edf0f3; text-align:left; font-size:13px; font-weight:600; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">
-              {product.title}
-            </div>
-          </div>
+          <s-box padding="small" border="base" cornerRadius="large-100">
+            <s-stack direction="block" gap="small">
+              {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
+              <s-box padding="small">
+                <s-stack direction="block" gap="small">
+                  <s-text emphasis="bold">{product.title}</s-text>
+                </s-stack>
+              </s-box>
+            </s-stack>
+          </s-box>
         </s-clickable>
       </s-box>
     );
@@ -2804,6 +2940,8 @@ function Modal() {
           <s-section heading="Size">
             {renderVariants(selectedProduct)}
           </s-section>
+          {renderOrderWorkflowSelector()}
+          {!isBundleProduct ? renderSingleFulfilmentSelector() : null}
           {renderBundleNote(selectedProduct)}
           <s-section heading="Actions">
             <s-stack direction="inline" gap="small" alignment="center">
@@ -2813,7 +2951,7 @@ function Modal() {
                   variant="primary"
                   onClick={function () {
                     setLastEnteredPersonalisation(false);
-                    addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
+                    addSelectedProductToCart(selectedProduct, selectedVariant, buildWorkflowProperties(selectedOrderWorkflow, selectedFulfilmentChoice), null);
                   }}
                 >
                   Add to cart
@@ -2851,6 +2989,8 @@ function Modal() {
               <s-text>Bundle parent: {selectedProduct.title}</s-text>
               <s-text appearance="subdued">Parent variant: {selectedVariant ? selectedVariant.title : 'none selected'}</s-text>
               <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
+              {renderOrderWorkflowSelector()}
+              {selectedOrderWorkflow !== 'take_now' ? renderSingleFulfilmentSelector() : null}
               {bundleLoading ? <s-text>Loading bundle components…</s-text> : null}
               {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
               {bundleComponents.map(function (component) {
@@ -2877,6 +3017,7 @@ function Modal() {
                       ) : (
                         <s-text appearance="critical">No variants available for this component</s-text>
                       )}
+                      {selectedOrderWorkflow === 'split_fulfilment' ? renderBundleFulfilmentSelector(component) : null}
                     </s-stack>
                   </s-section>
                 );
@@ -2990,7 +3131,10 @@ function Modal() {
       if (enteredPersonalisation && parsedFeeAmount !== null && parsedFeeAmount > 0) {
         feeAmount = parsedFeeAmount;
       }
-      var props = buildPersonalisationProperties(meta, primaryFieldValue, extraField1Value, extraField2Value, feeAmount);
+      var props = mergeProperties(
+        buildWorkflowProperties(selectedOrderWorkflow, selectedFulfilmentChoice),
+        buildPersonalisationProperties(meta, primaryFieldValue, extraField1Value, extraField2Value, feeAmount)
+      );
       if (Object.keys(props).length > 0) {
         var summaryParts = [];
         var keys = Object.keys(props);
@@ -3016,6 +3160,8 @@ function Modal() {
             <s-stack direction="block" gap="small">
               <div style="font-weight: 700;"><s-text>{selectedProduct.title}</s-text></div>
               <s-text appearance="subdued">Variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
+              {renderOrderWorkflowSelector()}
+              {renderSingleFulfilmentSelector()}
 
               {meta.enablePersonalisation ? (
                 <s-stack direction="block" gap="small">
