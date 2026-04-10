@@ -1435,7 +1435,7 @@ function Modal() {
     return (
       <s-section heading="Order handling">
         <s-stack direction="block" gap="small">
-          <s-text appearance="subdued">Choose whether this is going now, needs saving for later, or has mixed fulfilment.</s-text>
+          <s-text appearance="subdued">Choose the checkout route for this sale.</s-text>
           <s-stack direction="inline" gap="small" wrap="true">
             <s-button variant={selectedOrderWorkflow === 'take_now' ? 'primary' : 'secondary'} onClick={function () { setSelectedOrderWorkflow('take_now'); }}>
               Take today
@@ -1448,10 +1448,10 @@ function Modal() {
             </s-button>
           </s-stack>
           {selectedOrderWorkflow === 'save_for_later' ? (
-            <s-text appearance="subdued">This stays flagged for a later order workflow so it can be pushed through to Orders/admin next.</s-text>
+            <s-text appearance="subdued">Use this when the customer is not taking the order away today.</s-text>
           ) : null}
           {selectedOrderWorkflow === 'split_fulfilment' ? (
-            <s-text appearance="subdued">Use this when some items go now and others need ordering in later.</s-text>
+            <s-text appearance="subdued">Use this when some items go now and some need ordering in.</s-text>
           ) : null}
         </s-stack>
       </s-section>
@@ -1462,7 +1462,7 @@ function Modal() {
     return (
       <s-section heading="Stock / fulfilment">
         <s-stack direction="block" gap="small">
-          <s-text appearance="subdued">Flag whether this item is leaving with the customer now or needs ordering in.</s-text>
+          <s-text appearance="subdued">Choose whether this item is going with the customer now.</s-text>
           <s-stack direction="inline" gap="small" wrap="true">
             <s-button variant={selectedFulfilmentChoice === 'take_now' ? 'primary' : 'secondary'} onClick={function () { setSelectedFulfilmentChoice('take_now'); }}>
               Take now
@@ -2563,7 +2563,7 @@ function Modal() {
 
   function renderDiagnosticsToggle() {
     return (
-      <div style="margin-top: 28px;">
+      <div style="margin-top: 34px; opacity: 0.82;">
         <s-section>
           <s-stack direction="inline" gap="small" alignment="center">
             <s-button
@@ -2574,7 +2574,7 @@ function Modal() {
             >
               {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
             </s-button>
-            {!showDebug && errorMessage ? <s-text size="small" appearance="critical">Diagnostics hidden · active warning</s-text> : null}
+            {!showDebug && errorMessage ? <s-text size="small" appearance="critical">Warning available</s-text> : null}
           </s-stack>
         </s-section>
       </div>
@@ -2766,7 +2766,7 @@ function Modal() {
         <s-stack direction="block" gap="small">
           <s-stack direction="inline" gap="small" alignment="center">
             {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
-            <div style="font-size: 21px; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em;"><s-text>{title}</s-text></div>
+            <div style="font-size: 22px; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em;"><s-text>{title}</s-text></div>
           </s-stack>
           {subtitle ? <s-text appearance="subdued">{subtitle}</s-text> : null}
         </s-stack>
@@ -2794,13 +2794,13 @@ function Modal() {
 
   function tileWidth(columns) {
     if (columns === 4) {
-      return '24%';
+      return '23.5%';
     }
     if (columns === 3) {
-      return '32%';
+      return '31.8%';
     }
     if (columns === 2) {
-      return '49%';
+      return '48.5%';
     }
     return '100%';
   }
@@ -2811,16 +2811,14 @@ function Modal() {
     return (
       <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
-          <s-box padding="small" border="base" cornerRadius="large-100">
-            <s-stack direction="block" gap="small">
-              {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
-              <s-box padding="small">
-                <s-stack direction="block" gap="small" alignItems="center">
-                  <s-text emphasis="bold">{title}</s-text>
-                </s-stack>
-              </s-box>
-            </s-stack>
-          </s-box>
+          <div style="border:1px solid #d9e0ea; border-radius:16px; background:#ffffff; overflow:hidden; min-height:174px; box-shadow:0 1px 3px rgba(15,23,42,0.04);">
+            <div style="padding:12px 12px 8px 12px; border-bottom:1px solid #eef2f7; background:#fafbfc; display:flex; justify-content:center; align-items:center; min-height:92px;">
+              <div style="width:100%; max-width:92px;">{renderImageOrFallback(item ? item.imageUrl : '', title, '74px', 'contain')}</div>
+            </div>
+            <div style="padding:12px 10px 14px 10px; text-align:center; display:flex; align-items:center; justify-content:center; min-height:68px;">
+              <div style="font-size:13px; font-weight:700; line-height:1.28; color:#111827;">{title}</div>
+            </div>
+          </div>
         </s-clickable>
       </s-box>
     );
@@ -2831,16 +2829,14 @@ function Modal() {
     return (
       <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
-          <s-box padding="small" border="base" cornerRadius="large-100">
-            <s-stack direction="block" gap="small">
-              {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
-              <s-box padding="small">
-                <s-stack direction="block" gap="small">
-                  <s-text emphasis="bold">{product.title}</s-text>
-                </s-stack>
-              </s-box>
-            </s-stack>
-          </s-box>
+          <div style="border:1px solid #d9e0ea; border-radius:16px; background:#ffffff; overflow:hidden; min-height:220px; box-shadow:0 1px 3px rgba(15,23,42,0.04);">
+            <div style="padding:14px 12px 10px 12px; border-bottom:1px solid #eef2f7; background:#fafbfc; display:flex; justify-content:center; align-items:center; min-height:112px;">
+              <div style="width:100%; max-width:110px;">{renderImageOrFallback(product.imageUrl, product.title, '90px', 'contain')}</div>
+            </div>
+            <div style="padding:12px 12px 14px 12px; min-height:94px; display:flex; align-items:flex-start;">
+              <div style="font-size:13px; font-weight:700; line-height:1.28; color:#111827;">{product.title}</div>
+            </div>
+          </div>
         </s-clickable>
       </s-box>
     );
@@ -2852,7 +2848,7 @@ function Modal() {
       return null;
     }
     return (
-      <s-stack direction="inline" gap="small" wrap="true" alignItems="start">
+      <s-stack direction="inline" gap="base" wrap="true" alignItems="start">
         {list.map(function (item) {
           return renderItem(item, columns);
         })}
@@ -3050,25 +3046,34 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          <s-section heading="Bundle builder">
-            <s-stack direction="block" gap="small">
-              <s-text emphasis="bold">{selectedProduct.title}</s-text>
-              <s-text appearance="subdued">{hideVariantSelector ? ('Bundle variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : ('Selected bundle size: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'None'))}</s-text>
+          <s-section>
+            <s-stack direction="block" gap="base">
+              <div style="border:1px solid #e5e7eb; border-radius:18px; background:#ffffff; padding:16px; box-shadow:0 1px 3px rgba(15,23,42,0.04);">
+                <s-stack direction="block" gap="small">
+                  <div style="font-size:20px; font-weight:700; line-height:1.2;"><s-text>{selectedProduct.title}</s-text></div>
+                  <s-text appearance="subdued">{hideVariantSelector ? ('Bundle variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : ('Selected bundle size: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'None'))}</s-text>
+                  <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
+                </s-stack>
+              </div>
+
               {!hideVariantSelector ? (
                 <s-section heading="Bundle size">
                   {renderVariants(selectedProduct)}
                 </s-section>
               ) : null}
-              <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
+
               {renderOrderWorkflowSelector()}
               {selectedOrderWorkflow === 'save_for_later' ? renderSingleFulfilmentSelector() : null}
+
               {bundleLoading ? <s-text>Loading bundle components…</s-text> : null}
               {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
+
               {bundleComponents.map(function (component) {
                 var chosen = bundleSelections[component.key];
                 return (
-                  <s-section key={component.key} heading={component.title}>
+                  <div key={component.key} style="border:1px solid #e5e7eb; border-radius:16px; background:#ffffff; padding:14px 14px 12px 14px; box-shadow:0 1px 3px rgba(15,23,42,0.04); margin-bottom:12px;">
                     <s-stack direction="block" gap="small">
+                      <div style="font-size:15px; font-weight:700; line-height:1.3;"><s-text>{component.title}</s-text></div>
                       <s-text appearance="subdued">{chosen ? ('Selected: ' + normalizeVariantTitleForDisplay(chosen.title)) : 'Choose one variant'}</s-text>
                       {component.variants && component.variants.length > 0 ? (
                         <s-stack direction="inline" wrap="true" gap="small">
@@ -3088,60 +3093,69 @@ function Modal() {
                       ) : (
                         <s-text appearance="critical">No variants available for this component</s-text>
                       )}
-                      {selectedOrderWorkflow === 'split_fulfilment' ? (<s-stack direction="block" gap="small"><s-text appearance="subdued">Choose whether this component goes now or later.</s-text>{renderBundleFulfilmentSelector(component)}</s-stack>) : null}
+                      {selectedOrderWorkflow === 'split_fulfilment' ? (
+                        <s-stack direction="block" gap="small">
+                          <s-text appearance="subdued">Fulfilment for this item</s-text>
+                          {renderBundleFulfilmentSelector(component)}
+                        </s-stack>
+                      ) : null}
                     </s-stack>
-                  </s-section>
+                  </div>
                 );
               })}
+
               {hasAnyPersonalisation(meta) ? (
-                <s-section heading="Bundle personalisation">
-                  <s-stack direction="block" gap="small">
-                    {meta.enablePersonalisation ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
-                        <s-text-field
-                          value={primaryFieldValue}
-                          maxLength={maxChars === null ? undefined : maxChars}
-                          onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
+                <div style="border:1px solid #e5e7eb; border-radius:16px; background:#ffffff; padding:14px; box-shadow:0 1px 3px rgba(15,23,42,0.04);">
+                  <s-section heading="Bundle personalisation">
+                    <s-stack direction="block" gap="small">
+                      {meta.enablePersonalisation ? (
+                        <s-stack direction="block" gap="small">
+                          {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
+                          <s-text-field
+                            value={primaryFieldValue}
+                            maxLength={maxChars === null ? undefined : maxChars}
+                            onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
+                            placeholder="Enter text"
+                          />
+                        </s-stack>
+                      ) : null}
 
-                    {meta.extraField1Enabled ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
-                        <s-text-field
-                          value={extraField1Value}
-                          onInput={function (event) { setExtraField1Value(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
+                      {meta.extraField1Enabled ? (
+                        <s-stack direction="block" gap="small">
+                          {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
+                          <s-text-field
+                            value={extraField1Value}
+                            onInput={function (event) { setExtraField1Value(event.target.value); }}
+                            placeholder="Enter text"
+                          />
+                        </s-stack>
+                      ) : null}
 
-                    {meta.extraField2Enabled ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
-                        <s-text-field
-                          value={extraField2Value}
-                          onInput={function (event) { setExtraField2Value(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
+                      {meta.extraField2Enabled ? (
+                        <s-stack direction="block" gap="small">
+                          {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
+                          <s-text-field
+                            value={extraField2Value}
+                            onInput={function (event) { setExtraField2Value(event.target.value); }}
+                            placeholder="Enter text"
+                          />
+                        </s-stack>
+                      ) : null}
 
-                    {meta.enableFileUpload ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
-                        <s-text appearance="critical">File upload is not available in POS V1 for bundle personalisation.</s-text>
-                        <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
-                      </s-stack>
-                    ) : null}
-                  </s-stack>
-                </s-section>
+                      {meta.enableFileUpload ? (
+                        <s-stack direction="block" gap="small">
+                          {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
+                          <s-text appearance="critical">File upload is not available in POS V1 for bundle personalisation.</s-text>
+                          <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
+                        </s-stack>
+                      ) : null}
+                    </s-stack>
+                  </s-section>
+                </div>
               ) : null}
+
               <s-section heading="Actions">
-                <s-stack direction="block" gap="small">
+                <s-stack direction="inline" gap="small" alignment="center">
                   <s-button
                     variant="primary"
                     onClick={addBundleParentToCart}
