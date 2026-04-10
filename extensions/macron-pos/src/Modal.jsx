@@ -2433,7 +2433,7 @@ function Modal() {
 
   function renderLiveDebugPanel() {
     return (
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.72;">
+      <s-section>
         <s-stack direction="block" gap="micro">
           <s-text size="small" appearance="subdued">Live fetch started: {liveFetchStarted ? 'yes' : 'no'}</s-text>
           <s-text size="small" appearance="subdued">Live fetch succeeded: {liveFetchSucceeded ? 'yes' : 'no'}</s-text>
@@ -2449,7 +2449,7 @@ function Modal() {
           <s-text size="small" appearance="subdued">Data source in use: {dataSource}</s-text>
           <s-text size="small" appearance={liveFetchErrorMessage === '' ? 'subdued' : 'critical'}>Error: {liveFetchErrorMessage === '' ? 'none' : liveFetchErrorMessage}</s-text>
         </s-stack>
-      </div>
+      </s-section>
     );
   }
   function renderDebugHeader() {
@@ -2459,19 +2459,15 @@ function Modal() {
           <s-text size="small" appearance="subdued">Screen: {screen} · {dataSource}</s-text>
           {loading ? <s-text size="small" appearance="subdued">Loading…</s-text> : null}
           {errorMessage ? <s-text size="small" appearance="critical">{errorMessage}</s-text> : null}
-        </s-stack>
-        <details>
-          <summary>Live diagnostics</summary>
           {renderLiveDebugPanel()}
-        </details>
+        </s-stack>
       </s-section>
     );
   }
-
   function renderDiagnosticsToggle() {
     return (
       <s-section>
-        <s-stack direction="inline" gap="small" alignment="center">
+        <s-stack direction="inline" gap="small" alignItems="center">
           <s-button
             variant="secondary"
             onClick={function () {
@@ -2525,8 +2521,7 @@ function Modal() {
     }
     return (
       <s-section heading="Bundle debug">
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.72;">
-          <s-stack direction="block" gap="micro">
+        <s-stack direction="block" gap="micro">
           <s-text>bundle parent: {product.title}</s-text>
           <s-text>parent variant: {selectedVariant ? selectedVariant.title : 'none'}</s-text>
           <s-text>isBundle: {meta.isBundle ? 'true' : 'false'}</s-text>
@@ -2545,7 +2540,6 @@ function Modal() {
           <s-text>bundle fetch errors: {bundleDebugFetchErrors.length === 0 ? 'none' : bundleDebugFetchErrors.join(' | ')}</s-text>
             {names.length > 0 ? <s-text>components: {names.join(', ')}</s-text> : null}
           </s-stack>
-        </div>
       </s-section>
     );
   }
@@ -2560,8 +2554,7 @@ function Modal() {
     var summary = hasAnyPersonalisation(meta) ? 'yes' : 'no';
     return (
       <s-section heading="Personalisation debug">
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.72;">
-          <s-stack direction="block" gap="micro">
+        <s-stack direction="block" gap="micro">
           <s-text>Product supports personalisation: {summary}</s-text>
           <s-text>Parsed max chars: {parsedMax === null ? 'none' : parsedMax}</s-text>
           <s-text>Parsed fee: {feeDisplay === '' ? 'none' : feeDisplay}</s-text>
@@ -2581,7 +2574,6 @@ function Modal() {
           <s-text>fileUploadHelpText: {meta.fileUploadHelpText}</s-text>
             <s-text>fileUploadRequired: {meta.fileUploadRequired ? 'true' : 'false'}</s-text>
           </s-stack>
-        </div>
       </s-section>
     );
   }
@@ -2590,8 +2582,7 @@ function Modal() {
     var variantId = selectedVariant ? selectedVariant.id : '';
     return (
       <s-section heading="Cart debug">
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.72;">
-          <s-stack direction="block" gap="micro">
+        <s-stack direction="block" gap="micro">
           <s-text>Selected product: {selectedProduct ? selectedProduct.title : ''}</s-text>
           <s-text>Selected variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
           <s-text>Variant id: {variantId}</s-text>
@@ -2643,7 +2634,6 @@ function Modal() {
               : 'none'}
             </s-text>
           </s-stack>
-        </div>
       </s-section>
     );
   }
@@ -2651,15 +2641,13 @@ function Modal() {
   function renderProductDebug() {
     return (
       <s-section heading="Product debug">
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px; opacity: 0.72;">
-          <s-stack direction="block" gap="micro">
+        <s-stack direction="block" gap="micro">
           <s-text>Selected club: {selectedClub ? selectedClub.name : ''}</s-text>
           <s-text>Selected subsection: {selectedSubsection ? selectedSubsection.label : ''}</s-text>
           <s-text>Current collection id: {currentProductsCollectionId ? currentProductsCollectionId : ''}</s-text>
           <s-text>Product list loading: {productListLoading ? 'yes' : 'no'}</s-text>
             <s-text>Current products count: {currentProducts ? currentProducts.length : 0}</s-text>
           </s-stack>
-        </div>
       </s-section>
     );
   }
@@ -2669,9 +2657,9 @@ function Modal() {
     return (
       <s-section>
         <s-stack direction="block" gap="small">
-          <s-stack direction="inline" gap="small" alignment="center">
+          <s-stack direction="inline" gap="small" alignItems="center">
             {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
-            <div style="font-size: 21px; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em;"><s-text>{title}</s-text></div>
+            <s-text>{title}</s-text>
           </s-stack>
           {subtitle ? <s-text appearance="subdued">{subtitle}</s-text> : null}
         </s-stack>
@@ -2867,17 +2855,19 @@ function Modal() {
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
     var boxHeight = height || '96px';
     var objectFit = fitMode || 'contain';
-    var wrapperStyle = 'height:' + boxHeight + '; width:100%; overflow:hidden; border-radius:14px 14px 0 0; background:#f8fafc; border-bottom:1px solid #e5e7eb; display:flex; align-items:center; justify-content:center;';
-    var imageStyle = 'width:100%; height:100%; display:block; object-fit:' + objectFit + '; object-position:center; background:#f8fafc;';
+    if (imageUrl && toStr(imageUrl) !== '') {
+      return (
+        <s-box blockSize={boxHeight} inlineSize="100%">
+          <s-image src={imageUrl} alt={altText || ''} inlineSize="fill" blockSize="fill" objectFit={objectFit} />
+        </s-box>
+      );
+    }
     return (
-      <div style={wrapperStyle}>
-        {imageUrl && toStr(imageUrl) !== '' ? (
-          <img src={imageUrl} alt={altText || ''} style={imageStyle} />
-        ) : null}
-      </div>
+      <s-box blockSize={boxHeight} padding="small">
+        <s-text appearance="subdued">No image</s-text>
+      </s-box>
     );
   }
-
   function tileWidth(columns) {
     if (columns === 4) {
       return '24%';
@@ -2894,48 +2884,56 @@ function Modal() {
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
     return (
-      <s-box key={'collection-' + title} inlineSize="100%" minInlineSize="100%" maxInlineSize="100%">
-        <s-clickable onClick={onPress}>
-          <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,0.08); overflow:hidden; min-height:182px;">
+      <s-clickable key={'collection-' + title} onClick={onPress}>
+        <s-box padding="small">
+          <s-stack direction="block" gap="small">
             {renderImageOrFallback(item ? item.imageUrl : '', title, '78px', 'contain')}
-            <div style="padding:14px 12px 16px; text-align:center; display:flex; flex-direction:column; justify-content:center; gap:6px; min-height:90px;">
-              <div style="font-size:15px; font-weight:700; line-height:1.3; color:#111827;">{title}</div>
-            </div>
-          </div>
-        </s-clickable>
-      </s-box>
+            <s-text>{title}</s-text>
+            {subtitle ? <s-text appearance="subdued">{subtitle}</s-text> : null}
+          </s-stack>
+        </s-box>
+      </s-clickable>
     );
   }
-
   function renderProductTile(product, onPress, columns) {
     return (
-      <s-box key={'product-' + product.id} inlineSize="100%" minInlineSize="100%" maxInlineSize="100%">
-        <s-clickable onClick={onPress}>
-          <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; box-shadow:0 1px 3px rgba(15,23,42,0.08); overflow:hidden; min-height:262px;">
+      <s-clickable key={'product-' + product.id} onClick={onPress}>
+        <s-box padding="small">
+          <s-stack direction="block" gap="small">
             {renderImageOrFallback(product.imageUrl, product.title, '96px', 'contain')}
-            <div style="padding:14px 14px 16px; display:flex; flex-direction:column; justify-content:flex-start; gap:8px; min-height:150px; text-align:left;">
-              <div style="font-size:14px; font-weight:700; line-height:1.35; color:#111827;">{product.title}</div>
-            </div>
-          </div>
-        </s-clickable>
-      </s-box>
+            <s-text>{product.title}</s-text>
+          </s-stack>
+        </s-box>
+      </s-clickable>
     );
   }
-
   function renderGrid(items, renderItem, columns) {
     var list = items || [];
     if (list.length === 0) {
       return null;
     }
+    var rows = [];
+    for (var i = 0; i < list.length; i += columns) {
+      rows.push(list.slice(i, i + columns));
+    }
     return (
-      <div style={'display:grid; grid-template-columns:repeat(' + String(columns) + ', minmax(0, 1fr)); gap:14px; align-items:start;'}>
-        {list.map(function (item) {
-          return renderItem(item, columns);
+      <s-stack direction="block" gap="small">
+        {rows.map(function (row, rowIndex) {
+          return (
+            <s-stack key={'row-' + rowIndex} direction="inline" gap="small">
+              {row.map(function (item) {
+                return (
+                  <s-box key={(item && (item.id || item.collectionId || item.name || item.label)) ? String(item.id || item.collectionId || item.name || item.label) : String(rowIndex)} inlineSize="fill">
+                    {renderItem(item, columns)}
+                  </s-box>
+                );
+              })}
+            </s-stack>
+          );
         })}
-      </div>
+      </s-stack>
     );
   }
-
   function renderClubsScreen() {
     return (
       <s-page heading="Macron POS">
@@ -2955,7 +2953,7 @@ function Modal() {
             </s-stack>
           </s-section>
           {renderDiagnosticsToggle()}
-          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
+          {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
     );
@@ -2982,7 +2980,7 @@ function Modal() {
             </s-stack>
           </s-section>
           {renderDiagnosticsToggle()}
-          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
+          {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
     );
@@ -3013,7 +3011,7 @@ function Modal() {
           </s-section>
           {renderDiagnosticsToggle()}
           {showDebug ? renderProductDebug() : null}
-          {showDebug ? <div style="margin-top: 8px; opacity: 0.55;">{renderDebugHeader()}</div> : null}
+          {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
     );
@@ -3069,7 +3067,7 @@ function Modal() {
           <s-section>
             <s-stack direction="block" gap="base">
               {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '196px')}
-              <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
+              <s-text>{selectedProduct.title}</s-text>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
                 <s-text appearance="subdued">Select size to continue.</s-text>
               ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
@@ -3080,7 +3078,7 @@ function Modal() {
           </s-section>
           {renderBundleNote(selectedProduct)}
           <s-section heading="Actions">
-            <s-stack direction="inline" gap="small" alignment="center">
+            <s-stack direction="inline" gap="small" alignItems="center">
               <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
               {showAddToCart ? (
                 <s-button
@@ -3104,7 +3102,7 @@ function Modal() {
           {showDebug ? renderBundleDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
           {showDebug ? renderProductDebug() : null}
-          {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
+          {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
     );
@@ -3220,7 +3218,7 @@ function Modal() {
           {showDebug ? renderBundleDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
           {showDebug ? renderProductDebug() : null}
-          {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
+          {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
     );
@@ -3288,7 +3286,7 @@ function Modal() {
         <ScreenScroll>
           <s-section heading="Personalisation">
             <s-stack direction="block" gap="small">
-              <div style="font-weight: 700;"><s-text>{selectedProduct.title}</s-text></div>
+              <s-text>{selectedProduct.title}</s-text>
               <s-text appearance="subdued">Variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
 
               {meta.enablePersonalisation ? (
@@ -3332,7 +3330,7 @@ function Modal() {
                 </s-stack>
               ) : null}
               <s-section heading="Actions">
-                <s-stack direction="inline" gap="small" alignment="center">
+                <s-stack direction="inline" gap="small" alignItems="center">
                   <s-button variant="secondary" onClick={handleBack}>
                     Back
                   </s-button>
@@ -3347,7 +3345,7 @@ function Modal() {
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
           {showDebug ? renderProductDebug() : null}
-          {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
+          {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
     );
