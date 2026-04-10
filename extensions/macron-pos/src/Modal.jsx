@@ -2658,10 +2658,12 @@ function Modal() {
       <s-section>
         <s-stack direction="block" gap="small">
           <s-stack direction="inline" gap="small" alignItems="center">
-            {showBack ? <s-button variant="secondary" onClick={handleBack}>Back to product</s-button> : null}
-            <div style="font-size:21px; font-weight:700; line-height:1.2; letter-spacing:-0.01em;"><s-text>{title}</s-text></div>
+            {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
+            <s-stack direction="block" gap="micro">
+              <s-text>{title}</s-text>
+              {subtitle ? <s-text appearance="subdued">{subtitle}</s-text> : null}
+            </s-stack>
           </s-stack>
-          {subtitle ? <s-text appearance="subdued">{subtitle}</s-text> : null}
         </s-stack>
       </s-section>
     );
@@ -2856,17 +2858,13 @@ function Modal() {
     var boxHeight = height || '96px';
     var objectFit = fitMode || 'contain';
     return (
-      <div style="border:1px solid #e5e7eb; border-radius:14px; background:#f8fafc; overflow:hidden;">
+      <s-box blockSize={boxHeight} inlineSize="100%" padding="small">
         {imageUrl && toStr(imageUrl) !== '' ? (
-          <s-box blockSize={boxHeight} inlineSize="100%">
-            <s-image src={imageUrl} alt={altText || ''} inlineSize="fill" blockSize="fill" objectFit={objectFit} />
-          </s-box>
+          <s-image src={imageUrl} alt={altText || ''} inlineSize="fill" blockSize="fill" objectFit={objectFit} />
         ) : (
-          <s-box blockSize={boxHeight} padding="small">
-            <s-text appearance="subdued">No image</s-text>
-          </s-box>
+          <s-text appearance="subdued">No image</s-text>
         )}
-      </div>
+      </s-box>
     );
   }
   function tileWidth(columns) {
@@ -2886,25 +2884,25 @@ function Modal() {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
     return (
       <s-clickable key={'collection-' + title} onClick={onPress}>
-        <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; padding:10px; min-height:164px; box-shadow:0 1px 2px rgba(15,23,42,0.06);">
-          <s-stack direction="block" gap="small">
-            {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
-            <div style="font-size:14px; font-weight:700; line-height:1.3; text-align:center; color:#111827; min-height:38px;">{title}</div>
-            {subtitle ? <div style="font-size:12px; line-height:1.3; text-align:center; color:#6b7280;">{subtitle}</div> : null}
+        <s-box padding="base">
+          <s-stack direction="block" gap="small" alignItems="center">
+            {renderImageOrFallback(item ? item.imageUrl : '', title, '72px', 'contain')}
+            <s-text>{title}</s-text>
+            {subtitle ? <s-text appearance="subdued">{subtitle}</s-text> : null}
           </s-stack>
-        </div>
+        </s-box>
       </s-clickable>
     );
   }
   function renderProductTile(product, onPress, columns) {
     return (
       <s-clickable key={'product-' + product.id} onClick={onPress}>
-        <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; padding:10px; min-height:218px; box-shadow:0 1px 2px rgba(15,23,42,0.06);">
-          <s-stack direction="block" gap="small">
-            {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
-            <div style="font-size:14px; font-weight:700; line-height:1.35; text-align:center; color:#111827; min-height:56px;">{product.title}</div>
+        <s-box padding="base">
+          <s-stack direction="block" gap="small" alignItems="center">
+            {renderImageOrFallback(product.imageUrl, product.title, '88px', 'contain')}
+            <s-text>{product.title}</s-text>
           </s-stack>
-        </div>
+        </s-box>
       </s-clickable>
     );
   }
@@ -2953,7 +2951,10 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <s-section>
+            <s-text appearance="subdued">Diagnostics</s-text>
+            {renderDiagnosticsToggle()}
+          </s-section>
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
@@ -3066,9 +3067,9 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section>
-            <s-stack direction="block" gap="base">
-              {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '180px')}
-              <div style="font-size:20px; font-weight:700; line-height:1.25; color:#111827;"><s-text>{selectedProduct.title}</s-text></div>
+            <s-stack direction="block" gap="base" alignItems="center">
+              {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '164px')}
+              <s-text>{selectedProduct.title}</s-text>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
                 <s-text appearance="subdued">Select size to continue.</s-text>
               ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
@@ -3098,7 +3099,7 @@ function Modal() {
               <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <div style="margin-top: 14px;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderBundleDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
@@ -3121,7 +3122,6 @@ function Modal() {
         <ScreenScroll>
           <s-section heading="Bundle builder">
             <s-stack direction="block" gap="small">
-              <div style="font-size:18px; font-weight:700; line-height:1.25; color:#111827;"><s-text>Bundle builder</s-text></div>
               <s-text>Bundle parent: {selectedProduct.title}</s-text>
               <s-text appearance="subdued">Parent variant: {selectedVariant ? selectedVariant.title : 'none selected'}</s-text>
               <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
@@ -3211,7 +3211,7 @@ function Modal() {
                   >
                     Add bundle to cart
                   </s-button>
-                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
+                  <s-button variant="secondary" onClick={handleBack}>Back to product</s-button>
                 </s-stack>
               </s-section>
             </s-stack>
