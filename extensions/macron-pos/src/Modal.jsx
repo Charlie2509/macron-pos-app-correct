@@ -1,4 +1,4 @@
-﻿import "@shopify/ui-extensions/preact";
+import "@shopify/ui-extensions/preact";
 import {render} from 'preact';
 import {useEffect, useState} from 'preact/hooks';
 
@@ -1435,7 +1435,8 @@ function Modal() {
     return (
       <s-section heading="Order handling">
         <s-stack direction="block" gap="small">
-                    <s-stack direction="inline" gap="small" wrap="true">
+          <s-text appearance="subdued">Choose whether this is going now, needs saving for later, or has mixed fulfilment.</s-text>
+          <s-stack direction="inline" gap="small" wrap="true">
             <s-button variant={selectedOrderWorkflow === 'take_now' ? 'primary' : 'secondary'} onClick={function () { setSelectedOrderWorkflow('take_now'); }}>
               Take today
             </s-button>
@@ -2562,7 +2563,7 @@ function Modal() {
 
   function renderDiagnosticsToggle() {
     return (
-      <div style="margin-top: 52px; opacity:0.78;">
+      <div style="margin-top: 28px;">
         <s-section>
           <s-stack direction="inline" gap="small" alignment="center">
             <s-button
@@ -2571,9 +2572,9 @@ function Modal() {
                 setShowDebug(!showDebug);
               }}
             >
-              {showDebug ? 'Hide diagnostics' : 'Diagnostics'}
+              {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
             </s-button>
-            {!showDebug && errorMessage ? <s-text size="small" appearance="critical">Active warning</s-text> : null}
+            {!showDebug && errorMessage ? <s-text size="small" appearance="critical">Diagnostics hidden · active warning</s-text> : null}
           </s-stack>
         </s-section>
       </div>
@@ -2808,9 +2809,9 @@ function Modal() {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
     var width = tileWidth(columns);
     return (
-      <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width}>
+      <s-box key={'collection-' + title} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
-          <s-pos-block>
+          <s-box padding="small" border="base" cornerRadius="large-100">
             <s-stack direction="block" gap="small">
               {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
               <s-box padding="small">
@@ -2819,7 +2820,7 @@ function Modal() {
                 </s-stack>
               </s-box>
             </s-stack>
-          </s-pos-block>
+          </s-box>
         </s-clickable>
       </s-box>
     );
@@ -2828,18 +2829,18 @@ function Modal() {
   function renderProductTile(product, onPress, columns) {
     var width = tileWidth(columns);
     return (
-      <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width}>
+      <s-box key={'product-' + product.id} inlineSize={width} minInlineSize={width} maxInlineSize={width} padding="none">
         <s-clickable onClick={onPress}>
-          <s-pos-block>
+          <s-box padding="small" border="base" cornerRadius="large-100">
             <s-stack direction="block" gap="small">
               {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
               <s-box padding="small">
-                <s-stack direction="block" gap="small" alignItems="center">
+                <s-stack direction="block" gap="small">
                   <s-text emphasis="bold">{product.title}</s-text>
                 </s-stack>
               </s-box>
             </s-stack>
-          </s-pos-block>
+          </s-box>
         </s-clickable>
       </s-box>
     );
@@ -2851,7 +2852,7 @@ function Modal() {
       return null;
     }
     return (
-      <s-stack direction="inline" gap="base" wrap="true" alignItems="start">
+      <s-stack direction="inline" gap="small" wrap="true" alignItems="start">
         {list.map(function (item) {
           return renderItem(item, columns);
         })}
@@ -2951,7 +2952,7 @@ function Modal() {
         <s-stack direction="block" gap="micro">
           <s-text appearance="subdued">Bundle product detected.</s-text>
           <s-button variant="secondary" onClick={handleBundleBuilderOpen}>
-            Build bundle
+            Continue to bundle builder
           </s-button>
         </s-stack>
       </s-section>
@@ -2990,12 +2991,14 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section>
-            <s-stack direction="block" gap="base">
-              {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '168px')}
-              <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
+            <s-stack direction="block" gap="base" alignItems="center">
+              <s-box inlineSize="180px" maxInlineSize="180px">
+                {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '180px', 'contain')}
+              </s-box>
+              <div style="font-size: 20px; font-weight: 700; line-height: 1.25; text-align: center;"><s-text>{selectedProduct.title}</s-text></div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
-                <s-text appearance="subdued">{hideVariantSelector ? ('Variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : ''}</s-text>
-              ) : <s-text appearance="subdued">{hideVariantSelector ? ('Bundle variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : ''}</s-text>}
+                <s-text appearance="subdued">{hideVariantSelector ? ('Variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : 'Select size to continue.'}</s-text>
+              ) : <s-text appearance="subdued">{hideVariantSelector ? ('Bundle variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : 'Bundle options available for this item.'}</s-text>}
             </s-stack>
           </s-section>
           {!hideVariantSelector ? (
@@ -3008,8 +3011,6 @@ function Modal() {
           {renderBundleNote(selectedProduct)}
           <s-section heading="Actions">
             <s-stack direction="block" gap="base">
-              <s-stack direction="inline" gap="base" alignment="center">
-              <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
               {showAddToCart ? (
                 <s-button
                   variant="primary"
@@ -3025,6 +3026,7 @@ function Modal() {
                   Continue to personalisation
                 </s-button>
               ) : null)}
+              <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
             </s-stack>
           </s-section>
           {renderDiagnosticsToggle()}
@@ -3050,128 +3052,98 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          <s-section heading="Bundle builder">
-            <s-stack direction="block" gap="base">
-              <s-text emphasis="bold">{selectedProduct.title}</s-text>
-              <s-text appearance="subdued">{hideVariantSelector ? ('Bundle variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : ('Selected bundle size: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'None'))}</s-text>
-              {!hideVariantSelector ? (
-                <s-section heading="Bundle size">
-                  {renderVariants(selectedProduct)}
-                </s-section>
-              ) : null}
-              {renderOrderWorkflowSelector()}
-              {selectedOrderWorkflow === 'save_for_later' ? renderSingleFulfilmentSelector() : null}
-              {bundleLoading ? <s-text>Loading bundle components…</s-text> : null}
-              {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
-              {bundleComponents.map(function (component) {
-                var chosen = bundleSelections[component.key];
-                return (
-                  <s-section key={component.key} heading={component.title}>
-                    <s-stack direction="block" gap="small">
-                      <s-text appearance="subdued">{chosen ? ('Selected: ' + normalizeVariantTitleForDisplay(chosen.title)) : 'Choose one variant'}</s-text>
-                      {component.variants && component.variants.length > 0 ? (
-                        <s-stack direction="inline" wrap="true" gap="small">
-                          {component.variants.map(function (variant) {
-                            var active = chosen && chosen.id === variant.id;
-                            return (
-                              <s-button
-                                key={variant.id}
-                                variant={active ? 'primary' : 'secondary'}
-                                onClick={function () { handleBundleVariantSelect(component.key, variant); }}
-                              >
-                                {normalizeVariantTitleForDisplay(variant.title)}
-                              </s-button>
-                            );
-                          })}
-                        </s-stack>
-                      ) : (
-                        <s-text appearance="critical">No variants available for this component</s-text>
-                      )}
-                      {selectedOrderWorkflow === 'split_fulfilment' ? (<s-stack direction="block" gap="small"><s-text appearance="subdued">Choose whether this component goes now or later.</s-text>{renderBundleFulfilmentSelector(component)}</s-stack>) : null}
+          <s-section>
+            <s-stack direction="block" gap="base" alignItems="center">
+              <s-box inlineSize="180px" maxInlineSize="180px">
+                {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '180px', 'contain')}
+              </s-box>
+              <div style="font-size: 20px; font-weight: 700; line-height: 1.25; text-align: center;"><s-text>{selectedProduct.title}</s-text></div>
+              <s-text appearance="subdued">{hideVariantSelector ? normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard') : ('Bundle size: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'None'))}</s-text>
+            </s-stack>
+          </s-section>
+          {!hideVariantSelector ? (
+            <s-section heading="Bundle size">
+              {renderVariants(selectedProduct)}
+            </s-section>
+          ) : null}
+          {renderOrderWorkflowSelector()}
+          {bundleLoading ? <s-section><s-text>Loading bundle components…</s-text></s-section> : null}
+          {bundleError !== '' ? <s-section><s-text appearance="critical">{bundleError}</s-text></s-section> : null}
+          {bundleComponents.map(function (component) {
+            var chosen = bundleSelections[component.key];
+            return (
+              <s-section key={component.key} heading={component.title}>
+                <s-stack direction="block" gap="base">
+                  {component.variants && component.variants.length > 0 ? (
+                    <s-stack direction="inline" wrap="true" gap="small">
+                      {component.variants.map(function (variant) {
+                        var active = chosen && chosen.id === variant.id;
+                        return (
+                          <s-button
+                            key={variant.id}
+                            variant={active ? 'primary' : 'secondary'}
+                            onClick={function () { handleBundleVariantSelect(component.key, variant); }}
+                          >
+                            {normalizeVariantTitleForDisplay(variant.title)}
+                          </s-button>
+                        );
+                      })}
                     </s-stack>
-                  </s-section>
-                );
-              })}
-              {hasAnyPersonalisation(meta) ? (
-                <s-section heading="Bundle personalisation">
-                  <s-stack direction="block" gap="small">
-                    {meta.enablePersonalisation ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
-                        <s-text-field
-                          value={primaryFieldValue}
-                          maxLength={maxChars === null ? undefined : maxChars}
-                          onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
-
-                    {meta.extraField1Enabled ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
-                        <s-text-field
-                          value={extraField1Value}
-                          onInput={function (event) { setExtraField1Value(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
-
-                    {meta.extraField2Enabled ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
-                        <s-text-field
-                          value={extraField2Value}
-                          onInput={function (event) { setExtraField2Value(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
-
-                    {meta.enableFileUpload ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
-                        <s-text appearance="critical">File upload is not available in POS V1 for bundle personalisation.</s-text>
-                        <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
-                      </s-stack>
-                    ) : null}
-                  </s-stack>
-                </s-section>
-              ) : null}
-              <s-section heading="Actions">
-                <s-stack direction="block" gap="small">
-                  <s-button
-                    variant="primary"
-                    onClick={addBundleParentToCart}
-                    disabled={bundleLoading}
-                  >
-                    Add bundle to cart
-                  </s-button>
-                  <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
+                  ) : (
+                    <s-text appearance="critical">No variants available for this component</s-text>
+                  )}
+                  {selectedOrderWorkflow === 'split_fulfilment' ? renderBundleFulfilmentSelector(component) : null}
                 </s-stack>
               </s-section>
+            );
+          })}
+          {hasAnyPersonalisation(meta) ? (
+            <s-section heading="Bundle personalisation">
+              <s-stack direction="block" gap="base">
+                {meta.enablePersonalisation ? renderTextField(
+                  meta.personalisationLabel || 'Personalisation',
+                  primaryFieldValue,
+                  setPrimaryFieldValue,
+                  meta.personalisationRequired,
+                  feeDisplay,
+                  maxChars,
+                  'Enter text'
+                ) : null}
+                {meta.extraField1Enabled ? renderTextField(
+                  meta.extraField1Label || 'Additional detail',
+                  extraField1Value,
+                  setExtraField1Value,
+                  meta.extraField1Required,
+                  '',
+                  null,
+                  'Enter text'
+                ) : null}
+                {meta.extraField2Enabled ? renderTextField(
+                  meta.extraField2Label || 'Additional detail',
+                  extraField2Value,
+                  setExtraField2Value,
+                  meta.extraField2Required,
+                  '',
+                  null,
+                  'Enter text'
+                ) : null}
+              </s-stack>
+            </s-section>
+          ) : null}
+          <s-section heading="Actions">
+            <s-stack direction="block" gap="base">
+              <s-button variant="primary" onClick={addBundleParentToCart}>Add bundle to cart</s-button>
+              <s-button variant="secondary" onClick={handleBack}>Back</s-button>
             </s-stack>
           </s-section>
           {renderDiagnosticsToggle()}
           {showDebug ? renderBundleDebug(selectedProduct) : null}
+          {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
           {showDebug ? renderProductDebug() : null}
           {showDebug ? <div style="margin-top: 12px; opacity: 0.7;">{renderDebugHeader()}</div> : null}
         </ScreenScroll>
       </s-page>
-    );
-  }
-
-  function fieldLabel(label, required, feeText) {
-    return (
-      <s-stack direction="block" gap="small">
-        <s-text>{label}</s-text>
-        <s-stack direction="inline" gap="small" wrap="true">
-          {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
-          {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
-        </s-stack>
-      </s-stack>
     );
   }
 
