@@ -2476,7 +2476,7 @@ function Modal() {
           >
             {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
           </s-button>
-          {!showDebug && errorMessage ? <s-text size="small" appearance="critical">Active warning</s-text> : null}
+          {!showDebug && errorMessage ? <s-text size="small" appearance="critical">Diagnostics hidden · active warning</s-text> : null}
         </s-stack>
       </s-section>
     );
@@ -2658,8 +2658,8 @@ function Modal() {
       <s-section>
         <s-stack direction="block" gap="small">
           <s-stack direction="inline" gap="small" alignItems="center">
-            {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
-            <div style="font-size:20px; font-weight:700; line-height:1.2; color:#111827;">{title}</div>
+            {showBack ? <s-button variant="secondary" onClick={handleBack}>Back to product</s-button> : null}
+            <div style="font-size:21px; font-weight:700; line-height:1.2; letter-spacing:-0.01em;"><s-text>{title}</s-text></div>
           </s-stack>
           {subtitle ? <s-text appearance="subdued">{subtitle}</s-text> : null}
         </s-stack>
@@ -2855,18 +2855,17 @@ function Modal() {
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
     var boxHeight = height || '96px';
     var objectFit = fitMode || 'contain';
-    var frameStyle = 'height:' + boxHeight + '; width:100%; display:flex; align-items:center; justify-content:center; overflow:hidden; border-radius:14px; background:#f8fafc; border:1px solid #e5e7eb;';
-    var imageStyle = 'max-width:100%; max-height:100%; width:auto; height:auto; display:block; object-fit:' + objectFit + '; object-position:center;';
-    if (imageUrl && toStr(imageUrl) !== '') {
-      return (
-        <div style={frameStyle}>
-          <img src={imageUrl} alt={altText || ''} style={imageStyle} />
-        </div>
-      );
-    }
     return (
-      <div style={frameStyle}>
-        <span style="font-size:12px; color:#6b7280;">No image</span>
+      <div style="border:1px solid #e5e7eb; border-radius:14px; background:#f8fafc; overflow:hidden;">
+        {imageUrl && toStr(imageUrl) !== '' ? (
+          <s-box blockSize={boxHeight} inlineSize="100%">
+            <s-image src={imageUrl} alt={altText || ''} inlineSize="fill" blockSize="fill" objectFit={objectFit} />
+          </s-box>
+        ) : (
+          <s-box blockSize={boxHeight} padding="small">
+            <s-text appearance="subdued">No image</s-text>
+          </s-box>
+        )}
       </div>
     );
   }
@@ -2886,27 +2885,27 @@ function Modal() {
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
     return (
-      <div key={'collection-' + title} style="width:100%;">
-        <s-clickable onClick={onPress}>
-          <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; padding:12px; min-height:164px; box-shadow:0 1px 2px rgba(15,23,42,0.06); display:flex; flex-direction:column; gap:10px; justify-content:flex-start;">
+      <s-clickable key={'collection-' + title} onClick={onPress}>
+        <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; padding:10px; min-height:164px; box-shadow:0 1px 2px rgba(15,23,42,0.06);">
+          <s-stack direction="block" gap="small">
             {renderImageOrFallback(item ? item.imageUrl : '', title, '76px', 'contain')}
-            <div style="font-size:14px; font-weight:700; line-height:1.25; text-align:center; color:#111827;">{title}</div>
+            <div style="font-size:14px; font-weight:700; line-height:1.3; text-align:center; color:#111827; min-height:38px;">{title}</div>
             {subtitle ? <div style="font-size:12px; line-height:1.3; text-align:center; color:#6b7280;">{subtitle}</div> : null}
-          </div>
-        </s-clickable>
-      </div>
+          </s-stack>
+        </div>
+      </s-clickable>
     );
   }
   function renderProductTile(product, onPress, columns) {
     return (
-      <div key={'product-' + product.id} style="width:100%;">
-        <s-clickable onClick={onPress}>
-          <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; padding:12px; min-height:214px; box-shadow:0 1px 2px rgba(15,23,42,0.06); display:flex; flex-direction:column; gap:12px; justify-content:flex-start;">
+      <s-clickable key={'product-' + product.id} onClick={onPress}>
+        <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; padding:10px; min-height:218px; box-shadow:0 1px 2px rgba(15,23,42,0.06);">
+          <s-stack direction="block" gap="small">
             {renderImageOrFallback(product.imageUrl, product.title, '92px', 'contain')}
-            <div style="font-size:14px; font-weight:700; line-height:1.3; text-align:center; color:#111827;">{product.title}</div>
-          </div>
-        </s-clickable>
-      </div>
+            <div style="font-size:14px; font-weight:700; line-height:1.35; text-align:center; color:#111827; min-height:56px;">{product.title}</div>
+          </s-stack>
+        </div>
+      </s-clickable>
     );
   }
   function renderGrid(items, renderItem, columns) {
@@ -2914,19 +2913,26 @@ function Modal() {
     if (list.length === 0) {
       return null;
     }
+    var rows = [];
+    for (var i = 0; i < list.length; i += columns) {
+      rows.push(list.slice(i, i + columns));
+    }
     return (
-      <div style={'display:grid; grid-template-columns:repeat(' + String(columns) + ', minmax(0, 1fr)); gap:14px; align-items:start; width:100%;'}>
-        {list.map(function (item, index) {
-          var key = item && (item.id || item.collectionId || item.name || item.label)
-            ? String(item.id || item.collectionId || item.name || item.label)
-            : 'grid-item-' + String(index);
+      <s-stack direction="block" gap="small">
+        {rows.map(function (row, rowIndex) {
           return (
-            <div key={key} style="min-width:0;">
-              {renderItem(item, columns)}
-            </div>
+            <s-stack key={'row-' + rowIndex} direction="inline" gap="small">
+              {row.map(function (item) {
+                return (
+                  <s-box key={(item && (item.id || item.collectionId || item.name || item.label)) ? String(item.id || item.collectionId || item.name || item.label) : String(rowIndex)} inlineSize="fill">
+                    {renderItem(item, columns)}
+                  </s-box>
+                );
+              })}
+            </s-stack>
           );
         })}
-      </div>
+      </s-stack>
     );
   }
   function renderClubsScreen() {
@@ -3062,7 +3068,7 @@ function Modal() {
           <s-section>
             <s-stack direction="block" gap="base">
               {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '180px')}
-              <div style="font-size:18px; font-weight:700; line-height:1.25; color:#111827;">{selectedProduct.title}</div>
+              <div style="font-size:20px; font-weight:700; line-height:1.25; color:#111827;"><s-text>{selectedProduct.title}</s-text></div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
                 <s-text appearance="subdued">Select size to continue.</s-text>
               ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
@@ -3115,6 +3121,7 @@ function Modal() {
         <ScreenScroll>
           <s-section heading="Bundle builder">
             <s-stack direction="block" gap="small">
+              <div style="font-size:18px; font-weight:700; line-height:1.25; color:#111827;"><s-text>Bundle builder</s-text></div>
               <s-text>Bundle parent: {selectedProduct.title}</s-text>
               <s-text appearance="subdued">Parent variant: {selectedVariant ? selectedVariant.title : 'none selected'}</s-text>
               <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
