@@ -1379,6 +1379,58 @@ function Modal() {
     return next;
   }
 
+
+  function normalizeVariantTitleForDisplay(title) {
+    var raw = toStr(title);
+    if (raw === '' || raw === 'Default Title') {
+      return 'Standard';
+    }
+    return raw;
+  }
+
+  function getDefaultSelectableVariant(product) {
+    if (!product || !product.variants || !Array.isArray(product.variants) || product.variants.length === 0) {
+      return null;
+    }
+    if (product.variants.length === 1) {
+      return product.variants[0];
+    }
+    var first = product.variants[0];
+    var allDefault = true;
+    for (var i = 0; i < product.variants.length; i += 1) {
+      var title = toStr(product.variants[i] ? product.variants[i].title : '');
+      if (title !== 'Default Title' && title !== 'Default') {
+        allDefault = false;
+        break;
+      }
+    }
+    return allDefault ? first : null;
+  }
+
+  function shouldHideVariantSelector(product) {
+    return getDefaultSelectableVariant(product) !== null;
+  }
+
+  function getEffectiveSelectedVariant(product) {
+    if (selectedVariant) {
+      return selectedVariant;
+    }
+    return getDefaultSelectableVariant(product);
+  }
+
+  function getEffectiveFulfilmentForBundleItem(componentKey) {
+    if (selectedOrderWorkflow === 'split_fulfilment') {
+      if (bundleFulfilmentChoices && bundleFulfilmentChoices[componentKey]) {
+        return bundleFulfilmentChoices[componentKey];
+      }
+      return 'take_now';
+    }
+    if (selectedOrderWorkflow === 'save_for_later') {
+      return 'order_later';
+    }
+    return 'take_now';
+  }
+
   function renderOrderWorkflowSelector() {
     return (
       <s-section heading="Order handling">
@@ -1764,6 +1816,10 @@ function Modal() {
       toast('Bundle data unavailable');
       return;
     }
+    var autoVariant = getDefaultSelectableVariant(selectedProduct);
+    if (!selectedVariant && autoVariant) {
+      setSelectedVariant(autoVariant);
+    }
     setBundleAddStatus('idle');
     setBundleAddError('');
     setScreen('bundleBuilder');
@@ -1795,11 +1851,15 @@ function Modal() {
       toast('No bundle selected');
       return;
     }
-    if (!selectedVariant) {
-      toast('Select a size first');
+    var parentVariant = getEffectiveSelectedVariant(selectedProduct);
+    if (!parentVariant) {
+      toast('Select the bundle size');
       setBundleAddStatus('failed');
-      setBundleAddError('No parent variant selected');
+      setBundleAddError('No parent bundle variant selected');
       return;
+    }
+    if (!selectedVariant && parentVariant) {
+      setSelectedVariant(parentVariant);
     }
     if (!bundleComponents || bundleComponents.length === 0) {
       toast('Bundle components not loaded');
@@ -1856,7 +1916,7 @@ function Modal() {
       var item = bundleComponents[idx];
       var selected = bundleSelections[item.key];
       bundleProps['Item ' + String(idx + 1)] = item.title + ' — ' + selected.title;
-      bundleProps['Fulfilment Item ' + String(idx + 1)] = fulfilmentLabel(bundleFulfilmentChoices && bundleFulfilmentChoices[item.key] ? bundleFulfilmentChoices[item.key] : 'take_now');
+      bundleProps['Fulfilment Item ' + String(idx + 1)] = fulfilmentLabel(getEffectiveFulfilmentForBundleItem(item.key));
     }
 
     var personalisationProps = buildPersonalisationProperties(
@@ -1882,7 +1942,7 @@ function Modal() {
 
     setBundleAddStatus(bundleFeeAmount !== null ? 'resolving_fee' : 'adding_parent');
     setBundleAddError('');
-    var ok = await addSelectedProductToCart(selectedProduct, selectedVariant, bundleProps, bundleFeeAmount);
+    var ok = await addSelectedProductToCart(selectedProduct, parentVariant, bundleProps, bundleFeeAmount);
     if (!ok) {
       setBundleAddStatus('failed');
       setBundleAddError('Bundle add failed. See cart debug for detail.');
@@ -1951,7 +2011,7 @@ function Modal() {
 
   function handleProductPress(product) {
     setSelectedProduct(product);
-    setSelectedVariant(null);
+    setSelectedVariant(getDefaultSelectableVariant(product));
     resetBundleBuilderState();
     setScreen('productDetail');
   }
@@ -2909,7 +2969,7 @@ function Modal() {
           var active = selectedVariant && selectedVariant.id === variant.id;
           return (
             <s-button key={variant.id} variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
-              {variant.title}
+              {normalizeVariantTitleForDisplay(variant.title)}
             </s-button>
           );
         })}
@@ -2925,6 +2985,8 @@ function Modal() {
     var hasPersonalisation = hasAnyPersonalisation(meta);
     var isBundleProduct = selectedProduct.bundleMeta && selectedProduct.bundleMeta.isBundle;
     var showAddToCart = !hasPersonalisation && !isBundleProduct;
+    var effectiveVariant = getEffectiveSelectedVariant(selectedProduct);
+    var hideVariantSelector = shouldHideVariantSelector(selectedProduct);
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
@@ -2933,13 +2995,15 @@ function Modal() {
               {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '168px')}
               <div style="font-size: 20px; font-weight: 700; line-height: 1.25;"><s-text>{selectedProduct.title}</s-text></div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
-                <s-text appearance="subdued">Select size to continue.</s-text>
-              ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
+                <s-text appearance="subdued">{hideVariantSelector ? ('Variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : 'Select size to continue.'}</s-text>
+              ) : <s-text appearance="subdued">{hideVariantSelector ? ('Bundle variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : 'Bundle options available for this item.'}</s-text>}
             </s-stack>
           </s-section>
-          <s-section heading="Size">
-            {renderVariants(selectedProduct)}
-          </s-section>
+          {!hideVariantSelector ? (
+            <s-section heading="Size">
+              {renderVariants(selectedProduct)}
+            </s-section>
+          ) : null}
           {renderOrderWorkflowSelector()}
           {!isBundleProduct ? renderSingleFulfilmentSelector() : null}
           {renderBundleNote(selectedProduct)}
@@ -2951,7 +3015,7 @@ function Modal() {
                   variant="primary"
                   onClick={function () {
                     setLastEnteredPersonalisation(false);
-                    addSelectedProductToCart(selectedProduct, selectedVariant, buildWorkflowProperties(selectedOrderWorkflow, selectedFulfilmentChoice), null);
+                    addSelectedProductToCart(selectedProduct, effectiveVariant, buildWorkflowProperties(selectedOrderWorkflow, selectedFulfilmentChoice), null);
                   }}
                 >
                   Add to cart
@@ -2981,16 +3045,23 @@ function Modal() {
     var meta = selectedProduct.personalisationMeta || {};
     var feeDisplay = parseFeeDisplay(meta.personalisationFeeRaw);
     var maxChars = parseMaxChars(meta.personalisationMaxCharsRaw);
+    var effectiveVariant = getEffectiveSelectedVariant(selectedProduct);
+    var hideVariantSelector = shouldHideVariantSelector(selectedProduct);
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section heading="Bundle builder">
             <s-stack direction="block" gap="small">
-              <s-text>Bundle parent: {selectedProduct.title}</s-text>
-              <s-text appearance="subdued">Parent variant: {selectedVariant ? selectedVariant.title : 'none selected'}</s-text>
+              <s-text emphasis="bold">{selectedProduct.title}</s-text>
+              <s-text appearance="subdued">{hideVariantSelector ? ('Bundle variant: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'Standard')) : ('Selected bundle size: ' + normalizeVariantTitleForDisplay(effectiveVariant ? effectiveVariant.title : 'None'))}</s-text>
+              {!hideVariantSelector ? (
+                <s-section heading="Bundle size">
+                  {renderVariants(selectedProduct)}
+                </s-section>
+              ) : null}
               <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
               {renderOrderWorkflowSelector()}
-              {selectedOrderWorkflow !== 'take_now' ? renderSingleFulfilmentSelector() : null}
+              {selectedOrderWorkflow === 'save_for_later' ? renderSingleFulfilmentSelector() : null}
               {bundleLoading ? <s-text>Loading bundle components…</s-text> : null}
               {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
               {bundleComponents.map(function (component) {
@@ -2998,7 +3069,7 @@ function Modal() {
                 return (
                   <s-section key={component.key} heading={component.title}>
                     <s-stack direction="block" gap="small">
-                      <s-text appearance="subdued">{chosen ? ('Selected: ' + chosen.title) : 'Choose one variant'}</s-text>
+                      <s-text appearance="subdued">{chosen ? ('Selected: ' + normalizeVariantTitleForDisplay(chosen.title)) : 'Choose one variant'}</s-text>
                       {component.variants && component.variants.length > 0 ? (
                         <s-stack direction="inline" wrap="true" gap="small">
                           {component.variants.map(function (variant) {
@@ -3009,7 +3080,7 @@ function Modal() {
                                 variant={active ? 'primary' : 'secondary'}
                                 onClick={function () { handleBundleVariantSelect(component.key, variant); }}
                               >
-                                {variant.title}
+                                {normalizeVariantTitleForDisplay(variant.title)}
                               </s-button>
                             );
                           })}
@@ -3017,7 +3088,7 @@ function Modal() {
                       ) : (
                         <s-text appearance="critical">No variants available for this component</s-text>
                       )}
-                      {selectedOrderWorkflow === 'split_fulfilment' ? renderBundleFulfilmentSelector(component) : null}
+                      {selectedOrderWorkflow === 'split_fulfilment' ? (<s-stack direction="block" gap="small"><s-text appearance="subdued">Choose whether this component goes now or later.</s-text>{renderBundleFulfilmentSelector(component)}</s-stack>) : null}
                     </s-stack>
                   </s-section>
                 );
