@@ -1354,8 +1354,10 @@ function Modal() {
 
   function buildWorkflowProperties(workflow, fulfilmentChoice) {
     var props = {};
-    props['POS Workflow'] = workflowLabel(workflow || 'take_now');
-    props['Fulfilment Status'] = fulfilmentLabel(fulfilmentChoice || 'take_now');
+    var effectiveWorkflow = workflow || 'take_now';
+    var effectiveFulfilment = fulfilmentChoice || (effectiveWorkflow === 'save_for_later' ? 'order_later' : 'take_now');
+    props['POS Workflow'] = workflowLabel(effectiveWorkflow);
+    props['Fulfilment Status'] = fulfilmentLabel(effectiveFulfilment);
     return props;
   }
 
@@ -1435,7 +1437,7 @@ function Modal() {
     return (
       <s-section heading="Order handling">
         <s-stack direction="block" gap="small">
-          <s-text appearance="subdued">Choose whether this is going now, needs saving for later, or has mixed fulfilment.</s-text>
+          <s-text appearance="subdued">Choose the order route.</s-text>
           <s-stack direction="inline" gap="small" wrap="true">
             <s-button variant={selectedOrderWorkflow === 'take_now' ? 'primary' : 'secondary'} onClick={function () { setSelectedOrderWorkflow('take_now'); }}>
               Take today
@@ -2950,7 +2952,7 @@ function Modal() {
     return (
       <s-section heading="Bundle">
         <s-stack direction="block" gap="micro">
-          <s-text appearance="subdued">Bundle product detected.</s-text>
+          <s-text appearance="subdued">Bundle ready.</s-text>
           <s-button variant="secondary" onClick={handleBundleBuilderOpen}>
             Continue to bundle builder
           </s-button>
@@ -3007,7 +3009,6 @@ function Modal() {
             </s-section>
           ) : null}
           {renderOrderWorkflowSelector()}
-          {!isBundleProduct ? renderSingleFulfilmentSelector() : null}
           {renderBundleNote(selectedProduct)}
           <s-section heading="Actions">
             <s-stack direction="block" gap="base">
