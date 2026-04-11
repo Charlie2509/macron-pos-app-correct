@@ -2464,19 +2464,20 @@ function Modal() {
       </s-section>
     );
   }
+
   function renderDiagnosticsToggle() {
     return (
       <s-section>
-        <s-stack direction="block" gap="micro">
+        <s-stack direction="inline" gap="small" alignItems="center">
           <s-button
             variant="secondary"
             onClick={function () {
               setShowDebug(!showDebug);
             }}
           >
-            {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
+            {showDebug ? 'Hide diagnostics' : 'Diagnostics'}
           </s-button>
-          {!showDebug && errorMessage ? <s-text size="small" appearance="critical">Active warning hidden in diagnostics</s-text> : null}
+          {errorMessage && !showDebug ? <s-text size="small" appearance="critical">Warning</s-text> : null}
         </s-stack>
       </s-section>
     );
@@ -2854,27 +2855,23 @@ function Modal() {
     );
   }
 
+
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
-    var boxHeight = height || '108px';
+    var boxHeight = height || '112px';
     var objectFit = fitMode || 'contain';
+    var wrapperStyle = 'height:' + boxHeight + '; width:100%; border-radius:14px; border:1px solid #d9e2ec; background:#ffffff; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:10px; box-sizing:border-box;';
+    var imageStyle = 'max-width:100%; max-height:100%; width:auto; height:auto; object-fit:' + objectFit + '; object-position:center; display:block;';
     return (
-      <s-box
-        blockSize={boxHeight}
-        inlineSize="100%"
-        padding="small"
-        border="base"
-        borderRadius="base"
-      >
-        <s-stack direction="block" alignItems="center" justifyContent="center" blockSize="fill">
-          {imageUrl && toStr(imageUrl) !== '' ? (
-            <s-image src={imageUrl} alt={altText || ''} inlineSize="fill" blockSize="fill" objectFit={objectFit} />
-          ) : (
-            <s-text appearance="subdued">No image</s-text>
-          )}
-        </s-stack>
-      </s-box>
+      <div style={wrapperStyle}>
+        {imageUrl && toStr(imageUrl) !== '' ? (
+          <img src={imageUrl} alt={altText || ''} style={imageStyle} />
+        ) : (
+          <s-text appearance="subdued">No image</s-text>
+        )}
+      </div>
     );
   }
+
   function tileWidth(columns) {
     if (columns === 4) {
       return '24%';
@@ -2888,69 +2885,52 @@ function Modal() {
     return '100%';
   }
 
+
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
     return (
       <s-clickable key={'collection-' + title} onClick={onPress}>
-        <s-box padding="small" border="base" borderRadius="base" minBlockSize="188px">
-          <s-stack direction="block" gap="small" alignItems="center">
-            <s-box inlineSize="100%" padding="small">
-              {renderImageOrFallback(item ? item.imageUrl : '', title, '104px', 'contain')}
-            </s-box>
-            <s-stack direction="block" gap="micro" alignItems="center">
-              <s-text>{title}</s-text>
-              {subtitle ? <s-text appearance="subdued">{subtitle}</s-text> : null}
-            </s-stack>
-          </s-stack>
-        </s-box>
+        <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; min-height:190px; padding:12px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch; gap:10px; box-shadow:0 1px 3px rgba(15,23,42,0.06);">
+          {renderImageOrFallback(item ? item.imageUrl : '', title, '108px', 'contain')}
+          <div style="min-height:40px; display:flex; flex-direction:column; justify-content:flex-start; align-items:center; text-align:center; gap:4px;">
+            <div style="font-size:14px; line-height:1.25; font-weight:600; color:#111827;">{title}</div>
+            {subtitle ? <div style="font-size:12px; line-height:1.2; color:#6b7280;">{subtitle}</div> : null}
+          </div>
+        </div>
       </s-clickable>
     );
   }
+
+
   function renderProductTile(product, onPress, columns) {
     return (
       <s-clickable key={'product-' + product.id} onClick={onPress}>
-        <s-box padding="small" border="base" borderRadius="base" minBlockSize="214px">
-          <s-stack direction="block" gap="small" alignItems="center">
-            <s-box inlineSize="100%" padding="small">
-              {renderImageOrFallback(product.imageUrl, product.title, '116px', 'contain')}
-            </s-box>
-            <s-box minBlockSize="44px" inlineSize="100%">
-              <s-stack direction="block" alignItems="center" justifyContent="center">
-                <s-text>{product.title}</s-text>
-              </s-stack>
-            </s-box>
-          </s-stack>
-        </s-box>
+        <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; min-height:220px; padding:12px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch; gap:12px; box-shadow:0 1px 3px rgba(15,23,42,0.06);">
+          {renderImageOrFallback(product.imageUrl, product.title, '126px', 'contain')}
+          <div style="min-height:54px; display:flex; align-items:flex-start; justify-content:center; text-align:center; font-size:13px; line-height:1.3; font-weight:600; color:#111827;">
+            {product.title}
+          </div>
+        </div>
       </s-clickable>
     );
   }
+
+
   function renderGrid(items, renderItem, columns) {
     var list = items || [];
     if (list.length === 0) {
       return null;
     }
-    var rows = [];
-    for (var i = 0; i < list.length; i += columns) {
-      rows.push(list.slice(i, i + columns));
-    }
     return (
-      <s-stack direction="block" gap="base">
-        {rows.map(function (row, rowIndex) {
-          return (
-            <s-stack key={'row-' + rowIndex} direction="inline" gap="small">
-              {row.map(function (item) {
-                return (
-                  <s-box key={(item && (item.id || item.collectionId || item.name || item.label)) ? String(item.id || item.collectionId || item.name || item.label) : String(rowIndex)} inlineSize="fill" padding="micro">
-                    {renderItem(item, columns)}
-                  </s-box>
-                );
-              })}
-            </s-stack>
-          );
+      <div style={'display:grid; grid-template-columns:repeat(' + String(columns) + ', minmax(0, 1fr)); gap:14px; align-items:start; width:100%;'}>
+        {list.map(function (item) {
+          return renderItem(item, columns);
         })}
-      </s-stack>
+      </div>
     );
   }
+
+
   function renderClubsScreen() {
     return (
       <s-page heading="Macron POS">
@@ -2969,12 +2949,13 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <div style="margin-top:10px; opacity:0.8;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
     );
   }
+
 
   function renderSubsectionsScreen() {
     if (!selectedClub || !selectedClub.subsections) {
@@ -2983,10 +2964,9 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderScreenIntro(selectedClub.name, '')}
+          {renderScreenIntro(selectedClub.name, 'Choose a subsection')}
           <s-section>
             <s-stack direction="block" gap="base">
-              <s-text appearance="subdued">Choose a subsection</s-text>
               {renderGrid(selectedClub.subsections, function (subsection) {
                 return renderCollectionTile(
                   subsection,
@@ -2997,7 +2977,7 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <div style="margin-top:10px; opacity:0.8;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
@@ -3007,6 +2987,7 @@ function Modal() {
   function productsForCurrentSelection() {
     return currentProducts || [];
   }
+
 
   function renderProductsScreen() {
     var products = productsForCurrentSelection();
@@ -3027,7 +3008,7 @@ function Modal() {
               }, productTileColumns()) : null}
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <div style="margin-top:10px; opacity:0.8;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderProductDebug() : null}
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
@@ -3071,6 +3052,7 @@ function Modal() {
     );
   }
 
+
   function renderProductDetailScreen() {
     if (!selectedProduct) {
       return renderProductsScreen();
@@ -3083,13 +3065,11 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section>
-            <s-stack direction="block" gap="small" alignItems="center">
-              <s-box inlineSize="100%" padding="small">
-                {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '210px')}
-              </s-box>
-              <s-box padding="small">
-                <s-text>{selectedProduct.title}</s-text>
-              </s-box>
+            <s-stack direction="block" gap="base">
+              <div style="max-width:320px; margin:0 auto; width:100%;">
+                {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '220px', 'contain')}
+              </div>
+              <div style="font-size:20px; font-weight:700; line-height:1.25; text-align:center; color:#111827;">{selectedProduct.title}</div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
                 <s-text appearance="subdued">Select size to continue.</s-text>
               ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
@@ -3100,7 +3080,7 @@ function Modal() {
           </s-section>
           {renderBundleNote(selectedProduct)}
           <s-section heading="Actions">
-            <s-stack direction="block" gap="base">
+            <s-stack direction="block" gap="small">
               {showAddToCart ? (
                 <s-button
                   variant="primary"
@@ -3119,7 +3099,7 @@ function Modal() {
               <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
             </s-stack>
           </s-section>
-          <s-box padding="small">{renderDiagnosticsToggle()}</s-box>
+          <div style="margin-top:10px; opacity:0.8;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderBundleDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
@@ -3129,6 +3109,7 @@ function Modal() {
       </s-page>
     );
   }
+
 
   function renderBundleBuilderScreen() {
     if (!selectedProduct) {
@@ -3151,27 +3132,29 @@ function Modal() {
                 var chosen = bundleSelections[component.key];
                 return (
                   <s-section key={component.key} heading={component.title}>
-                    <s-stack direction="block" gap="base">
-                      <s-text appearance="subdued">{chosen ? ('Selected: ' + chosen.title) : 'Choose one variant'}</s-text>
-                      {component.variants && component.variants.length > 0 ? (
-                        <s-stack direction="inline" wrap="true" gap="small">
-                          {component.variants.map(function (variant) {
-                            var active = chosen && chosen.id === variant.id;
-                            return (
-                              <s-button
-                                key={variant.id}
-                                variant={active ? 'primary' : 'secondary'}
-                                onClick={function () { handleBundleVariantSelect(component.key, variant); }}
-                              >
-                                {variant.title}
-                              </s-button>
-                            );
-                          })}
-                        </s-stack>
-                      ) : (
-                        <s-text appearance="critical">No variants available for this component</s-text>
-                      )}
-                    </s-stack>
+                    <div style="border:1px solid #d9e2ec; border-radius:14px; padding:12px; background:#ffffff;">
+                      <s-stack direction="block" gap="base">
+                        <s-text appearance="subdued">{chosen ? ('Selected: ' + chosen.title) : 'Choose one variant'}</s-text>
+                        {component.variants && component.variants.length > 0 ? (
+                          <s-stack direction="inline" wrap="true" gap="small">
+                            {component.variants.map(function (variant) {
+                              var active = chosen && chosen.id === variant.id;
+                              return (
+                                <s-button
+                                  key={variant.id}
+                                  variant={active ? 'primary' : 'secondary'}
+                                  onClick={function () { handleBundleVariantSelect(component.key, variant); }}
+                                >
+                                  {variant.title}
+                                </s-button>
+                              );
+                            })}
+                          </s-stack>
+                        ) : (
+                          <s-text appearance="critical">No variants available for this component</s-text>
+                        )}
+                      </s-stack>
+                    </div>
                   </s-section>
                 );
               })}
@@ -3223,7 +3206,7 @@ function Modal() {
                 </s-section>
               ) : null}
               <s-section heading="Actions">
-                <s-stack direction="block" gap="base">
+                <s-stack direction="block" gap="small">
                   <s-button
                     variant="primary"
                     onClick={addBundleParentToCart}
@@ -3236,7 +3219,7 @@ function Modal() {
               </s-section>
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <div style="margin-top:10px; opacity:0.8;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderBundleDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
           {showDebug ? renderProductDebug() : null}
