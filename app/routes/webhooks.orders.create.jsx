@@ -80,17 +80,31 @@ function isFeeOrSystemLine(attributes) {
   );
 }
 
-function normalizeTakeNow(rawTakeNow, mode) {
-  const takeNowValue = String(rawTakeNow || "").toLowerCase();
-  if (mode === "take_today") return true;
-  if (mode === "order_in") return false;
-  return takeNowValue === "true" || takeNowValue === "1" || takeNowValue === "yes";
+function normalizeStringValue(value) {
+  return String(value == null ? "" : value).trim().toLowerCase();
+}
+
+function normalizeMode(rawMode) {
+  const mode = normalizeStringValue(rawMode);
+  if (mode === "take_today" || mode === "order_in" || mode === "split") return mode;
+  return "";
+}
+
+function normalizeSource(rawSource) {
+  return normalizeStringValue(rawSource);
+}
+
+function normalizeTakeNow(rawTakeNow) {
+  const takeNowValue = normalizeStringValue(rawTakeNow);
+  if (takeNowValue === "true") return true;
+  if (takeNowValue === "false") return false;
+  return null;
 }
 
 function shouldFulfillNowForMode(mode, takeNow) {
   if (mode === "take_today") return true;
   if (mode === "order_in") return false;
-  if (mode === "split") return takeNow;
+  if (mode === "split") return takeNow === true;
   return false;
 }
 
@@ -149,7 +163,7 @@ export const action = async ({ request }) => {
           properties,
         };
       })
-      .filter((line) => line.properties._msh_source === "macron_pos");
+      .filter((line) => normalizeSource(line.properties._msh_source) === "macron_pos");
 
     if (markedPayloadLines.length === 0) {
       console.log(`[orders/create] Ignored ${shop} order ${payload?.id || "unknown"}: no Macron POS marker found`);
@@ -181,12 +195,20 @@ export const action = async ({ request }) => {
     const linesToFulfillNow = new Set();
     for (const orderLine of order.lineItems?.nodes || []) {
       const attributes = attributeMap(orderLine.customAttributes);
-      if (attributes._msh_source !== "macron_pos") continue;
+      const source = normalizeSource(attributes._msh_source);
+      if (source !== "macron_pos") continue;
       if (isFeeOrSystemLine(attributes)) continue;
 
-      const mode = attributes._msh_fulfilment_mode;
-      const takeNow = normalizeTakeNow(attributes._msh_take_now, mode);
-      if (shouldFulfillNowForMode(mode, takeNow)) {
+      const mode = normalizeMode(attributes._msh_fulfillment_mode || attributes._msh_fulfilment_mode);
+      const takeNow = normalizeTakeNow(attributes._msh_take_now);
+      const fulfillNow = shouldFulfillNowForMode(mode, takeNow);
+      console.log(
+        `[orders/create] Decision for order ${order.id} (${order.name || "unknown"}) line "${orderLine.title}": source=${source || "missing"} mode=${mode || "missing"} take_now=${
+          takeNow === null ? "missing" : String(takeNow)
+        } => ${fulfillNow ? "FULFILL" : "SKIP"}`,
+      );
+
+      if (fulfillNow) {
         linesToFulfillNow.add(String(orderLine.legacyResourceId));
       }
     }
@@ -215,6 +237,9 @@ export const action = async ({ request }) => {
           id: foLineItem.id,
           quantity,
         });
+        console.log(
+          `[orders/create] Selected fulfillment-order line for order ${order.id} (${order.name || "unknown"}): "${linkedOrderLine.title}" qty=${quantity} fo=${fulfillmentOrder.id}`,
+        );
       }
 
       if (selectedLineItems.length > 0) {
