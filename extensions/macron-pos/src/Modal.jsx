@@ -2454,7 +2454,7 @@ function Modal() {
   }
   function renderDebugHeader() {
     return (
-      <s-section heading="Debug">
+      <s-section heading="Diagnostics">
         <s-stack direction="block" gap="micro">
           <s-text size="small" appearance="subdued">Screen: {screen} · {dataSource}</s-text>
           {loading ? <s-text size="small" appearance="subdued">Loading…</s-text> : null}
@@ -2468,25 +2468,23 @@ function Modal() {
   function renderDiagnosticsToggle() {
     return (
       <s-section>
-        <s-box border="base" cornerRadius="base" padding="small">
-          <s-stack direction="block" gap="micro">
-            <s-stack direction="inline" gap="small" alignItems="center">
-              <s-text size="small" appearance="subdued">Diagnostics</s-text>
-              <s-text size="small" appearance="subdued">·</s-text>
-            <s-button
-              variant="secondary"
-              onClick={function () {
-                setShowDebug(!showDebug);
-              }}
-            >
-              {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
-            </s-button>
-              {errorMessage && !showDebug ? <s-text size="small" appearance="critical">Issue detected</s-text> : null}
-              {!errorMessage && !showDebug ? <s-text size="small" appearance="subdued">Optional</s-text> : null}
-            </s-stack>
-            {!showDebug ? <s-text size="small" appearance="subdued">Only needed for troubleshooting.</s-text> : null}
-          </s-stack>
-        </s-box>
+        <s-stack direction="inline" gap="small" alignItems="center">
+          <s-button
+            variant="secondary"
+            onClick={function () {
+              setShowDebug(!showDebug);
+            }}
+          >
+            {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
+          </s-button>
+          {errorMessage && !showDebug ? <s-text size="small" appearance="critical">Issue</s-text> : null}
+          {showDebug ? <s-text size="small" appearance="subdued">On</s-text> : null}
+        </s-stack>
+        {showDebug ? (
+          <s-box padding="small">
+            <s-text size="small" appearance="subdued">Diagnostics are visible.</s-text>
+          </s-box>
+        ) : null}
       </s-section>
     );
   }
@@ -2530,26 +2528,28 @@ function Modal() {
       bundlePreview.push(previewKey + ': ' + bundlePersonalisationProps[previewKey]);
     }
     return (
-      <s-section heading="Bundle debug">
-        <s-stack direction="block" gap="micro">
-          <s-text>bundle parent: {product.title}</s-text>
-          <s-text>parent variant: {selectedVariant ? selectedVariant.title : 'none'}</s-text>
-          <s-text>isBundle: {meta.isBundle ? 'true' : 'false'}</s-text>
-          <s-text>raw component refs: {bundleDebugRawRefsCount}</s-text>
-          <s-text>resolved by handle: {bundleDebugResolvedByHandleCount}</s-text>
-          <s-text>resolved by gid: {bundleDebugResolvedByGidCount}</s-text>
-          <s-text>unknown refs: {bundleDebugUnknownRefCount}</s-text>
-          <s-text>component products: {meta.componentProducts.length}</s-text>
-          <s-text>loaded components: {bundleComponents.length}</s-text>
-          <s-text>bundle loading: {bundleLoading ? 'yes' : 'no'}</s-text>
-          <s-text>unresolved refs: {bundleDebugUnresolvedRefs.length === 0 ? 'none' : bundleDebugUnresolvedRefs.join(', ')}</s-text>
-          <s-text>selected variants: {selectedSummary.length === 0 ? 'none' : selectedSummary.join(' | ')}</s-text>
-          <s-text>bundle add status: {bundleAddStatus}</s-text>
-          <s-text>bundle add error: {bundleAddError === '' ? 'none' : bundleAddError}</s-text>
-          <s-text>bundle properties preview: {bundlePreview.length === 0 ? 'none' : ('Bundle:' + product.title + ' | ' + bundlePreview.join(' | '))}</s-text>
-          <s-text>bundle fetch errors: {bundleDebugFetchErrors.length === 0 ? 'none' : bundleDebugFetchErrors.join(' | ')}</s-text>
-            {names.length > 0 ? <s-text>components: {names.join(', ')}</s-text> : null}
+      <s-section heading="Bundle diagnostics">
+        <s-box border="base" cornerRadius="base" padding="small">
+          <s-stack direction="block" gap="micro">
+            <s-text size="small">bundle parent: {product.title}</s-text>
+            <s-text size="small">parent variant: {selectedVariant ? selectedVariant.title : 'none'}</s-text>
+            <s-text size="small">isBundle: {meta.isBundle ? 'true' : 'false'}</s-text>
+            <s-text size="small">raw component refs: {bundleDebugRawRefsCount}</s-text>
+            <s-text size="small">resolved by handle: {bundleDebugResolvedByHandleCount}</s-text>
+            <s-text size="small">resolved by gid: {bundleDebugResolvedByGidCount}</s-text>
+            <s-text size="small">unknown refs: {bundleDebugUnknownRefCount}</s-text>
+            <s-text size="small">component products: {meta.componentProducts.length}</s-text>
+            <s-text size="small">loaded components: {bundleComponents.length}</s-text>
+            <s-text size="small">bundle loading: {bundleLoading ? 'yes' : 'no'}</s-text>
+            <s-text size="small">unresolved refs: {bundleDebugUnresolvedRefs.length === 0 ? 'none' : bundleDebugUnresolvedRefs.join(', ')}</s-text>
+            <s-text size="small">selected variants: {selectedSummary.length === 0 ? 'none' : selectedSummary.join(' | ')}</s-text>
+            <s-text size="small">bundle add status: {bundleAddStatus}</s-text>
+            <s-text size="small">bundle add error: {bundleAddError === '' ? 'none' : bundleAddError}</s-text>
+            <s-text size="small">bundle properties preview: {bundlePreview.length === 0 ? 'none' : ('Bundle:' + product.title + ' | ' + bundlePreview.join(' | '))}</s-text>
+            <s-text size="small">bundle fetch errors: {bundleDebugFetchErrors.length === 0 ? 'none' : bundleDebugFetchErrors.join(' | ')}</s-text>
+            {names.length > 0 ? <s-text size="small">components: {names.join(', ')}</s-text> : null}
           </s-stack>
+        </s-box>
       </s-section>
     );
   }
@@ -2563,27 +2563,29 @@ function Modal() {
     var feeDisplay = parseFeeDisplay(meta.personalisationFeeRaw);
     var summary = hasAnyPersonalisation(meta) ? 'yes' : 'no';
     return (
-      <s-section heading="Personalisation debug">
-        <s-stack direction="block" gap="micro">
-          <s-text>Product supports personalisation: {summary}</s-text>
-          <s-text>Parsed max chars: {parsedMax === null ? 'none' : parsedMax}</s-text>
-          <s-text>Parsed fee: {feeDisplay === '' ? 'none' : feeDisplay}</s-text>
-          <s-text>enablePersonalisation: {meta.enablePersonalisation ? 'true' : 'false'}</s-text>
-          <s-text>personalisationLabel: {meta.personalisationLabel}</s-text>
-          <s-text>personalisationFeeRaw: {meta.personalisationFeeRaw}</s-text>
-          <s-text>personalisationMaxCharsRaw: {meta.personalisationMaxCharsRaw}</s-text>
-          <s-text>personalisationRequired: {meta.personalisationRequired ? 'true' : 'false'}</s-text>
-          <s-text>extraField1Enabled: {meta.extraField1Enabled ? 'true' : 'false'}</s-text>
-          <s-text>extraField1Label: {meta.extraField1Label}</s-text>
-          <s-text>extraField1Required: {meta.extraField1Required ? 'true' : 'false'}</s-text>
-          <s-text>extraField2Enabled: {meta.extraField2Enabled ? 'true' : 'false'}</s-text>
-          <s-text>extraField2Label: {meta.extraField2Label}</s-text>
-          <s-text>extraField2Required: {meta.extraField2Required ? 'true' : 'false'}</s-text>
-          <s-text>enableFileUpload: {meta.enableFileUpload ? 'true' : 'false'}</s-text>
-          <s-text>fileUploadLabel: {meta.fileUploadLabel}</s-text>
-          <s-text>fileUploadHelpText: {meta.fileUploadHelpText}</s-text>
-            <s-text>fileUploadRequired: {meta.fileUploadRequired ? 'true' : 'false'}</s-text>
+      <s-section heading="Personalisation diagnostics">
+        <s-box border="base" cornerRadius="base" padding="small">
+          <s-stack direction="block" gap="micro">
+            <s-text size="small">Product supports personalisation: {summary}</s-text>
+            <s-text size="small">Parsed max chars: {parsedMax === null ? 'none' : parsedMax}</s-text>
+            <s-text size="small">Parsed fee: {feeDisplay === '' ? 'none' : feeDisplay}</s-text>
+            <s-text size="small">enablePersonalisation: {meta.enablePersonalisation ? 'true' : 'false'}</s-text>
+            <s-text size="small">personalisationLabel: {meta.personalisationLabel}</s-text>
+            <s-text size="small">personalisationFeeRaw: {meta.personalisationFeeRaw}</s-text>
+            <s-text size="small">personalisationMaxCharsRaw: {meta.personalisationMaxCharsRaw}</s-text>
+            <s-text size="small">personalisationRequired: {meta.personalisationRequired ? 'true' : 'false'}</s-text>
+            <s-text size="small">extraField1Enabled: {meta.extraField1Enabled ? 'true' : 'false'}</s-text>
+            <s-text size="small">extraField1Label: {meta.extraField1Label}</s-text>
+            <s-text size="small">extraField1Required: {meta.extraField1Required ? 'true' : 'false'}</s-text>
+            <s-text size="small">extraField2Enabled: {meta.extraField2Enabled ? 'true' : 'false'}</s-text>
+            <s-text size="small">extraField2Label: {meta.extraField2Label}</s-text>
+            <s-text size="small">extraField2Required: {meta.extraField2Required ? 'true' : 'false'}</s-text>
+            <s-text size="small">enableFileUpload: {meta.enableFileUpload ? 'true' : 'false'}</s-text>
+            <s-text size="small">fileUploadLabel: {meta.fileUploadLabel}</s-text>
+            <s-text size="small">fileUploadHelpText: {meta.fileUploadHelpText}</s-text>
+            <s-text size="small">fileUploadRequired: {meta.fileUploadRequired ? 'true' : 'false'}</s-text>
           </s-stack>
+        </s-box>
       </s-section>
     );
   }
@@ -2591,10 +2593,11 @@ function Modal() {
   function renderCartDebug() {
     var variantId = selectedVariant ? selectedVariant.id : '';
     return (
-      <s-section heading="Cart debug">
-        <s-stack direction="block" gap="micro">
-          <s-text>Selected product: {selectedProduct ? selectedProduct.title : ''}</s-text>
-          <s-text>Selected variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
+      <s-section heading="Cart diagnostics">
+        <s-box border="base" cornerRadius="base" padding="small">
+          <s-stack direction="block" gap="micro">
+          <s-text size="small">Selected product: {selectedProduct ? selectedProduct.title : ''}</s-text>
+          <s-text size="small">Selected variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
           <s-text>Variant id: {variantId}</s-text>
           <s-text>Variant id type: {classifyVariantId(variantId)}</s-text>
           <s-text>Normalized variant id: {lastNormalizedVariantId}</s-text>
@@ -2633,7 +2636,7 @@ function Modal() {
           <s-text>Last cart status: {lastCartActionStatus}</s-text>
           <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
           <s-text>Last fee error: {lastFeeErrorMessage === '' ? 'none' : lastFeeErrorMessage}</s-text>
-          <s-text>
+          <s-text size="small">
             Line item properties preview:{' '}
             {lastLineItemProperties && Object.keys(lastLineItemProperties).length > 0
               ? Object.keys(lastLineItemProperties)
@@ -2642,22 +2645,25 @@ function Modal() {
                   })
                   .join(', ')
               : 'none'}
-            </s-text>
+          </s-text>
           </s-stack>
+        </s-box>
       </s-section>
     );
   }
 
   function renderProductDebug() {
     return (
-      <s-section heading="Product debug">
-        <s-stack direction="block" gap="micro">
-          <s-text>Selected club: {selectedClub ? selectedClub.name : ''}</s-text>
-          <s-text>Selected subsection: {selectedSubsection ? selectedSubsection.label : ''}</s-text>
-          <s-text>Current collection id: {currentProductsCollectionId ? currentProductsCollectionId : ''}</s-text>
-          <s-text>Product list loading: {productListLoading ? 'yes' : 'no'}</s-text>
-            <s-text>Current products count: {currentProducts ? currentProducts.length : 0}</s-text>
+      <s-section heading="Product diagnostics">
+        <s-box border="base" cornerRadius="base" padding="small">
+          <s-stack direction="block" gap="micro">
+            <s-text size="small">Selected club: {selectedClub ? selectedClub.name : ''}</s-text>
+            <s-text size="small">Selected subsection: {selectedSubsection ? selectedSubsection.label : ''}</s-text>
+            <s-text size="small">Current collection id: {currentProductsCollectionId ? currentProductsCollectionId : ''}</s-text>
+            <s-text size="small">Product list loading: {productListLoading ? 'yes' : 'no'}</s-text>
+            <s-text size="small">Current products count: {currentProducts ? currentProducts.length : 0}</s-text>
           </s-stack>
+        </s-box>
       </s-section>
     );
   }
@@ -3002,9 +3008,9 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          <s-section>
+          <s-box style="margin-top:6px; opacity:0.72;">
             {renderDiagnosticsToggle()}
-          </s-section>
+          </s-box>
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
@@ -3032,9 +3038,9 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          <s-section>
+          <s-box style="margin-top:6px; opacity:0.72;">
             {renderDiagnosticsToggle()}
-          </s-section>
+          </s-box>
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
@@ -3066,9 +3072,9 @@ function Modal() {
               }, productTileColumns()) : null}
             </s-stack>
           </s-section>
-          <s-section>
+          <s-box style="margin-top:6px; opacity:0.72;">
             {renderDiagnosticsToggle()}
-          </s-section>
+          </s-box>
           {showDebug ? renderProductDebug() : null}
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
@@ -3164,7 +3170,7 @@ function Modal() {
               <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
             </s-stack>
           </s-section>
-          <s-box style="margin-top:8px; opacity:0.65;">
+          <s-box style="margin-top:6px; opacity:0.72;">
             {renderDiagnosticsToggle()}
           </s-box>
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
@@ -3286,7 +3292,7 @@ function Modal() {
               </s-section>
             </s-stack>
           </s-section>
-          <s-box style="margin-top:8px; opacity:0.65;">
+          <s-box style="margin-top:6px; opacity:0.72;">
             {renderDiagnosticsToggle()}
           </s-box>
           {showDebug ? renderBundleDebug(selectedProduct) : null}
@@ -3415,7 +3421,7 @@ function Modal() {
               </s-section>
             </s-stack>
           </s-section>
-          <div style="margin-top: 14px;">{renderDiagnosticsToggle()}</div>
+          <s-box style="margin-top:6px; opacity:0.72;">{renderDiagnosticsToggle()}</s-box>
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
           {showDebug ? renderProductDebug() : null}
