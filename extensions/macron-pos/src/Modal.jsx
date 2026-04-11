@@ -2657,13 +2657,11 @@ function Modal() {
     var showBack = screen !== 'clubs';
     return (
       <s-section>
-        <s-stack direction="block" gap="micro">
-          <s-stack direction="inline" gap="small" alignItems="start">
-            {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
-            <s-stack direction="block" gap="none">
-              <s-text>{title}</s-text>
-              {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
-            </s-stack>
+        <s-stack direction="block" gap="small">
+          {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
+          <s-stack direction="block" gap="none">
+            <s-text>{title}</s-text>
+            {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
           </s-stack>
         </s-stack>
       </s-section>
@@ -2859,16 +2857,18 @@ function Modal() {
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
     var boxHeight = height || '120px';
     var objectFit = fitMode || 'contain';
-    var wrapperStyle = 'height:' + boxHeight + '; width:100%; border-radius:12px; border:1px solid #d9e2ec; background:#f8fafc; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:10px; box-sizing:border-box;';
+    var cleanUrl = toStr(imageUrl);
     var imageStyle = 'max-width:100%; max-height:100%; width:auto; height:auto; object-fit:' + objectFit + '; object-position:center; display:block;';
     return (
-      <div style={wrapperStyle}>
-        {imageUrl && toStr(imageUrl) !== '' ? (
-          <img src={imageUrl} alt={altText || ''} style={imageStyle} />
-        ) : (
-          <s-text appearance="subdued">No image</s-text>
-        )}
-      </div>
+      <s-box border="base" cornerRadius="base" padding="small">
+        <s-box style={'height:' + boxHeight + '; width:100%; display:flex; align-items:center; justify-content:center; overflow:hidden;'}>
+          {cleanUrl !== '' ? (
+            <img src={cleanUrl} alt={altText || ''} style={imageStyle} />
+          ) : (
+            <s-text appearance="subdued">No image</s-text>
+          )}
+        </s-box>
+      </s-box>
     );
   }
 
@@ -2892,13 +2892,15 @@ function Modal() {
     var imageHeight = columns === 4 ? '108px' : '120px';
     return (
       <s-clickable key={'collection-' + title} onClick={onPress}>
-        <div style={'background:#ffffff; border:1px solid #d9e2ec; border-radius:14px; min-height:' + tileMinHeight + '; padding:10px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch; gap:8px; box-shadow:0 1px 2px rgba(15,23,42,0.05);'}>
-          {renderImageOrFallback(item ? item.imageUrl : '', title, imageHeight, 'contain')}
-          <div style="min-height:44px; display:flex; flex-direction:column; justify-content:flex-start; align-items:center; text-align:center; gap:2px;">
-            <div style="font-size:14px; line-height:1.25; font-weight:600; color:#111827;">{title}</div>
-            {subtitle ? <div style="font-size:12px; line-height:1.2; color:#6b7280;">{subtitle}</div> : null}
-          </div>
-        </div>
+        <s-box border="base" cornerRadius="large" padding="small" style={'min-height:' + tileMinHeight + ';'}>
+          <s-stack direction="block" gap="small">
+            {renderImageOrFallback(item ? item.imageUrl : '', title, imageHeight, 'contain')}
+            <s-stack direction="block" gap="none" alignment="center">
+              <s-text emphasis="bold">{title}</s-text>
+              {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
+            </s-stack>
+          </s-stack>
+        </s-box>
       </s-clickable>
     );
   }
@@ -2909,12 +2911,12 @@ function Modal() {
     var cardMinHeight = columns === 4 ? '214px' : '228px';
     return (
       <s-clickable key={'product-' + product.id} onClick={onPress}>
-        <div style={'background:#ffffff; border:1px solid #d9e2ec; border-radius:14px; min-height:' + cardMinHeight + '; padding:10px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch; gap:8px; box-shadow:0 1px 2px rgba(15,23,42,0.05);'}>
-          {renderImageOrFallback(product.imageUrl, product.title, imageHeight, 'contain')}
-          <div style="min-height:44px; display:flex; align-items:flex-start; justify-content:center; text-align:center; font-size:13px; line-height:1.3; font-weight:600; color:#111827;">
-            {product.title}
-          </div>
-        </div>
+        <s-box border="base" cornerRadius="large" padding="small" style={'min-height:' + cardMinHeight + ';'}>
+          <s-stack direction="block" gap="small">
+            {renderImageOrFallback(product.imageUrl, product.title, imageHeight, 'contain')}
+            <s-text emphasis="bold">{product.title}</s-text>
+          </s-stack>
+        </s-box>
       </s-clickable>
     );
   }
@@ -2925,13 +2927,18 @@ function Modal() {
     if (list.length === 0) {
       return null;
     }
-    var gridGap = columns === 4 ? '10px' : '12px';
+    var width = tileWidth(columns);
     return (
-      <div style={'display:grid; grid-template-columns:repeat(' + String(columns) + ', minmax(0, 1fr)); gap:' + gridGap + '; align-items:start; width:100%;'}>
-        {list.map(function (item) {
-          return renderItem(item, columns);
+      <s-stack direction="inline" wrap="true" gap="small">
+        {list.map(function (item, index) {
+          var keyBase = item && (item.id || item.name || item.label) ? (item.id || item.name || item.label) : String(index);
+          return (
+            <s-box key={'grid-' + keyBase} style={'width:' + width + '; min-width:' + width + ';'}>
+              {renderItem(item, columns)}
+            </s-box>
+          );
         })}
-      </div>
+      </s-stack>
     );
   }
 
@@ -2954,7 +2961,7 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          <div style="margin-top:8px; opacity:0.65;">{renderDiagnosticsToggle()}</div>
+          {renderDiagnosticsToggle()}
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
@@ -2982,7 +2989,7 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          <div style="margin-top:8px; opacity:0.65;">{renderDiagnosticsToggle()}</div>
+          {renderDiagnosticsToggle()}
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
@@ -3013,7 +3020,7 @@ function Modal() {
               }, productTileColumns()) : null}
             </s-stack>
           </s-section>
-          <div style="margin-top:8px; opacity:0.65;">{renderDiagnosticsToggle()}</div>
+          {renderDiagnosticsToggle()}
           {showDebug ? renderProductDebug() : null}
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
