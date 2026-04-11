@@ -285,6 +285,23 @@ function toBool(value) {
   return str === 'true' || str === '1' || str === 'yes';
 }
 
+
+function buildMshIntentProperties(mode, takeNowInSplit) {
+  var normalizedMode = mode === 'order_in' || mode === 'split' ? mode : 'take_today';
+  var takeNow = normalizedMode === 'take_today';
+  if (normalizedMode === 'order_in') {
+    takeNow = false;
+  }
+  if (normalizedMode === 'split') {
+    takeNow = takeNowInSplit ? true : false;
+  }
+  return {
+    _msh_source: 'macron_pos',
+    _msh_fulfilment_mode: normalizedMode,
+    _msh_take_now: takeNow ? 'true' : 'false',
+  };
+}
+
 function parseFeeDisplay(raw) {
   var text = toStr(raw);
   if (text === '') {
@@ -1312,6 +1329,14 @@ function Modal() {
   var extraField2Value = extra2State[0];
   var setExtraField2Value = extra2State[1];
 
+  var fulfilmentModeState = useState('take_today');
+  var fulfilmentMode = fulfilmentModeState[0];
+  var setFulfilmentMode = fulfilmentModeState[1];
+
+  var splitTakeNowState = useState(true);
+  var splitTakeNow = splitTakeNowState[0];
+  var setSplitTakeNow = splitTakeNowState[1];
+
   var bundleComponentsState = useState([]);
   var bundleComponents = bundleComponentsState[0];
   var setBundleComponents = bundleComponentsState[1];
@@ -1824,6 +1849,11 @@ function Modal() {
     for (var k = 0; k < personalisationKeys.length; k += 1) {
       var key = personalisationKeys[k];
       bundleProps[key] = personalisationProps[key];
+    }
+    var mshIntentProps = buildMshIntentProperties(fulfilmentMode, splitTakeNow);
+    var mshKeys = Object.keys(mshIntentProps);
+    for (var mk = 0; mk < mshKeys.length; mk += 1) {
+      bundleProps[mshKeys[mk]] = mshIntentProps[mshKeys[mk]];
     }
     if (personalisationKeys.length > 0) {
       var summaryParts = [];
@@ -3114,6 +3144,38 @@ function Modal() {
   }
 
 
+  function renderFulfilmentControls() {
+    return (
+      <s-section heading="Fulfilment intent">
+        <s-stack direction="block" gap="small">
+          <s-stack direction="inline" wrap="true" gap="small">
+            <s-button variant={fulfilmentMode === 'take_today' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('take_today'); }}>
+              Take today
+            </s-button>
+            <s-button variant={fulfilmentMode === 'order_in' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('order_in'); }}>
+              Order in
+            </s-button>
+            <s-button variant={fulfilmentMode === 'split' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('split'); }}>
+              Split fulfilment
+            </s-button>
+          </s-stack>
+          {fulfilmentMode === 'split' ? (
+            <s-stack direction="inline" wrap="true" gap="small">
+              <s-text size="small" appearance="subdued">This line:</s-text>
+              <s-button variant={splitTakeNow ? 'primary' : 'secondary'} onClick={function () { setSplitTakeNow(true); }}>
+                Take now
+              </s-button>
+              <s-button variant={!splitTakeNow ? 'primary' : 'secondary'} onClick={function () { setSplitTakeNow(false); }}>
+                Order in
+              </s-button>
+            </s-stack>
+          ) : null}
+        </s-stack>
+      </s-section>
+    );
+  }
+
+
   function renderProductDetailScreen() {
     if (!selectedProduct) {
       return renderProductsScreen();
@@ -3144,6 +3206,7 @@ function Modal() {
             {renderVariantSelectors(selectedProduct)}
           </s-section>
           {renderBundleNote(selectedProduct)}
+          {renderFulfilmentControls()}
           <s-section heading="Actions">
             <s-stack direction="block" gap="small">
               {showAddToCart ? (
@@ -3151,7 +3214,7 @@ function Modal() {
                   variant="primary"
                   onClick={function () {
                     setLastEnteredPersonalisation(false);
-                    addSelectedProductToCart(selectedProduct, selectedVariant, {}, null);
+                    addSelectedProductToCart(selectedProduct, selectedVariant, buildMshIntentProperties(fulfilmentMode, splitTakeNow), null);
                   }}
                 >
                   Add to cart
@@ -3284,6 +3347,7 @@ function Modal() {
                   </s-stack>
                 </s-section>
               ) : null}
+              {renderFulfilmentControls()}
               <s-section heading="Actions">
                 <s-stack direction="block" gap="small">
                   <s-button
@@ -3365,6 +3429,11 @@ function Modal() {
         feeAmount = parsedFeeAmount;
       }
       var props = buildPersonalisationProperties(meta, primaryFieldValue, extraField1Value, extraField2Value, feeAmount);
+      var mshIntentProps = buildMshIntentProperties(fulfilmentMode, splitTakeNow);
+      var mshIntentKeys = Object.keys(mshIntentProps);
+      for (var m = 0; m < mshIntentKeys.length; m += 1) {
+        props[mshIntentKeys[m]] = mshIntentProps[mshIntentKeys[m]];
+      }
       if (Object.keys(props).length > 0) {
         var summaryParts = [];
         var keys = Object.keys(props);
@@ -3431,6 +3500,8 @@ function Modal() {
                   <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
                 </s-stack>
               ) : null}
+
+              {renderFulfilmentControls()}
               <s-section heading="Actions">
                 <s-stack direction="block" gap="small">
                   <s-button variant="primary" onClick={submitPersonalisation}>
