@@ -2478,6 +2478,7 @@ function Modal() {
             {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
           </s-button>
           {errorMessage && !showDebug ? <s-text size="small" appearance="critical">Issue</s-text> : null}
+          {!errorMessage && !showDebug ? <s-text size="small" appearance="subdued">Optional</s-text> : null}
         </s-stack>
       </s-section>
     );
@@ -2657,9 +2658,9 @@ function Modal() {
     var showBack = screen !== 'clubs';
     return (
       <s-section>
-        <s-stack direction="block" gap="small">
+        <s-stack direction="block" gap="micro">
           {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
-          <s-stack direction="block" gap="none">
+          <s-stack direction="block" gap="micro">
             <s-text>{title}</s-text>
             {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
           </s-stack>
@@ -2855,18 +2856,20 @@ function Modal() {
 
 
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
-    var boxHeight = height || '120px';
+    var boxHeight = height || '88px';
     var objectFit = fitMode || 'contain';
     var cleanUrl = toStr(imageUrl);
     return (
-      <s-box border="base" cornerRadius="base" padding="none">
+      <s-box border="base" cornerRadius="base" padding="small">
         <s-box style={'height:' + boxHeight + '; width:100%; overflow:hidden;'}>
           {cleanUrl !== '' ? (
-            <s-image
-              source={cleanUrl}
-              accessibilityDescription={altText || ''}
-              fit={objectFit}
-            />
+            <s-stack direction="block" alignItems="center" justifyContent="center" style={'height:' + boxHeight + '; width:100%;'}>
+              <s-image
+                source={cleanUrl}
+                accessibilityDescription={altText || ''}
+                fit={objectFit}
+              />
+            </s-stack>
           ) : (
             <s-stack direction="block" alignItems="center" justifyContent="center" style={'height:' + boxHeight + '; width:100%;'}>
               <s-text appearance="subdued">No image</s-text>
@@ -2893,15 +2896,15 @@ function Modal() {
 
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-    var tileMinHeight = columns === 4 ? '208px' : '220px';
-    var imageHeight = columns === 4 ? '108px' : '120px';
+    var tileMinHeight = columns === 4 ? '158px' : '170px';
+    var imageHeight = columns === 4 ? '72px' : '82px';
     return (
       <s-clickable key={'collection-' + title} onClick={onPress}>
         <s-box border="base" cornerRadius="large" padding="small" style={'min-height:' + tileMinHeight + ';'}>
-          <s-stack direction="block" gap="small">
+          <s-stack direction="block" gap="micro">
             {renderImageOrFallback(item ? item.imageUrl : '', title, imageHeight, 'contain')}
-            <s-stack direction="block" gap="none" alignItems="center">
-              <s-text emphasis="bold">{title}</s-text>
+            <s-stack direction="block" gap="micro" alignItems="center">
+              <s-text emphasis="bold" size="small">{title}</s-text>
               {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
             </s-stack>
           </s-stack>
@@ -2912,15 +2915,15 @@ function Modal() {
 
 
   function renderProductTile(product, onPress, columns) {
-    var imageHeight = columns === 4 ? '132px' : '144px';
-    var cardMinHeight = columns === 4 ? '224px' : '236px';
+    var imageHeight = columns === 4 ? '96px' : '108px';
+    var cardMinHeight = columns === 4 ? '178px' : '188px';
     return (
       <s-clickable key={'product-' + product.id} onClick={onPress}>
         <s-box border="base" cornerRadius="large" padding="small" style={'min-height:' + cardMinHeight + ';'}>
-          <s-stack direction="block" gap="small">
+          <s-stack direction="block" gap="micro">
             {renderImageOrFallback(product.imageUrl, product.title, imageHeight, 'contain')}
-            <s-stack direction="block" gap="none" alignItems="center">
-              <s-text emphasis="bold">{product.title}</s-text>
+            <s-stack direction="block" gap="micro" alignItems="center">
+              <s-text emphasis="bold" size="small">{product.title}</s-text>
             </s-stack>
           </s-stack>
         </s-box>
@@ -2936,7 +2939,7 @@ function Modal() {
     }
     var width = tileWidth(columns);
     return (
-      <s-stack direction="inline" wrap="true" gap="small">
+      <s-stack direction="inline" wrap="true" gap="micro">
         {list.map(function (item, index) {
           var keyBase = item && (item.id || item.name || item.label) ? (item.id || item.name || item.label) : String(index);
           return (
@@ -2956,7 +2959,7 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro('Club Shop', '')}
           <s-section>
-            <s-stack direction="block" gap="small">
+            <s-stack direction="block" gap="micro">
               <s-text size="small" appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
               {renderGrid(clubs, function (club) {
                 return renderCollectionTile(
@@ -2985,7 +2988,7 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro(selectedClub.name, 'Choose a subsection')}
           <s-section>
-            <s-stack direction="block" gap="small">
+            <s-stack direction="block" gap="micro">
               {renderGrid(selectedClub.subsections, function (subsection) {
                 return renderCollectionTile(
                   subsection,
@@ -3019,7 +3022,7 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro(heading, '')}
           <s-section>
-            <s-stack direction="block" gap="small">
+            <s-stack direction="block" gap="micro">
               {productListLoading ? <s-text size="small" appearance="subdued">Loading products…</s-text> : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
               {!productListLoading ? renderGrid(products, function (product) {
