@@ -2468,16 +2468,16 @@ function Modal() {
   function renderDiagnosticsToggle() {
     return (
       <s-section>
-        <s-stack direction="inline" gap="small" alignItems="center">
+        <s-stack direction="inline" gap="micro" alignItems="center">
           <s-button
             variant="secondary"
             onClick={function () {
               setShowDebug(!showDebug);
             }}
           >
-            {showDebug ? 'Hide diagnostics' : 'Diagnostics'}
+            {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
           </s-button>
-          {errorMessage && !showDebug ? <s-text size="small" appearance="critical">Warning</s-text> : null}
+          {errorMessage && !showDebug ? <s-text size="small" appearance="critical">Issue</s-text> : null}
         </s-stack>
       </s-section>
     );
@@ -2657,12 +2657,12 @@ function Modal() {
     var showBack = screen !== 'clubs';
     return (
       <s-section>
-        <s-stack direction="block" gap="small">
-          <s-stack direction="inline" gap="small" alignItems="center">
+        <s-stack direction="block" gap="micro">
+          <s-stack direction="inline" gap="small" alignItems="start">
             {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
-            <s-stack direction="block" gap="micro">
+            <s-stack direction="block" gap="none">
               <s-text>{title}</s-text>
-              {subtitle ? <s-text appearance="subdued">{subtitle}</s-text> : null}
+              {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
             </s-stack>
           </s-stack>
         </s-stack>
@@ -2857,9 +2857,9 @@ function Modal() {
 
 
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
-    var boxHeight = height || '112px';
+    var boxHeight = height || '120px';
     var objectFit = fitMode || 'contain';
-    var wrapperStyle = 'height:' + boxHeight + '; width:100%; border-radius:14px; border:1px solid #d9e2ec; background:#ffffff; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:10px; box-sizing:border-box;';
+    var wrapperStyle = 'height:' + boxHeight + '; width:100%; border-radius:12px; border:1px solid #d9e2ec; background:#f8fafc; display:flex; align-items:center; justify-content:center; overflow:hidden; padding:10px; box-sizing:border-box;';
     var imageStyle = 'max-width:100%; max-height:100%; width:auto; height:auto; object-fit:' + objectFit + '; object-position:center; display:block;';
     return (
       <div style={wrapperStyle}>
@@ -2888,11 +2888,13 @@ function Modal() {
 
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
+    var tileMinHeight = columns === 4 ? '194px' : '204px';
+    var imageHeight = columns === 4 ? '108px' : '120px';
     return (
       <s-clickable key={'collection-' + title} onClick={onPress}>
-        <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; min-height:190px; padding:12px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch; gap:10px; box-shadow:0 1px 3px rgba(15,23,42,0.06);">
-          {renderImageOrFallback(item ? item.imageUrl : '', title, '108px', 'contain')}
-          <div style="min-height:40px; display:flex; flex-direction:column; justify-content:flex-start; align-items:center; text-align:center; gap:4px;">
+        <div style={'background:#ffffff; border:1px solid #d9e2ec; border-radius:14px; min-height:' + tileMinHeight + '; padding:10px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch; gap:8px; box-shadow:0 1px 2px rgba(15,23,42,0.05);'}>
+          {renderImageOrFallback(item ? item.imageUrl : '', title, imageHeight, 'contain')}
+          <div style="min-height:44px; display:flex; flex-direction:column; justify-content:flex-start; align-items:center; text-align:center; gap:2px;">
             <div style="font-size:14px; line-height:1.25; font-weight:600; color:#111827;">{title}</div>
             {subtitle ? <div style="font-size:12px; line-height:1.2; color:#6b7280;">{subtitle}</div> : null}
           </div>
@@ -2903,11 +2905,13 @@ function Modal() {
 
 
   function renderProductTile(product, onPress, columns) {
+    var imageHeight = columns === 4 ? '132px' : '144px';
+    var cardMinHeight = columns === 4 ? '214px' : '228px';
     return (
       <s-clickable key={'product-' + product.id} onClick={onPress}>
-        <div style="background:#ffffff; border:1px solid #d9e2ec; border-radius:16px; min-height:220px; padding:12px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch; gap:12px; box-shadow:0 1px 3px rgba(15,23,42,0.06);">
-          {renderImageOrFallback(product.imageUrl, product.title, '126px', 'contain')}
-          <div style="min-height:54px; display:flex; align-items:flex-start; justify-content:center; text-align:center; font-size:13px; line-height:1.3; font-weight:600; color:#111827;">
+        <div style={'background:#ffffff; border:1px solid #d9e2ec; border-radius:14px; min-height:' + cardMinHeight + '; padding:10px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch; gap:8px; box-shadow:0 1px 2px rgba(15,23,42,0.05);'}>
+          {renderImageOrFallback(product.imageUrl, product.title, imageHeight, 'contain')}
+          <div style="min-height:44px; display:flex; align-items:flex-start; justify-content:center; text-align:center; font-size:13px; line-height:1.3; font-weight:600; color:#111827;">
             {product.title}
           </div>
         </div>
@@ -2921,8 +2925,9 @@ function Modal() {
     if (list.length === 0) {
       return null;
     }
+    var gridGap = columns === 4 ? '10px' : '12px';
     return (
-      <div style={'display:grid; grid-template-columns:repeat(' + String(columns) + ', minmax(0, 1fr)); gap:14px; align-items:start; width:100%;'}>
+      <div style={'display:grid; grid-template-columns:repeat(' + String(columns) + ', minmax(0, 1fr)); gap:' + gridGap + '; align-items:start; width:100%;'}>
         {list.map(function (item) {
           return renderItem(item, columns);
         })}
@@ -2937,8 +2942,8 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro('Club Shop', '')}
           <s-section>
-            <s-stack direction="block" gap="base">
-              <s-text appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
+            <s-stack direction="block" gap="small">
+              <s-text size="small" appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
               {renderGrid(clubs, function (club) {
                 return renderCollectionTile(
                   club,
@@ -2949,7 +2954,7 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          <div style="margin-top:10px; opacity:0.8;">{renderDiagnosticsToggle()}</div>
+          <div style="margin-top:8px; opacity:0.65;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
@@ -2966,7 +2971,7 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro(selectedClub.name, 'Choose a subsection')}
           <s-section>
-            <s-stack direction="block" gap="base">
+            <s-stack direction="block" gap="small">
               {renderGrid(selectedClub.subsections, function (subsection) {
                 return renderCollectionTile(
                   subsection,
@@ -2977,7 +2982,7 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          <div style="margin-top:10px; opacity:0.8;">{renderDiagnosticsToggle()}</div>
+          <div style="margin-top:8px; opacity:0.65;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
@@ -3000,15 +3005,15 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro(heading, '')}
           <s-section>
-            <s-stack direction="block" gap="base">
-              {productListLoading ? <s-text appearance="subdued">Loading products…</s-text> : null}
+            <s-stack direction="block" gap="small">
+              {productListLoading ? <s-text size="small" appearance="subdued">Loading products…</s-text> : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
               {!productListLoading ? renderGrid(products, function (product) {
                 return renderProductTile(product, function () { handleProductPress(product); }, productTileColumns());
               }, productTileColumns()) : null}
             </s-stack>
           </s-section>
-          <div style="margin-top:10px; opacity:0.8;">{renderDiagnosticsToggle()}</div>
+          <div style="margin-top:8px; opacity:0.65;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderProductDebug() : null}
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
@@ -3065,14 +3070,14 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section>
-            <s-stack direction="block" gap="base">
-              <div style="max-width:320px; margin:0 auto; width:100%;">
-                {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '220px', 'contain')}
+            <s-stack direction="block" gap="small">
+              <div style="max-width:360px; margin:0 auto; width:100%;">
+                {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '232px', 'contain')}
               </div>
-              <div style="font-size:20px; font-weight:700; line-height:1.25; text-align:center; color:#111827;">{selectedProduct.title}</div>
+              <div style="font-size:20px; font-weight:700; line-height:1.2; text-align:center; color:#111827;">{selectedProduct.title}</div>
               {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
-                <s-text appearance="subdued">Select size to continue.</s-text>
-              ) : <s-text appearance="subdued">Bundle options available for this item.</s-text>}
+                <s-text size="small" appearance="subdued">Select size to continue.</s-text>
+              ) : <s-text size="small" appearance="subdued">Bundle options available for this item.</s-text>}
             </s-stack>
           </s-section>
           <s-section heading={productUsesSeparateOptions(selectedProduct) ? 'Options' : 'Size'}>
@@ -3099,7 +3104,7 @@ function Modal() {
               <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
             </s-stack>
           </s-section>
-          <div style="margin-top:10px; opacity:0.8;">{renderDiagnosticsToggle()}</div>
+          <div style="margin-top:8px; opacity:0.65;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
           {showDebug ? renderBundleDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
@@ -3122,7 +3127,7 @@ function Modal() {
       <s-page heading="Macron POS">
         <ScreenScroll>
           <s-section heading="Bundle builder">
-            <s-stack direction="block" gap="base">
+            <s-stack direction="block" gap="small">
               <s-text>Bundle parent: {selectedProduct.title}</s-text>
               <s-text appearance="subdued">Parent variant: {selectedVariant ? selectedVariant.title : 'none selected'}</s-text>
               <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
@@ -3132,8 +3137,8 @@ function Modal() {
                 var chosen = bundleSelections[component.key];
                 return (
                   <s-section key={component.key} heading={component.title}>
-                    <div style="border:1px solid #d9e2ec; border-radius:14px; padding:12px; background:#ffffff;">
-                      <s-stack direction="block" gap="base">
+                    <div style="border:1px solid #d9e2ec; border-radius:12px; padding:10px; background:#ffffff;">
+                      <s-stack direction="block" gap="small">
                         <s-text appearance="subdued">{chosen ? ('Selected: ' + chosen.title) : 'Choose one variant'}</s-text>
                         {component.variants && component.variants.length > 0 ? (
                           <s-stack direction="inline" wrap="true" gap="small">
@@ -3219,7 +3224,7 @@ function Modal() {
               </s-section>
             </s-stack>
           </s-section>
-          <div style="margin-top:10px; opacity:0.8;">{renderDiagnosticsToggle()}</div>
+          <div style="margin-top:8px; opacity:0.65;">{renderDiagnosticsToggle()}</div>
           {showDebug ? renderBundleDebug(selectedProduct) : null}
           {showDebug ? renderCartDebug() : null}
           {showDebug ? renderProductDebug() : null}
