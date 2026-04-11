@@ -2468,7 +2468,7 @@ function Modal() {
   function renderDiagnosticsToggle() {
     return (
       <s-section>
-        <s-stack direction="inline" gap="micro" alignItems="center">
+        <s-stack direction="inline" gap="small" alignItems="center">
           <s-button
             variant="secondary"
             onClick={function () {
@@ -2658,9 +2658,9 @@ function Modal() {
     var showBack = screen !== 'clubs';
     return (
       <s-section>
-        <s-stack direction="block" gap="micro">
+        <s-stack direction="block" gap="small">
           {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
-          <s-stack direction="block" gap="micro">
+          <s-stack direction="block" gap="small">
             <s-text>{title}</s-text>
             {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
           </s-stack>
@@ -2858,12 +2858,18 @@ function Modal() {
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
     var cleanUrl = toStr(imageUrl);
     var objectFit = toStr(fitMode) === '' ? 'contain' : toStr(fitMode);
-    var fallbackSize = toStr(height) === '' ? 'small' : 'base';
+    var imageHeight = toStr(height) === '' ? '56px' : toStr(height);
     var fallbackLabel = altText ? 'No image for ' + altText : 'No image';
     return (
-      <s-box padding="none">
-        {cleanUrl !== '' ? <s-image source={cleanUrl} accessibilityDescription={altText || ''} fit={objectFit} /> : <s-text size={fallbackSize} appearance="subdued">{fallbackLabel}</s-text>}
-      </s-box>
+      <s-stack direction="block" gap="micro" alignItems="center">
+        {cleanUrl !== '' ? (
+          <s-box padding="none" style={'height:' + imageHeight + '; width:100%;'}>
+            <s-image source={cleanUrl} accessibilityDescription={altText || ''} fit={objectFit} />
+          </s-box>
+        ) : (
+          <s-text size="small" appearance="subdued">{fallbackLabel}</s-text>
+        )}
+      </s-stack>
     );
   }
 
@@ -2881,14 +2887,16 @@ function Modal() {
   }
 
 
+
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-    var tileMinHeight = columns === 4 ? '124px' : '136px';
+    var tileMinHeight = columns === 4 ? '118px' : (columns === 3 ? '126px' : '134px');
+    var imageHeight = columns === 4 ? '52px' : (columns === 3 ? '56px' : '60px');
     return (
       <s-clickable key={'collection-' + title} onClick={onPress}>
         <s-box border="base" cornerRadius="large" padding="small" style={'min-height:' + tileMinHeight + ';'}>
-          <s-stack direction="block" gap="micro">
-            {renderImageOrFallback(item ? item.imageUrl : '', title, '', '')}
+          <s-stack direction="block" gap="small" alignItems="center">
+            {renderImageOrFallback(item ? item.imageUrl : '', title, imageHeight, 'contain')}
             <s-stack direction="block" gap="micro" alignItems="center">
               <s-text emphasis="bold" size="small">{title}</s-text>
               {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
@@ -2901,12 +2909,13 @@ function Modal() {
 
 
   function renderProductTile(product, onPress, columns) {
-    var cardMinHeight = columns === 4 ? '132px' : '144px';
+    var cardMinHeight = columns === 4 ? '156px' : (columns === 3 ? '166px' : '176px');
+    var imageHeight = columns === 4 ? '72px' : (columns === 3 ? '80px' : '88px');
     return (
       <s-clickable key={'product-' + product.id} onClick={onPress}>
         <s-box border="base" cornerRadius="large" padding="small" style={'min-height:' + cardMinHeight + ';'}>
-          <s-stack direction="block" gap="micro">
-            {renderImageOrFallback(product.imageUrl, product.title, '', '')}
+          <s-stack direction="block" gap="small" alignItems="center">
+            {renderImageOrFallback(product.imageUrl, product.title, imageHeight, 'contain')}
             <s-stack direction="block" gap="micro" alignItems="center">
               <s-text emphasis="bold" size="small">{product.title}</s-text>
             </s-stack>
@@ -2924,7 +2933,7 @@ function Modal() {
     }
     var width = tileWidth(columns);
     return (
-      <s-stack direction="inline" wrap="true" gap="micro">
+      <s-stack direction="inline" wrap="true" gap="small">
         {list.map(function (item, index) {
           var keyBase = item && (item.id || item.name || item.label) ? (item.id || item.name || item.label) : String(index);
           return (
@@ -2944,7 +2953,7 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro('Club Shop', '')}
           <s-section>
-            <s-stack direction="block" gap="micro">
+            <s-stack direction="block" gap="small">
               <s-text size="small" appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
               {renderGrid(clubs, function (club) {
                 return renderCollectionTile(
@@ -2973,7 +2982,7 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro(selectedClub.name, 'Choose a subsection')}
           <s-section>
-            <s-stack direction="block" gap="micro">
+            <s-stack direction="block" gap="small">
               {renderGrid(selectedClub.subsections, function (subsection) {
                 return renderCollectionTile(
                   subsection,
@@ -3007,7 +3016,7 @@ function Modal() {
         <ScreenScroll>
           {renderScreenIntro(heading, '')}
           <s-section>
-            <s-stack direction="block" gap="micro">
+            <s-stack direction="block" gap="small">
               {productListLoading ? <s-text size="small" appearance="subdued">Loading products…</s-text> : null}
               {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
               {!productListLoading ? renderGrid(products, function (product) {
