@@ -19,8 +19,12 @@ api_version = "2026-04"
   topics = [ "app/uninstalled" ]
   uri = "/webhooks/app/uninstalled"
 
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "/webhooks/orders/create"
+
 [access_scopes]
-scopes = "write_products"
+scopes = "write_products,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders"
 optional_scopes = []
 use_legacy_install_flow = false
 [auth]
