@@ -2856,26 +2856,13 @@ function Modal() {
 
 
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
-    var boxHeight = height || '88px';
-    var objectFit = fitMode || 'contain';
     var cleanUrl = toStr(imageUrl);
+    var objectFit = toStr(fitMode) === '' ? 'contain' : toStr(fitMode);
+    var fallbackSize = toStr(height) === '' ? 'small' : 'base';
+    var fallbackLabel = altText ? 'No image for ' + altText : 'No image';
     return (
-      <s-box border="base" cornerRadius="base" padding="small">
-        <s-box style={'height:' + boxHeight + '; width:100%; overflow:hidden;'}>
-          {cleanUrl !== '' ? (
-            <s-stack direction="block" alignItems="center" justifyContent="center" style={'height:' + boxHeight + '; width:100%;'}>
-              <s-image
-                source={cleanUrl}
-                accessibilityDescription={altText || ''}
-                fit={objectFit}
-              />
-            </s-stack>
-          ) : (
-            <s-stack direction="block" alignItems="center" justifyContent="center" style={'height:' + boxHeight + '; width:100%;'}>
-              <s-text appearance="subdued">No image</s-text>
-            </s-stack>
-          )}
-        </s-box>
+      <s-box padding="none">
+        {cleanUrl !== '' ? <s-image source={cleanUrl} accessibilityDescription={altText || ''} fit={objectFit} /> : <s-text size={fallbackSize} appearance="subdued">{fallbackLabel}</s-text>}
       </s-box>
     );
   }
@@ -2896,13 +2883,12 @@ function Modal() {
 
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-    var tileMinHeight = columns === 4 ? '158px' : '170px';
-    var imageHeight = columns === 4 ? '72px' : '82px';
+    var tileMinHeight = columns === 4 ? '124px' : '136px';
     return (
       <s-clickable key={'collection-' + title} onClick={onPress}>
         <s-box border="base" cornerRadius="large" padding="small" style={'min-height:' + tileMinHeight + ';'}>
           <s-stack direction="block" gap="micro">
-            {renderImageOrFallback(item ? item.imageUrl : '', title, imageHeight, 'contain')}
+            {renderImageOrFallback(item ? item.imageUrl : '', title, '', '')}
             <s-stack direction="block" gap="micro" alignItems="center">
               <s-text emphasis="bold" size="small">{title}</s-text>
               {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
@@ -2915,13 +2901,12 @@ function Modal() {
 
 
   function renderProductTile(product, onPress, columns) {
-    var imageHeight = columns === 4 ? '96px' : '108px';
-    var cardMinHeight = columns === 4 ? '178px' : '188px';
+    var cardMinHeight = columns === 4 ? '132px' : '144px';
     return (
       <s-clickable key={'product-' + product.id} onClick={onPress}>
         <s-box border="base" cornerRadius="large" padding="small" style={'min-height:' + cardMinHeight + ';'}>
           <s-stack direction="block" gap="micro">
-            {renderImageOrFallback(product.imageUrl, product.title, imageHeight, 'contain')}
+            {renderImageOrFallback(product.imageUrl, product.title, '', '')}
             <s-stack direction="block" gap="micro" alignItems="center">
               <s-text emphasis="bold" size="small">{product.title}</s-text>
             </s-stack>
