@@ -2662,7 +2662,7 @@ function Modal() {
     var showBack = screen !== 'clubs';
     return (
       <s-section>
-        <s-box border="base" cornerRadius="large" padding="base">
+        <s-box border="base" cornerRadius="large" padding="small">
           <s-stack direction="block" gap="small">
             {showBack ? <s-button variant="secondary" onClick={handleBack}>Back</s-button> : null}
             <s-stack direction="block" gap="micro">
@@ -2863,21 +2863,23 @@ function Modal() {
 
   function renderImageOrFallback(imageUrl, altText, height, fitMode) {
     var cleanUrl = toStr(imageUrl);
-    var objectFit = toStr(fitMode) === '' ? 'contain' : toStr(fitMode);
-    var imageHeight = toStr(height) === '' ? '56px' : toStr(height);
+    var imageHeight = toStr(height) === '' ? '64px' : toStr(height);
     var fallbackLabel = altText ? 'No image for ' + altText : 'No image';
+    var imageFit = toStr(fitMode);
+    var fitProps = {};
+    if (imageFit === 'contain' || imageFit === 'cover' || imageFit === 'fill') {
+      fitProps.fit = imageFit;
+    }
     return (
-      <s-box border="base" cornerRadius="base" padding="small">
-        <s-stack direction="block" gap="micro" alignItems="center">
-          {cleanUrl !== '' ? (
-            <s-box padding="none" minBlockSize={imageHeight} maxBlockSize={imageHeight} inlineSize="100%">
-              <s-image source={cleanUrl} accessibilityDescription={altText || ''} fit={objectFit} />
-            </s-box>
-          ) : (
-            <s-text size="small" appearance="subdued">{fallbackLabel}</s-text>
-          )}
-        </s-stack>
-      </s-box>
+      cleanUrl !== '' ? (
+        <s-box blockSize={imageHeight} inlineSize="fill" padding="none">
+          <s-image src={cleanUrl} accessibilityDescription={altText || ''} {...fitProps} />
+        </s-box>
+      ) : (
+        <s-box blockSize="auto" inlineSize="fill" padding="none">
+          <s-text size="small" appearance="subdued">{fallbackLabel}</s-text>
+        </s-box>
+      )
     );
   }
 
@@ -2899,12 +2901,14 @@ function Modal() {
 
   function renderCollectionTile(item, subtitle, onPress, columns) {
     var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-    var imageHeight = columns >= 4 ? '48px' : '56px';
+    var imageHeight = columns >= 4 ? '64px' : '72px';
     return (
       <s-clickable key={'collection-' + title} onClick={onPress}>
-        <s-box border="base" cornerRadius="large" padding="base">
+        <s-box border="base" cornerRadius="large" padding="small">
           <s-stack direction="block" gap="small">
-            {renderImageOrFallback(item ? item.imageUrl : '', title, imageHeight, 'contain')}
+            <s-box border="base" cornerRadius="base" padding="small" blockSize={columns >= 4 ? '84px' : '92px'} inlineSize="fill">
+              {renderImageOrFallback(item ? item.imageUrl : '', title, imageHeight, 'contain')}
+            </s-box>
             <s-stack direction="block" gap="micro">
               <s-text emphasis="bold" size="small">{title}</s-text>
               {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
@@ -2917,12 +2921,14 @@ function Modal() {
 
 
   function renderProductTile(product, onPress, columns) {
-    var imageHeight = columns >= 4 ? '56px' : '68px';
+    var imageHeight = columns >= 4 ? '64px' : '72px';
     return (
       <s-clickable key={'product-' + product.id} onClick={onPress}>
-        <s-box border="base" cornerRadius="large" padding="base">
+        <s-box border="base" cornerRadius="large" padding="small">
           <s-stack direction="block" gap="small">
-            {renderImageOrFallback(product.imageUrl, product.title, imageHeight, 'contain')}
+            <s-box border="base" cornerRadius="base" padding="small" blockSize={columns >= 4 ? '84px' : '92px'} inlineSize="fill">
+              {renderImageOrFallback(product.imageUrl, product.title, imageHeight, 'contain')}
+            </s-box>
             <s-stack direction="block" gap="micro">
               <s-text emphasis="bold" size="small">{product.title}</s-text>
             </s-stack>
@@ -2938,29 +2944,17 @@ function Modal() {
     if (list.length === 0) {
       return null;
     }
-    var perRow = columns && columns > 1 ? columns : 1;
-    var rows = [];
-    var cursor = 0;
-    while (cursor < list.length) {
-      rows.push(list.slice(cursor, cursor + perRow));
-      cursor += perRow;
-    }
+    var width = tileWidth(columns);
     return (
-      <s-stack direction="block" gap="small">
-        {rows.map(function (rowItems, rowIndex) {
+      <s-stack direction="inline" wrap="true" gap="small">
+        {list.map(function (item, index) {
+          var keyBase = item && (item.id || item.name || item.label)
+            ? (item.id || item.name || item.label)
+            : String(index);
           return (
-            <s-stack key={'grid-row-' + String(rowIndex)} direction="inline" gap="small" wrap="false">
-              {rowItems.map(function (item, colIndex) {
-                var keyBase = item && (item.id || item.name || item.label)
-                  ? (item.id || item.name || item.label)
-                  : String(rowIndex) + '-' + String(colIndex);
-                return (
-                  <s-box key={'grid-' + keyBase} inlineSize="fill">
-                    {renderItem(item, columns)}
-                  </s-box>
-                );
-              })}
-            </s-stack>
+            <s-box key={'grid-' + keyBase} inlineSize={width}>
+              {renderItem(item, columns)}
+            </s-box>
           );
         })}
       </s-stack>
@@ -2986,7 +2980,9 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <s-section>
+            {renderDiagnosticsToggle()}
+          </s-section>
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
@@ -3014,7 +3010,9 @@ function Modal() {
               }, 4)}
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <s-section>
+            {renderDiagnosticsToggle()}
+          </s-section>
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
       </s-page>
@@ -3046,7 +3044,9 @@ function Modal() {
               }, productTileColumns()) : null}
             </s-stack>
           </s-section>
-          {renderDiagnosticsToggle()}
+          <s-section>
+            {renderDiagnosticsToggle()}
+          </s-section>
           {showDebug ? renderProductDebug() : null}
           {showDebug ? renderDebugHeader() : null}
         </ScreenScroll>
