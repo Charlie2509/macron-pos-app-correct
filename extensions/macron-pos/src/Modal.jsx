@@ -2452,12 +2452,12 @@ function Modal() {
       </s-section>
     );
   }
+
   function renderDebugHeader() {
     return (
       <s-section heading="Diagnostics">
         <s-stack direction="block" gap="micro">
-          <s-text size="small" appearance="subdued">Screen: {screen} · {dataSource}</s-text>
-          {loading ? <s-text size="small" appearance="subdued">Loading…</s-text> : null}
+          <s-text size="small" appearance="subdued">{screen} · {dataSource}</s-text>
           {errorMessage ? <s-text size="small" appearance="critical">{errorMessage}</s-text> : null}
           {renderLiveDebugPanel()}
         </s-stack>
@@ -2475,16 +2475,10 @@ function Modal() {
               setShowDebug(!showDebug);
             }}
           >
-            {showDebug ? 'Hide diagnostics' : 'Show diagnostics'}
+            {showDebug ? 'Hide Diagnostics' : 'Diagnostics'}
           </s-button>
           {errorMessage && !showDebug ? <s-text size="small" appearance="critical">Issue</s-text> : null}
-          {showDebug ? <s-text size="small" appearance="subdued">On</s-text> : null}
         </s-stack>
-        {showDebug ? (
-          <s-box padding="small">
-            <s-text size="small" appearance="subdued">Diagnostics are visible.</s-text>
-          </s-box>
-        ) : null}
       </s-section>
     );
   }
@@ -3164,10 +3158,10 @@ function Modal() {
                 </s-button>
               ) : (!isBundleProduct ? (
                 <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
-                  Continue to personalisation
+                  Add personalisation
                 </s-button>
               ) : null)}
-              <s-button variant="secondary" onClick={handleBack}>Back to products</s-button>
+              <s-button variant="secondary" onClick={handleBack}>Back</s-button>
             </s-stack>
           </s-section>
           <s-box style="margin-top:6px; opacity:0.72;">
@@ -3191,14 +3185,26 @@ function Modal() {
     var meta = selectedProduct.personalisationMeta || {};
     var feeDisplay = parseFeeDisplay(meta.personalisationFeeRaw);
     var maxChars = parseMaxChars(meta.personalisationMaxCharsRaw);
+    function polishLabel(label, fallback) {
+      var value = toStr(label);
+      if (value === '') {
+        return fallback;
+      }
+      if (value === 'Please Enter The Players Name And Age Group') {
+        return "Player name and age group";
+      }
+      if (value === 'Please Upload Your Sponsor Logo Here') {
+        return 'Sponsor logo';
+      }
+      return value;
+    }
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          <s-section heading="Bundle builder">
+          <s-section heading="Build bundle">
             <s-stack direction="block" gap="base">
-              <s-text>Bundle parent: {selectedProduct.title}</s-text>
-              <s-text appearance="subdued">Parent variant: {selectedVariant ? selectedVariant.title : 'none selected'}</s-text>
-              <s-text appearance="subdued">Components required: {bundleComponents.length}</s-text>
+              <s-text>{selectedProduct.title}</s-text>
+              <s-text appearance="subdued">Items to choose: {bundleComponents.length}</s-text>
               {bundleLoading ? <s-text>Loading bundle components…</s-text> : null}
               {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
               {bundleComponents.map(function (component) {
@@ -3236,7 +3242,7 @@ function Modal() {
                   <s-stack direction="block" gap="small">
                     {meta.enablePersonalisation ? (
                       <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
+                        {fieldLabel(polishLabel(meta.personalisationLabel, 'Personalisation'), meta.personalisationRequired, feeDisplay)}
                         <s-text-field
                           value={primaryFieldValue}
                           maxLength={maxChars === null ? undefined : maxChars}
@@ -3248,7 +3254,7 @@ function Modal() {
 
                     {meta.extraField1Enabled ? (
                       <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
+                        {fieldLabel(polishLabel(meta.extraField1Label, 'Additional information'), meta.extraField1Required, '')}
                         <s-text-field
                           value={extraField1Value}
                           onInput={function (event) { setExtraField1Value(event.target.value); }}
@@ -3259,7 +3265,7 @@ function Modal() {
 
                     {meta.extraField2Enabled ? (
                       <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
+                        {fieldLabel(polishLabel(meta.extraField2Label, 'Additional information 2'), meta.extraField2Required, '')}
                         <s-text-field
                           value={extraField2Value}
                           onInput={function (event) { setExtraField2Value(event.target.value); }}
@@ -3270,7 +3276,7 @@ function Modal() {
 
                     {meta.enableFileUpload ? (
                       <s-stack direction="block" gap="small">
-                        {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
+                        {fieldLabel(polishLabel(meta.fileUploadLabel, 'Upload file'), meta.fileUploadRequired, '')}
                         <s-text appearance="critical">File upload is not available in POS V1 for bundle personalisation.</s-text>
                         <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
                       </s-stack>
@@ -3323,6 +3329,22 @@ function Modal() {
     var meta = selectedProduct.personalisationMeta || {};
     var feeDisplay = parseFeeDisplay(meta.personalisationFeeRaw);
     var maxChars = parseMaxChars(meta.personalisationMaxCharsRaw);
+    function polishLabel(label, fallback) {
+      var value = toStr(label);
+      if (value === '') {
+        return fallback;
+      }
+      if (value === 'Please Enter The Players Name And Age Group') {
+        return "Player name and age group";
+      }
+      if (value === 'Please Upload Your Sponsor Logo Here') {
+        return 'Sponsor logo';
+      }
+      if (value === 'Printed Number To Back Of Shirt') {
+        return 'Printed number on back of shirt';
+      }
+      return value;
+    }
 
     function submitPersonalisation() {
       var validation = validatePersonalisationInputs(
@@ -3371,7 +3393,7 @@ function Modal() {
 
               {meta.enablePersonalisation ? (
                 <s-stack direction="block" gap="small">
-                  {fieldLabel(meta.personalisationLabel || 'Personalisation', meta.personalisationRequired, feeDisplay)}
+                  {fieldLabel(polishLabel(meta.personalisationLabel, 'Personalisation'), meta.personalisationRequired, feeDisplay)}
                   <s-text-field
                     value={primaryFieldValue}
                     maxLength={maxChars === null ? undefined : maxChars}
@@ -3383,7 +3405,7 @@ function Modal() {
 
               {meta.extraField1Enabled ? (
                 <s-stack direction="block" gap="small">
-                  {fieldLabel(meta.extraField1Label || 'Additional information', meta.extraField1Required, '')}
+                  {fieldLabel(polishLabel(meta.extraField1Label, 'Additional information'), meta.extraField1Required, '')}
                   <s-text-field
                     value={extraField1Value}
                     onInput={function (event) { setExtraField1Value(event.target.value); }}
@@ -3394,7 +3416,7 @@ function Modal() {
 
               {meta.extraField2Enabled ? (
                 <s-stack direction="block" gap="small">
-                  {fieldLabel(meta.extraField2Label || 'Additional information 2', meta.extraField2Required, '')}
+                  {fieldLabel(polishLabel(meta.extraField2Label, 'Additional information 2'), meta.extraField2Required, '')}
                   <s-text-field
                     value={extraField2Value}
                     onInput={function (event) { setExtraField2Value(event.target.value); }}
@@ -3405,7 +3427,7 @@ function Modal() {
 
               {meta.enableFileUpload ? (
                 <s-stack direction="block" gap="small">
-                  {fieldLabel(meta.fileUploadLabel || 'Upload file', meta.fileUploadRequired, '')}
+                  {fieldLabel(polishLabel(meta.fileUploadLabel, 'Upload file'), meta.fileUploadRequired, '')}
                   <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
                 </s-stack>
               ) : null}
