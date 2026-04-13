@@ -445,10 +445,39 @@ function bundleComponentLineText(index, componentTitle, variantTitle) {
   return String(index) + '. ' + toStr(componentTitle) + ' — ' + toStr(variantTitle);
 }
 
+function buildBundleGroupedSummaryValue(lines) {
+  if (!lines || lines.length === 0) {
+    return '';
+  }
+  return '- ' + lines.join('\n- ');
+}
+
+function buildBundleComponentSummaryLine(componentTitle, variantTitle) {
+  return toStr(componentTitle) + ' — ' + toStr(variantTitle);
+}
+
+function buildBundlePersonalisationSummaryValue(personalisationProps) {
+  if (!personalisationProps || typeof personalisationProps !== 'object') {
+    return '';
+  }
+  var keys = Object.keys(personalisationProps);
+  var lines = [];
+  for (var i = 0; i < keys.length; i += 1) {
+    var key = keys[i];
+    if (key === 'Personalisation Fee') {
+      continue;
+    }
+    lines.push(key + ': ' + personalisationProps[key]);
+  }
+  return buildBundleGroupedSummaryValue(lines);
+}
+
 function buildBundleReadableProperties(bundleTitle, components, selections, fulfilmentByComponent, fulfilmentMode, personalisationProps) {
   var props = {};
   props.Bundle = toStr(bundleTitle);
   var mode = fulfilmentMode === 'order_in' || fulfilmentMode === 'split' ? fulfilmentMode : 'take_today';
+  var takeNowSummaryLines = [];
+  var orderLaterSummaryLines = [];
   for (var i = 0; i < components.length; i += 1) {
     var item = components[i];
     var selected = selections[item.key];
@@ -464,6 +493,18 @@ function buildBundleReadableProperties(bundleTitle, components, selections, fulf
       componentFulfilment = explicit === 'order_later' ? 'order_later' : 'take_now';
     }
     props['Bundle Component ' + String(i + 1) + ' Fulfilment'] = componentFulfilment;
+    var summaryLine = buildBundleComponentSummaryLine(item.title, selected.title);
+    if (componentFulfilment === 'order_later') {
+      orderLaterSummaryLines.push(summaryLine);
+    } else {
+      takeNowSummaryLines.push(summaryLine);
+    }
+  }
+  if (takeNowSummaryLines.length > 0) {
+    props['Bundle Take Now Summary'] = buildBundleGroupedSummaryValue(takeNowSummaryLines);
+  }
+  if (orderLaterSummaryLines.length > 0) {
+    props['Bundle Order Later Summary'] = buildBundleGroupedSummaryValue(orderLaterSummaryLines);
   }
   if (personalisationProps && typeof personalisationProps === 'object') {
     var personalisationKeys = Object.keys(personalisationProps);
@@ -478,6 +519,10 @@ function buildBundleReadableProperties(bundleTitle, components, selections, fulf
         summaryParts.push(summaryKey + ': ' + personalisationProps[summaryKey]);
       }
       props['Personalisation Summary'] = summaryParts.join(' | ');
+      var groupedPersonalisationSummary = buildBundlePersonalisationSummaryValue(personalisationProps);
+      if (groupedPersonalisationSummary !== '') {
+        props['Bundle Personalisation Summary'] = groupedPersonalisationSummary;
+      }
     }
   }
   return props;
