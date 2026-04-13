@@ -199,8 +199,12 @@ function parseBundleComponentsFromAttributes(attributes = {}, mode = "", takeNow
   if (!attributes.Bundle) return null;
   const defaultTakeNow = shouldFulfillNowForMode(mode, takeNow);
   const componentRows = {};
+  const readabilityOnlyKeys = new Set(["Bundle Summary", "Bundle Take Now", "Bundle Order Later"]);
 
   for (const [key, value] of Object.entries(attributes)) {
+    if (readabilityOnlyKeys.has(key)) {
+      continue;
+    }
     const itemMatch = key.match(/^Item\s+(\d+)$/i);
     if (itemMatch) {
       const index = Number(itemMatch[1]);
