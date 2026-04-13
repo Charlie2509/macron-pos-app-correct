@@ -59,6 +59,24 @@ const FULFILLMENT_CREATE_MUTATION = `#graphql
   }
 `;
 
+const DEBUG_MARKER = "[MSH-FULFILL-DEBUG]";
+
+function logDebug(stage, details = "") {
+  if (details) {
+    console.log(`${DEBUG_MARKER} ${stage} | ${details}`);
+    return;
+  }
+  console.log(`${DEBUG_MARKER} ${stage}`);
+}
+
+function logDebugError(stage, details = "") {
+  if (details) {
+    console.log(`${DEBUG_MARKER}[ERROR] ${stage} | ${details}`);
+    return;
+  }
+  console.log(`${DEBUG_MARKER}[ERROR] ${stage}`);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -186,10 +204,9 @@ async function queryOrderWithRetry(admin, orderGid, options = {}) {
       0,
     );
 
-    console.log(
-      `[orders/create] fulfillment order lookup attempt ${attempt}/${attempts} for ${orderGid}: order_found=${String(
-        Boolean(order),
-      )} fulfillment_orders=${foCount} fulfillment_order_lines=${foLineCount}`,
+    logDebug(
+      "ORDER FETCH ATTEMPT",
+      `attempt=${attempt}/${attempts} order_gid=${orderGid} order_found=${String(Boolean(order))} fulfillment_orders=${foCount} fulfillment_order_lines=${foLineCount}`,
     );
 
     if (order && foCount > 0 && foLineCount > 0) {
@@ -198,7 +215,7 @@ async function queryOrderWithRetry(admin, orderGid, options = {}) {
 
     if (attempt < attempts) {
       const delayMs = baseDelayMs * attempt;
-      console.log(`[orders/create] waiting ${delayMs}ms before next fulfillment-order retry for ${orderGid}`);
+      logDebug("ORDER FETCH RETRY WAIT", `order_gid=${orderGid} delay_ms=${delayMs}`);
       await sleep(delayMs);
     }
   }
@@ -214,10 +231,14 @@ async function queryOrderWithRetry(admin, orderGid, options = {}) {
 export const action = async ({ request }) => {
   try {
     const { payload, topic, shop, admin } = await authenticate.webhook(request);
-    console.log(`[orders/create] webhook received: topic=${topic} shop=${shop}`);
+    logDebug(
+      "WEBHOOK START",
+      `topic=${topic} shop=${shop} payload_order_id=${payload?.id || "unknown"}`,
+    );
 
     if (!admin) {
-      console.log(`[orders/create][ERROR] admin client unavailable for shop=${shop}; cannot process fulfillment`);
+      logDebugError("EARLY EXIT", `reason=admin client unavailable shop=${shop}`);
+      logDebug("FINAL RESULT: failed", "reason=admin client unavailable");
       return new Response();
     }
 
@@ -237,14 +258,20 @@ export const action = async ({ request }) => {
       .filter((line) => normalizeSource(line.properties._msh_source) === "macron_pos");
 
     if (markedPayloadLines.length === 0) {
-      console.log(`[orders/create] skipped: no Macron POS marker found for payload order_id=${payload?.id || "unknown"}`);
+      logDebugError(
+        "EARLY EXIT",
+        `reason=no Macron POS marker in payload order_id=${payload?.id || "unknown"}`,
+      );
+      logDebug("FINAL RESULT: skipped", "reason=no Macron POS marker in payload");
       return new Response();
     }
 
     const orderGid = toOrderGid(payload);
-    console.log(`[orders/create] order gid resolved: ${orderGid || "missing"}`);
+    logDebug("ORDER GID", `${orderGid || "missing"}`);
+
     if (!orderGid) {
-      console.log(`[orders/create][ERROR] missing order id in payload; payload_keys=${JSON.stringify(Object.keys(payload || {}))}`);
+      logDebugError("EARLY EXIT", `reason=missing order gid payload_keys=${JSON.stringify(Object.keys(payload || {}))}`);
+      logDebug("FINAL RESULT: failed", "reason=missing order gid");
       return new Response();
     }
 
@@ -252,22 +279,23 @@ export const action = async ({ request }) => {
     const order = orderLookup.order;
 
     if (!order) {
-      console.log(
-        `[orders/create][ERROR] order load failed after ${orderLookup.attemptsUsed} attempts for order_gid=${orderGid}. raw_body=${JSON.stringify(
-          orderLookup.lastBody,
-        )}`,
+      logDebugError(
+        "ORDER FETCH FAIL",
+        `order_gid=${orderGid} attempts=${orderLookup.attemptsUsed} raw_body=${JSON.stringify(orderLookup.lastBody)}`,
       );
+      logDebug("FINAL RESULT: failed", "reason=order fetch returned null");
       return new Response();
     }
 
-    const foNodes = order.fulfillmentOrders?.nodes || [];
-    console.log(
-      `[orders/create] order loaded: id=${order.id} name=${order.name || "unknown"} displayFulfillmentStatus=${
+    logDebug(
+      "ORDER FETCH SUCCESS",
+      `order_id=${order.id} order_name=${order.name || "unknown"} displayFulfillmentStatus=${
         order.displayFulfillmentStatus || "unknown"
-      } fulfillment_orders_found=${foNodes.length} retries_used=${orderLookup.attemptsUsed} exhausted=${String(
-        orderLookup.exhausted,
-      )}`,
+      } retries_used=${orderLookup.attemptsUsed} exhausted=${String(orderLookup.exhausted)}`,
     );
+
+    const foNodes = order.fulfillmentOrders?.nodes || [];
+    logDebug("FULFILLMENT ORDER COUNT", `order_id=${order.id} count=${foNodes.length}`);
 
     const eligibleOrderLineGids = new Set();
     const eligibleOrderLineNumericIds = new Set();
@@ -339,41 +367,28 @@ export const action = async ({ request }) => {
           takeNow,
         });
       }
-
-      console.log(
-        `[orders/create] order line eligibility: order=${order.id} line_gid=${orderLineGid || "missing"} title="${
-          orderLine?.title || ""
-        }" source=${source || "missing"} mode=${mode || "missing"} take_now=${
-          takeNow === null ? "missing" : String(takeNow)
-        } fee_or_system=${String(feeOrSystem)} eligible=${String(eligible)}`,
-      );
     }
 
-    console.log(
-      `[orders/create] mode summary (temporary): order_name=${order.name || "unknown"} order_id=${order.id} take_today_eligible_count=${takeTodayEligibleCount} split_eligible_count=${splitEligibleCount} order_in_count=${orderInCount} fee_system_count=${feeSystemCount}`,
+    logDebug(
+      "ELIGIBLE ORDER LINE COUNT",
+      `order_id=${order.id} eligible_count=${eligibleOrderLines.length} take_today_eligible_count=${takeTodayEligibleCount} split_eligible_count=${splitEligibleCount} order_in_count=${orderInCount} fee_system_count=${feeSystemCount}`,
     );
-
-    console.log(
-      `[orders/create] precomputed eligible lines: order=${order.id} eligible_count=${eligibleOrderLines.length} eligible_lines=${JSON.stringify(
-        eligibleOrderLines,
-      )}`,
-    );
-    console.log(
-      `[orders/create] simplified order.lineItems.nodes: order=${order.id} data=${JSON.stringify(simplifiedOrderLines)}`,
-    );
+    logDebug("ORDER LINE DECISIONS JSON", `order_id=${order.id} data=${JSON.stringify(lineDecisions)}`);
+    logDebug("SIMPLIFIED ORDER LINES JSON", `order_id=${order.id} data=${JSON.stringify(simplifiedOrderLines)}`);
 
     if (eligibleOrderLines.length === 0) {
-      console.log(
-        `[orders/create] no immediate fulfillment needed: order=${order.id} (eligible lines empty). decisions=${JSON.stringify(
-          lineDecisions,
-        )}`,
+      logDebugError(
+        "EARLY EXIT",
+        `reason=no eligible order lines order_id=${order.id} decisions=${JSON.stringify(lineDecisions)}`,
       );
+      logDebug("FINAL RESULT: skipped", "reason=no eligible order lines");
       return new Response();
     }
 
     const lineItemsByFulfillmentOrder = [];
     const fulfillmentOrderDecisions = [];
     const simplifiedFulfillmentOrders = [];
+    let selectedFoLineCount = 0;
 
     for (const fulfillmentOrder of foNodes) {
       const selectedLineItems = [];
@@ -419,6 +434,7 @@ export const action = async ({ request }) => {
             quantity,
           });
           foDecision.selectedForMutation = true;
+          selectedFoLineCount += 1;
         }
 
         foLineDecisions.push(foDecision);
@@ -439,16 +455,6 @@ export const action = async ({ request }) => {
           },
           selectedForMutation: foDecision.selectedForMutation,
         });
-
-        console.log(
-          `[orders/create] fulfillment-order line decision: order=${order.id} fo=${fulfillmentOrder.id} fo_status=${
-            fulfillmentOrder.status
-          } fo_line=${foLineId || "missing"} linked_order_line=${orderLineGid || "missing"} linked_legacy=${
-            legacyId || "missing"
-          } remaining_quantity=${quantity} matched=${String(matched)} valid_fo_line_id=${String(
-            validFoLineId,
-          )} selected=${String(foDecision.selectedForMutation)}`,
-        );
       }
 
       simplifiedFulfillmentOrders.push({
@@ -471,18 +477,22 @@ export const action = async ({ request }) => {
         });
       }
     }
-    console.log(
-      `[orders/create] simplified fulfillmentOrders.nodes: order=${order.id} data=${JSON.stringify(simplifiedFulfillmentOrders)}`,
-    );
+
+    logDebug("SELECTED FO LINE COUNT", `order_id=${order.id} selected_count=${selectedFoLineCount}`);
+    logDebug("FULFILLMENT ORDER DECISIONS JSON", `order_id=${order.id} data=${JSON.stringify(fulfillmentOrderDecisions)}`);
+    logDebug("SIMPLIFIED FULFILLMENT ORDERS JSON", `order_id=${order.id} data=${JSON.stringify(simplifiedFulfillmentOrders)}`);
 
     if (lineItemsByFulfillmentOrder.length === 0) {
-      const shouldHaveTakeTodayFulfillment = takeTodayEligibleCount > 0;
-      const errorLabel = shouldHaveTakeTodayFulfillment ? "[orders/create][ERROR]" : "[orders/create]";
-      console.log(
-        `${errorLabel} lineItemsByFulfillmentOrder empty: order=${order.id} name=${order.name || "unknown"} take_today_eligible_count=${takeTodayEligibleCount} split_eligible_count=${splitEligibleCount} fulfillment_orders_found=${foNodes.length} fulfillment_order_decisions=${JSON.stringify(
+      if (takeTodayEligibleCount > 0) {
+        logDebugError("take_today had no selected FO lines", `order_id=${order.id}`);
+      }
+      logDebugError(
+        "EARLY EXIT",
+        `reason=no selected fulfillment-order lines order_id=${order.id} fulfillment_order_decisions=${JSON.stringify(
           fulfillmentOrderDecisions,
-        )} line_decisions=${JSON.stringify(lineDecisions)}`,
+        )}`,
       );
+      logDebug("FINAL RESULT: skipped", "reason=no selected fulfillment-order lines");
       return new Response();
     }
 
@@ -491,9 +501,7 @@ export const action = async ({ request }) => {
       lineItemsByFulfillmentOrder,
     };
 
-    console.log(
-      `[orders/create] final fulfillmentInput: order=${order.id} payload=${JSON.stringify(fulfillmentInput)}`,
-    );
+    logDebug("FINAL fulfillmentInput JSON", `order_id=${order.id} payload=${JSON.stringify(fulfillmentInput)}`);
 
     const mutationResponse = await admin.graphql(FULFILLMENT_CREATE_MUTATION, {
       variables: {
@@ -502,48 +510,49 @@ export const action = async ({ request }) => {
     });
     const mutationBody = await mutationResponse.json();
 
-    console.log(
-      `[orders/create] raw fulfillmentCreate response: order=${order.id} body=${JSON.stringify(mutationBody)}`,
-    );
+    logDebug("RAW fulfillmentCreate RESPONSE JSON", `order_id=${order.id} body=${JSON.stringify(mutationBody)}`);
 
     if (Array.isArray(mutationBody?.errors) && mutationBody.errors.length > 0) {
-      console.log(
-        `[orders/create][ERROR] fulfillmentCreate returned GraphQL errors: order=${order.id} errors=${JSON.stringify(
-          mutationBody.errors,
-        )} raw_body=${JSON.stringify(mutationBody)}`,
+      logDebugError(
+        "fulfillmentCreate GraphQL errors",
+        `order_id=${order.id} raw_body=${JSON.stringify(mutationBody)}`,
       );
+      logDebug("FINAL RESULT: failed", "reason=fulfillmentCreate GraphQL errors");
       return new Response();
     }
 
     const result = mutationBody?.data?.fulfillmentCreate;
     if (!result) {
-      console.log(
-        `[orders/create][ERROR] fulfillmentCreate missing data.fulfillmentCreate: order=${order.id} raw_body=${JSON.stringify(
-          mutationBody,
-        )}`,
+      logDebugError(
+        "fulfillmentCreate missing data.fulfillmentCreate",
+        `order_id=${order.id} raw_body=${JSON.stringify(mutationBody)}`,
       );
+      logDebug("FINAL RESULT: failed", "reason=fulfillmentCreate missing data node");
       return new Response();
     }
 
     const userErrors = Array.isArray(result?.userErrors) ? result.userErrors : [];
     if (userErrors.length > 0) {
-      console.log(
-        `[orders/create][ERROR] fulfillmentCreate returned userErrors: order=${order.id} userErrors=${JSON.stringify(
-          userErrors,
-        )} raw_body=${JSON.stringify(mutationBody)}`,
+      logDebugError(
+        "fulfillmentCreate userErrors",
+        `order_id=${order.id} raw_body=${JSON.stringify(mutationBody)}`,
       );
+      logDebug("FINAL RESULT: failed", "reason=fulfillmentCreate userErrors");
       return new Response();
     }
 
-    console.log(
-      `[orders/create] final decision: SUCCESS order=${order.id} fulfillment_id=${
-        result?.fulfillment?.id || "unknown"
-      } fulfillment_status=${result?.fulfillment?.status || "unknown"}`,
+    logDebug(
+      "FINAL RESULT: fulfilled",
+      `order_id=${order.id} fulfillment_id=${result?.fulfillment?.id || "unknown"} fulfillment_status=${
+        result?.fulfillment?.status || "unknown"
+      }`,
     );
 
     return new Response();
   } catch (error) {
-    console.log(`[orders/create][ERROR] webhook handler failed: ${error?.stack || error?.message || String(error)}`);
+    logDebugError("EARLY EXIT", `reason=exception`);
+    logDebugError("WEBHOOK HANDLER EXCEPTION", `${error?.stack || error?.message || String(error)}`);
+    logDebug("FINAL RESULT: failed", "reason=exception");
     return new Response();
   }
 };
