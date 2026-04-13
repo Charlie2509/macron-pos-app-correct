@@ -321,6 +321,43 @@ function buildBundleMshIntentProperties(mode) {
   return props;
 }
 
+function bundleComponentLineText(index, componentTitle, variantTitle) {
+  return String(index) + '. ' + toStr(componentTitle) + ' — ' + toStr(variantTitle);
+}
+
+function buildBundleReadableSummaryProperties(bundleTitle, components, selections, fulfilmentByComponent, fulfilmentMode) {
+  var allLines = [];
+  var takeNowLines = [];
+  var orderLaterLines = [];
+  var mode = fulfilmentMode === 'order_in' || fulfilmentMode === 'split' ? fulfilmentMode : 'take_today';
+  for (var i = 0; i < components.length; i += 1) {
+    var item = components[i];
+    var selected = selections[item.key];
+    if (!selected) {
+      continue;
+    }
+    var line = bundleComponentLineText(i + 1, item.title, selected.title);
+    allLines.push(line);
+    var componentFulfilment = 'take_now';
+    if (mode === 'order_in') {
+      componentFulfilment = 'order_later';
+    } else if (mode === 'split') {
+      var explicit = fulfilmentByComponent[item.key];
+      componentFulfilment = explicit === 'order_later' ? 'order_later' : 'take_now';
+    }
+    if (componentFulfilment === 'order_later') {
+      orderLaterLines.push(line);
+    } else {
+      takeNowLines.push(line);
+    }
+  }
+  return {
+    'Bundle Summary': [toStr(bundleTitle)].concat(allLines).join('\n'),
+    'Bundle Take Now': takeNowLines.length > 0 ? takeNowLines.join('\n') : 'None',
+    'Bundle Order Later': orderLaterLines.length > 0 ? orderLaterLines.join('\n') : 'None',
+  };
+}
+
 function parseFeeDisplay(raw) {
   var text = toStr(raw);
   if (text === '') {
@@ -1850,7 +1887,12 @@ function Modal() {
       toast('No bundle selected');
       return;
     }
-    if (!selectedVariant) {
+    var parentVariant = selectedVariant;
+    if (!parentVariant && selectedProduct && Array.isArray(selectedProduct.variants) && selectedProduct.variants.length > 0) {
+      parentVariant = selectedProduct.variants[0];
+      setSelectedVariant(parentVariant);
+    }
+    if (!parentVariant) {
       toast('Select a size first');
       setBundleAddStatus('failed');
       setBundleAddError('No parent variant selected');
@@ -1944,6 +1986,18 @@ function Modal() {
         componentFulfilment
       );
     }
+    var readableSummaryProps = buildBundleReadableSummaryProperties(
+      selectedProduct.title,
+      bundleComponents,
+      bundleSelections,
+      bundleComponentFulfilment,
+      fulfilmentMode
+    );
+    var readableSummaryKeys = Object.keys(readableSummaryProps);
+    for (var sr = 0; sr < readableSummaryKeys.length; sr += 1) {
+      var readableKey = readableSummaryKeys[sr];
+      bundleProps[readableKey] = readableSummaryProps[readableKey];
+    }
 
     var personalisationProps = buildPersonalisationProperties(
       personalisationMeta,
@@ -1973,7 +2027,7 @@ function Modal() {
 
     setBundleAddStatus(bundleFeeAmount !== null ? 'resolving_fee' : 'adding_parent');
     setBundleAddError('');
-    var ok = await addSelectedProductToCart(selectedProduct, selectedVariant, bundleProps, bundleFeeAmount);
+    var ok = await addSelectedProductToCart(selectedProduct, parentVariant, bundleProps, bundleFeeAmount);
     if (!ok) {
       setBundleAddStatus('failed');
       setBundleAddError('Bundle add failed. See cart debug for detail.');
@@ -3325,8 +3379,8 @@ function Modal() {
             </s-button>
           </s-stack>
           <s-text size="small" appearance="subdued">
-            {fulfilmentMode === 'take_today' ? 'All bundle components will be marked Take now.' : null}
-            {fulfilmentMode === 'order_in' ? 'All bundle components will be marked Order later.' : null}
+            {fulfilmentMode === 'take_today' ? 'All components will be marked Take now' : null}
+            {fulfilmentMode === 'order_in' ? 'All components will be marked Order later' : null}
             {fulfilmentMode === 'split' ? 'Choose fulfilment per component below.' : null}
           </s-text>
         </s-stack>
