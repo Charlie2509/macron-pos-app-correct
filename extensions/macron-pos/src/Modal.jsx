@@ -300,6 +300,85 @@ function sanitizeLineItemProperties(rawProperties) {
   return sanitized;
 }
 
+function toPosLineItemProperties(rawProperties) {
+  var entries = [];
+  if (!rawProperties) {
+    return entries;
+  }
+
+  function pushSanitizedEntry(rawKey, rawValue) {
+    var key = toStr(rawKey).trim();
+    if (key === '') {
+      return;
+    }
+    if (rawValue === null || rawValue === undefined) {
+      return;
+    }
+
+    var converted = '';
+    if (typeof rawValue === 'boolean') {
+      converted = rawValue ? 'true' : 'false';
+    } else if (typeof rawValue === 'number') {
+      converted = String(rawValue);
+    } else if (Array.isArray(rawValue)) {
+      converted = rawValue.join(' | ');
+    } else if (typeof rawValue === 'object') {
+      try {
+        converted = JSON.stringify(rawValue);
+      } catch (err) {
+        converted = String(rawValue);
+      }
+    } else {
+      converted = String(rawValue);
+    }
+
+    var value = toStr(converted).trim();
+    if (value === '') {
+      return;
+    }
+    entries.push({key: key, value: value});
+  }
+
+  if (Array.isArray(rawProperties)) {
+    for (var i = 0; i < rawProperties.length; i += 1) {
+      var row = rawProperties[i];
+      if (Array.isArray(row) && row.length >= 2) {
+        pushSanitizedEntry(row[0], row[1]);
+        continue;
+      }
+      if (row && typeof row === 'object' && !Array.isArray(row) && row.key !== undefined) {
+        pushSanitizedEntry(row.key, row.value);
+      }
+    }
+    return entries;
+  }
+
+  if (typeof rawProperties === 'object') {
+    var keys = Object.keys(rawProperties);
+    for (var k = 0; k < keys.length; k += 1) {
+      var rawKey = keys[k];
+      pushSanitizedEntry(rawKey, rawProperties[rawKey]);
+    }
+    return entries;
+  }
+
+  if (typeof rawProperties.length === 'number') {
+    try {
+      var arr = Array.from(rawProperties);
+      for (var j = 0; j < arr.length; j += 1) {
+        var item = arr[j];
+        if (item && typeof item === 'object' && item.key !== undefined) {
+          pushSanitizedEntry(item.key, item.value);
+        }
+      }
+    } catch (arrayLikeErr) {
+      // ignore invalid array-like input
+    }
+  }
+
+  return entries;
+}
+
 function normalizeBundleComponentReference(rawReference) {
   var raw = toStr(rawReference);
   if (raw === '') {
@@ -2050,6 +2129,9 @@ function Modal() {
     var readableSummaryKeys = Object.keys(readableSummaryProps);
     for (var sr = 0; sr < readableSummaryKeys.length; sr += 1) {
       var readableKey = readableSummaryKeys[sr];
+      if (readableKey === 'Bundle Summary') {
+        continue;
+      }
       bundleProps[readableKey] = readableSummaryProps[readableKey];
     }
 
@@ -2465,6 +2547,7 @@ function Modal() {
     setLastFeeAmount(feeRequired ? numericFee : null);
 
     var propertiesObject = sanitizeLineItemProperties(lineItemProperties);
+    var posProperties = toPosLineItemProperties(lineItemProperties);
 
     var expectedIncrease = 1 + (feeRequired ? 1 : 0);
     var mainUuid = '';
@@ -2545,12 +2628,14 @@ function Modal() {
       }
 
       console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
+      console.log('[BundleAdd] final parent title=', product && product.title ? product.title : '');
+      console.log('[BundleAdd] final normalized parent variant id=', normalized.value);
+      console.log('[BundleAdd] final addLineItem args=', [normalized.value, 1, posProperties]);
+      console.log('[BundleAdd] final properties typeof=', typeof posProperties);
+      console.log('[BundleAdd] final properties Array.isArray=', Array.isArray(posProperties));
+      console.log('[BundleAdd] first 3 properties=', Array.isArray(posProperties) ? posProperties.slice(0, 3) : []);
       try {
-        mainUuid = await shopify.cart.addLineItem({
-          variantId: normalized.value,
-          quantity: 1,
-          properties: propertiesObject,
-        });
+        mainUuid = await shopify.cart.addLineItem(normalized.value, 1, posProperties);
       } catch (mainAddErr) {
         console.error('[BundleAdd] main addLineItem error object=', mainAddErr);
         console.error('[BundleAdd] main addLineItem error message=', mainAddErr && mainAddErr.message ? mainAddErr.message : String(mainAddErr));
@@ -2564,7 +2649,7 @@ function Modal() {
         return false;
       }
 
-      if (Object.keys(propertiesObject).length > 0) {
+      if (posProperties.length > 0) {
         setLastPropertiesAttachStatus('success');
       } else {
         setLastPropertiesAttachStatus('skipped');
@@ -2650,6 +2735,8 @@ function Modal() {
       setLastCartErrorMessage('No cart count change');
       return false;
     } catch (err) {
+      console.error('[BundleAdd] caught error object=', err);
+      console.error('[BundleAdd] caught error message=', err && err.message ? err.message : String(err));
       if (mainUuid || feeUuid) {
         await rollbackAddedLines('unexpected cart add failure');
       }
