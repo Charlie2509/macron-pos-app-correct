@@ -2404,6 +2404,19 @@ function Modal() {
     setLastFeeRequired(feeRequired);
     setLastFeeAmount(feeRequired ? numericFee : null);
 
+    var propertiesObject = {};
+    if (lineItemProperties && typeof lineItemProperties === 'object' && !Array.isArray(lineItemProperties)) {
+      var inputPropertyKeys = Object.keys(lineItemProperties);
+      for (var propIndex = 0; propIndex < inputPropertyKeys.length; propIndex += 1) {
+        var inputKey = inputPropertyKeys[propIndex];
+        var inputValue = lineItemProperties[inputKey];
+        if (inputValue === null || inputValue === undefined) {
+          continue;
+        }
+        propertiesObject[String(inputKey)] = String(inputValue);
+      }
+    }
+
     var expectedIncrease = 1 + (feeRequired ? 1 : 0);
     var mainUuid = '';
     var feeUuid = '';
@@ -2482,7 +2495,12 @@ function Modal() {
         setLastFeePropertiesAttachStatus('skipped');
       }
 
-      mainUuid = await shopify.cart.addLineItem(normalized.value, 1);
+      console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
+      mainUuid = await shopify.cart.addLineItem({
+        variantId: normalized.value,
+        quantity: 1,
+        properties: propertiesObject,
+      });
       setLastCartLineItemUuid(mainUuid ? String(mainUuid) : '');
       if (!mainUuid) {
         toast('Could not add to cart.');
@@ -2491,25 +2509,8 @@ function Modal() {
         return false;
       }
 
-      if (lineItemProperties && typeof lineItemProperties === 'object' && Object.keys(lineItemProperties).length > 0) {
-        if (shopify.cart && shopify.cart.addLineItemProperties) {
-          try {
-            await shopify.cart.addLineItemProperties(mainUuid, lineItemProperties);
-            setLastPropertiesAttachStatus('success');
-          } catch (errProps) {
-            setLastPropertiesAttachStatus('failed');
-            await rollbackAddedLines('main addLineItemProperties failed');
-            setLastCartActionStatus('failed');
-            setLastCartErrorMessage(errProps && errProps.message ? errProps.message : 'Failed to attach properties');
-            return false;
-          }
-        } else {
-          setLastPropertiesAttachStatus('failed');
-          await rollbackAddedLines('main addLineItemProperties missing API');
-          setLastCartActionStatus('failed');
-          setLastCartErrorMessage('Cart API missing addLineItemProperties');
-          return false;
-        }
+      if (Object.keys(propertiesObject).length > 0) {
+        setLastPropertiesAttachStatus('success');
       } else {
         setLastPropertiesAttachStatus('skipped');
       }
