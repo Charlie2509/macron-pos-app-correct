@@ -307,9 +307,21 @@ function defaultBundleComponentFulfilment(mode, takeNowInSplit) {
     return 'order_later';
   }
   if (mode === 'split') {
-    return takeNowInSplit ? 'take_now' : 'order_later';
+    return 'take_now';
   }
   return 'take_now';
+}
+
+function buildBundleMshIntentProperties(mode) {
+  var normalizedMode = mode === 'order_in' || mode === 'split' ? mode : 'take_today';
+  var props = {
+    _msh_source: 'macron_pos',
+    _msh_fulfilment_mode: normalizedMode,
+  };
+  if (normalizedMode !== 'split') {
+    props._msh_take_now = normalizedMode === 'take_today' ? 'true' : 'false';
+  }
+  return props;
 }
 
 function parseFeeDisplay(raw) {
@@ -1915,7 +1927,7 @@ function Modal() {
       var key = personalisationKeys[k];
       bundleProps[key] = personalisationProps[key];
     }
-    var mshIntentProps = buildMshIntentProperties(fulfilmentMode, splitTakeNow);
+    var mshIntentProps = buildBundleMshIntentProperties(fulfilmentMode);
     var mshKeys = Object.keys(mshIntentProps);
     for (var mk = 0; mk < mshKeys.length; mk += 1) {
       bundleProps[mshKeys[mk]] = mshIntentProps[mshKeys[mk]];
@@ -3234,7 +3246,9 @@ function Modal() {
   }
 
 
-  function renderFulfilmentControls() {
+  function renderFulfilmentControls(options) {
+    var config = options || {};
+    var hideSplitLineChoice = config.hideSplitLineChoice ? true : false;
     return (
       <s-section heading="Fulfilment intent">
         <s-stack direction="block" gap="small">
@@ -3249,7 +3263,7 @@ function Modal() {
               Split fulfilment
             </s-button>
           </s-stack>
-          {fulfilmentMode === 'split' ? (
+          {fulfilmentMode === 'split' && !hideSplitLineChoice ? (
             <s-stack direction="inline" wrap="true" gap="small">
               <s-text size="small" appearance="subdued">This line:</s-text>
               <s-button variant={splitTakeNow ? 'primary' : 'secondary'} onClick={function () { setSplitTakeNow(true); }}>
@@ -3354,7 +3368,7 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderFulfilmentControls()}
+          {renderFulfilmentControls({hideSplitLineChoice: true})}
           <s-section heading="Build bundle">
             <s-stack direction="block" gap="base">
               <s-text>{selectedProduct.title}</s-text>
