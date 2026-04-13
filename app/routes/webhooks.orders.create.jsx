@@ -101,6 +101,14 @@ function normalizeTakeNow(rawTakeNow) {
   return null;
 }
 
+function parseNumericId(value) {
+  if (value == null) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  const match = raw.match(/(\d+)(?:\?.*)?$/);
+  return match ? match[1] : "";
+}
+
 function shouldFulfillNowForMode(mode, takeNow) {
   if (mode === "take_today") return true;
   if (mode === "order_in") return false;
@@ -262,10 +270,11 @@ export const action = async ({ request }) => {
     );
 
     const eligibleOrderLineGids = new Set();
+    const eligibleOrderLineNumericIds = new Set();
     const eligibleOrderLineLegacyIds = new Set();
-    const eligibleOrderLineTitles = new Set();
     const eligibleOrderLines = [];
     const lineDecisions = [];
+    const simplifiedOrderLines = [];
 
     let takeTodayEligibleCount = 0;
     let splitEligibleCount = 0;
@@ -277,7 +286,7 @@ export const action = async ({ request }) => {
       const { source, rawMode, mode, rawTakeNow, takeNow, eligible, feeOrSystem } = evaluateLineEligibility(attributes);
       const orderLineGid = String(orderLine?.id || "");
       const orderLineLegacyId = String(orderLine?.legacyResourceId || "");
-      const normalizedTitle = normalizeStringValue(orderLine?.title || "");
+      const orderLineNumericId = parseNumericId(orderLineGid);
 
       if (feeOrSystem) feeSystemCount += 1;
       if (mode === "order_in") orderInCount += 1;
@@ -300,13 +309,29 @@ export const action = async ({ request }) => {
       };
 
       lineDecisions.push(decision);
+      simplifiedOrderLines.push({
+        id: orderLineGid,
+        numericId: orderLineNumericId,
+        legacyResourceId: orderLineLegacyId,
+        title: orderLine?.title || "",
+        quantity: Number(orderLine?.quantity || 0),
+        attributes: summarizeAttributes(attributes),
+        eligibility: {
+          source,
+          mode,
+          takeNow,
+          feeOrSystem,
+          eligible,
+        },
+      });
 
       if (eligible) {
         if (orderLineGid) eligibleOrderLineGids.add(orderLineGid);
+        if (orderLineNumericId) eligibleOrderLineNumericIds.add(orderLineNumericId);
         if (orderLineLegacyId) eligibleOrderLineLegacyIds.add(orderLineLegacyId);
-        if (normalizedTitle) eligibleOrderLineTitles.add(normalizedTitle);
         eligibleOrderLines.push({
           orderLineGid,
+          orderLineNumericId,
           orderLineLegacyId,
           title: orderLine?.title || "",
           quantity: Number(orderLine?.quantity || 0),
@@ -333,6 +358,9 @@ export const action = async ({ request }) => {
         eligibleOrderLines,
       )}`,
     );
+    console.log(
+      `[orders/create] simplified order.lineItems.nodes: order=${order.id} data=${JSON.stringify(simplifiedOrderLines)}`,
+    );
 
     if (eligibleOrderLines.length === 0) {
       console.log(
@@ -345,25 +373,27 @@ export const action = async ({ request }) => {
 
     const lineItemsByFulfillmentOrder = [];
     const fulfillmentOrderDecisions = [];
+    const simplifiedFulfillmentOrders = [];
 
     for (const fulfillmentOrder of foNodes) {
       const selectedLineItems = [];
       const foLineDecisions = [];
+      const simplifiedFoLines = [];
 
       for (const foLineItem of fulfillmentOrder.lineItems?.nodes || []) {
         const linkedOrderLine = foLineItem.lineItem || {};
         const orderLineGid = String(linkedOrderLine.id || "");
+        const orderLineNumericId = parseNumericId(orderLineGid);
         const legacyId = String(linkedOrderLine.legacyResourceId || "");
-        const normalizedTitle = normalizeStringValue(linkedOrderLine?.title || "");
         const foLineId = String(foLineItem.id || "");
         const quantity = Number(foLineItem.remainingQuantity || 0);
 
         const matchedByGid = Boolean(orderLineGid && eligibleOrderLineGids.has(orderLineGid));
-        const matchedByLegacyId = Boolean(legacyId && eligibleOrderLineLegacyIds.has(legacyId));
-        const matchedByTitle = Boolean(
-          !matchedByGid && !matchedByLegacyId && normalizedTitle && eligibleOrderLineTitles.has(normalizedTitle),
+        const matchedByNumericId = Boolean(
+          !matchedByGid && orderLineNumericId && eligibleOrderLineNumericIds.has(orderLineNumericId),
         );
-        const matched = matchedByGid || matchedByLegacyId || matchedByTitle;
+        const matchedByLegacyId = Boolean(legacyId && eligibleOrderLineLegacyIds.has(legacyId));
+        const matched = matchedByGid || matchedByNumericId || matchedByLegacyId;
         const validFoLineId = foLineId.startsWith("gid://shopify/FulfillmentOrderLineItem/");
 
         const foDecision = {
@@ -371,12 +401,13 @@ export const action = async ({ request }) => {
           fulfillmentOrderStatus: fulfillmentOrder.status,
           fulfillmentOrderLineId: foLineId,
           linkedOrderLineId: orderLineGid,
+          linkedOrderLineNumericId: orderLineNumericId,
           linkedOrderLineLegacyId: legacyId,
           linkedOrderLineTitle: linkedOrderLine?.title || "",
           remainingQuantity: quantity,
           matchedByGid,
+          matchedByNumericId,
           matchedByLegacyId,
-          matchedByTitle,
           matchedEligibleOrderLine: matched,
           validFulfillmentOrderLineId: validFoLineId,
           selectedForMutation: false,
@@ -391,6 +422,23 @@ export const action = async ({ request }) => {
         }
 
         foLineDecisions.push(foDecision);
+        simplifiedFoLines.push({
+          fulfillmentOrderId: fulfillmentOrder.id,
+          fulfillmentOrderLineId: foLineId,
+          remainingQuantity: quantity,
+          linkedLineItem: {
+            id: orderLineGid,
+            numericId: orderLineNumericId,
+            legacyResourceId: legacyId,
+            title: linkedOrderLine?.title || "",
+          },
+          matchedBy: {
+            gid: matchedByGid,
+            numericId: matchedByNumericId,
+            legacyId: matchedByLegacyId,
+          },
+          selectedForMutation: foDecision.selectedForMutation,
+        });
 
         console.log(
           `[orders/create] fulfillment-order line decision: order=${order.id} fo=${fulfillmentOrder.id} fo_status=${
@@ -402,6 +450,12 @@ export const action = async ({ request }) => {
           )} selected=${String(foDecision.selectedForMutation)}`,
         );
       }
+
+      simplifiedFulfillmentOrders.push({
+        id: fulfillmentOrder.id,
+        status: fulfillmentOrder.status,
+        lineItems: simplifiedFoLines,
+      });
 
       fulfillmentOrderDecisions.push({
         fulfillmentOrderId: fulfillmentOrder.id,
@@ -417,6 +471,9 @@ export const action = async ({ request }) => {
         });
       }
     }
+    console.log(
+      `[orders/create] simplified fulfillmentOrders.nodes: order=${order.id} data=${JSON.stringify(simplifiedFulfillmentOrders)}`,
+    );
 
     if (lineItemsByFulfillmentOrder.length === 0) {
       const shouldHaveTakeTodayFulfillment = takeTodayEligibleCount > 0;
