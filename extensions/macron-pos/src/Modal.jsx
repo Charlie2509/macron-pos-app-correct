@@ -445,10 +445,9 @@ function bundleComponentLineText(index, componentTitle, variantTitle) {
   return String(index) + '. ' + toStr(componentTitle) + ' — ' + toStr(variantTitle);
 }
 
-function buildBundleReadableSummaryProperties(bundleTitle, components, selections, fulfilmentByComponent, fulfilmentMode) {
-  var allLines = [];
-  var takeNowLines = [];
-  var orderLaterLines = [];
+function buildBundleReadableProperties(bundleTitle, components, selections, fulfilmentByComponent, fulfilmentMode, personalisationProps) {
+  var props = {};
+  props.Bundle = toStr(bundleTitle);
   var mode = fulfilmentMode === 'order_in' || fulfilmentMode === 'split' ? fulfilmentMode : 'take_today';
   for (var i = 0; i < components.length; i += 1) {
     var item = components[i];
@@ -456,8 +455,7 @@ function buildBundleReadableSummaryProperties(bundleTitle, components, selection
     if (!selected) {
       continue;
     }
-    var line = bundleComponentLineText(i + 1, item.title, selected.title);
-    allLines.push(line);
+    props['Item ' + String(i + 1)] = item.title + ' — ' + selected.title;
     var componentFulfilment = 'take_now';
     if (mode === 'order_in') {
       componentFulfilment = 'order_later';
@@ -465,17 +463,24 @@ function buildBundleReadableSummaryProperties(bundleTitle, components, selection
       var explicit = fulfilmentByComponent[item.key];
       componentFulfilment = explicit === 'order_later' ? 'order_later' : 'take_now';
     }
-    if (componentFulfilment === 'order_later') {
-      orderLaterLines.push(line);
-    } else {
-      takeNowLines.push(line);
+    props['Bundle Component ' + String(i + 1) + ' Fulfilment'] = componentFulfilment;
+  }
+  if (personalisationProps && typeof personalisationProps === 'object') {
+    var personalisationKeys = Object.keys(personalisationProps);
+    for (var p = 0; p < personalisationKeys.length; p += 1) {
+      var personalisationKey = personalisationKeys[p];
+      props[personalisationKey] = personalisationProps[personalisationKey];
+    }
+    if (personalisationKeys.length > 0) {
+      var summaryParts = [];
+      for (var s = 0; s < personalisationKeys.length; s += 1) {
+        var summaryKey = personalisationKeys[s];
+        summaryParts.push(summaryKey + ': ' + personalisationProps[summaryKey]);
+      }
+      props['Personalisation Summary'] = summaryParts.join(' | ');
     }
   }
-  return {
-    'Bundle Summary': [toStr(bundleTitle)].concat(allLines).join('\n'),
-    'Bundle Take Now': takeNowLines.length > 0 ? takeNowLines.join('\n') : 'None',
-    'Bundle Order Later': orderLaterLines.length > 0 ? orderLaterLines.join('\n') : 'None',
-  };
+  return props;
 }
 
 function parseFeeDisplay(raw) {
@@ -1565,6 +1570,34 @@ function Modal() {
   var bundleAddError = bundleAddErrorState[0];
   var setBundleAddError = bundleAddErrorState[1];
 
+  var bundleParentLineAddedState = useState(false);
+  var bundleParentLineAdded = bundleParentLineAddedState[0];
+  var setBundleParentLineAdded = bundleParentLineAddedState[1];
+
+  var bundleParentLineUuidState = useState('');
+  var bundleParentLineUuid = bundleParentLineUuidState[0];
+  var setBundleParentLineUuid = bundleParentLineUuidState[1];
+
+  var bundleReadablePropertyCountState = useState(0);
+  var bundleReadablePropertyCount = bundleReadablePropertyCountState[0];
+  var setBundleReadablePropertyCount = bundleReadablePropertyCountState[1];
+
+  var bundleReadableAttachAttemptedState = useState(false);
+  var bundleReadableAttachAttempted = bundleReadableAttachAttemptedState[0];
+  var setBundleReadableAttachAttempted = bundleReadableAttachAttemptedState[1];
+
+  var bundleReadableAttachStatusState = useState('idle');
+  var bundleReadableAttachStatus = bundleReadableAttachStatusState[0];
+  var setBundleReadableAttachStatus = bundleReadableAttachStatusState[1];
+
+  var bundleReadableAttachErrorState = useState('');
+  var bundleReadableAttachError = bundleReadableAttachErrorState[0];
+  var setBundleReadableAttachError = bundleReadableAttachErrorState[1];
+
+  var bundleFinalParentPropertiesCountState = useState(0);
+  var bundleFinalParentPropertiesCount = bundleFinalParentPropertiesCountState[0];
+  var setBundleFinalParentPropertiesCount = bundleFinalParentPropertiesCountState[1];
+
   var showDebugState = useState(false);
   var showDebug = showDebugState[0];
   var setShowDebug = showDebugState[1];
@@ -2080,8 +2113,14 @@ function Modal() {
       bundleFeeAmount = parsedBundleFee;
     }
 
-    var bundleProps = {};
-    bundleProps.Bundle = selectedProduct.title;
+    setBundleParentLineAdded(false);
+    setBundleParentLineUuid('');
+    setBundleReadablePropertyCount(0);
+    setBundleReadableAttachAttempted(false);
+    setBundleReadableAttachStatus('idle');
+    setBundleReadableAttachError('');
+    setBundleFinalParentPropertiesCount(0);
+
     console.log('[BundleAdd] mode=', fulfilmentMode, 'componentCount=', bundleComponents.length);
     for (var idx = 0; idx < bundleComponents.length; idx += 1) {
       var item = bundleComponents[idx];
@@ -2101,9 +2140,7 @@ function Modal() {
       } else {
         componentFulfilment = 'take_now';
       }
-      bundleProps['Item ' + String(idx + 1)] = item.title + ' — ' + selected.title;
       var fulfilmentKey = 'Bundle Component ' + String(idx + 1) + ' Fulfilment';
-      bundleProps[fulfilmentKey] = componentFulfilment;
       console.log(
         '[BundleAdd] component',
         idx + 1,
@@ -2119,21 +2156,6 @@ function Modal() {
         componentFulfilment
       );
     }
-    var readableSummaryProps = buildBundleReadableSummaryProperties(
-      selectedProduct.title,
-      bundleComponents,
-      bundleSelections,
-      bundleComponentFulfilment,
-      fulfilmentMode
-    );
-    var readableSummaryKeys = Object.keys(readableSummaryProps);
-    for (var sr = 0; sr < readableSummaryKeys.length; sr += 1) {
-      var readableKey = readableSummaryKeys[sr];
-      if (readableKey === 'Bundle Summary') {
-        continue;
-      }
-      bundleProps[readableKey] = readableSummaryProps[readableKey];
-    }
 
     var personalisationProps = buildPersonalisationProperties(
       personalisationMeta,
@@ -2142,23 +2164,18 @@ function Modal() {
       extraField2Value,
       bundleFeeAmount
     );
-    var personalisationKeys = Object.keys(personalisationProps);
-    for (var k = 0; k < personalisationKeys.length; k += 1) {
-      var key = personalisationKeys[k];
-      bundleProps[key] = personalisationProps[key];
-    }
+    var bundleProps = buildBundleReadableProperties(
+      selectedProduct.title,
+      bundleComponents,
+      bundleSelections,
+      bundleComponentFulfilment,
+      fulfilmentMode,
+      personalisationProps
+    );
     var mshIntentProps = buildBundleMshIntentProperties(fulfilmentMode);
     var mshKeys = Object.keys(mshIntentProps);
     for (var mk = 0; mk < mshKeys.length; mk += 1) {
       bundleProps[mshKeys[mk]] = mshIntentProps[mshKeys[mk]];
-    }
-    if (personalisationKeys.length > 0) {
-      var summaryParts = [];
-      for (var s = 0; s < personalisationKeys.length; s += 1) {
-        var summaryKey = personalisationKeys[s];
-        summaryParts.push(summaryKey + ': ' + personalisationProps[summaryKey]);
-      }
-      bundleProps['Personalisation Summary'] = summaryParts.join(' | ');
     }
     var sanitizedBundleProps = sanitizeLineItemProperties(bundleProps);
     console.log('[BundleAdd] parentTitle=', selectedProduct.title);
@@ -2169,7 +2186,10 @@ function Modal() {
 
     setBundleAddStatus(bundleFeeAmount !== null ? 'resolving_fee' : 'adding_parent');
     setBundleAddError('');
-    var ok = await addSelectedProductToCart(selectedProduct, parentVariant, sanitizedBundleProps, bundleFeeAmount);
+    var ok = await addSelectedProductToCart(selectedProduct, parentVariant, sanitizedBundleProps, bundleFeeAmount, {
+      enabled: true,
+      readableProperties: sanitizedBundleProps,
+    });
     if (!ok) {
       setBundleAddStatus('failed');
       setBundleAddError('Bundle add failed. See cart debug for detail.');
@@ -2296,6 +2316,49 @@ function Modal() {
       return 0;
     }
     return lines.length;
+  }
+
+  function getCartLineItemsSnapshot() {
+    if (typeof shopify === 'undefined') {
+      return [];
+    }
+    if (!shopify.cart || !shopify.cart.current || !shopify.cart.current.value) {
+      return [];
+    }
+    var lines = shopify.cart.current.value.lineItems;
+    if (!lines || !Array.isArray(lines)) {
+      return [];
+    }
+    return lines;
+  }
+
+  function findCartLineByUuid(lineUuid) {
+    var target = toStr(lineUuid);
+    if (target === '') {
+      return null;
+    }
+    var lines = getCartLineItemsSnapshot();
+    for (var i = 0; i < lines.length; i += 1) {
+      var line = lines[i];
+      var candidate = toStr(line && (line.uuid || line.id || line.lineItemUuid));
+      if (candidate === target) {
+        return line;
+      }
+    }
+    return null;
+  }
+
+  function countLineProperties(line) {
+    if (!line) {
+      return 0;
+    }
+    if (Array.isArray(line.properties)) {
+      return line.properties.length;
+    }
+    if (line.properties && typeof line.properties === 'object') {
+      return Object.keys(line.properties).length;
+    }
+    return 0;
   }
 
   async function fetchPersonalisationFeeVariant(feeAmount) {
@@ -2470,7 +2533,7 @@ function Modal() {
   }
 
 
-  async function addSelectedProductToCart(product, variant, lineItemProperties, feeAmount) {
+  async function addSelectedProductToCart(product, variant, lineItemProperties, feeAmount, bundleAttachConfig) {
     setLastCartActionStatus('idle');
     setLastCartErrorMessage('');
     setLastCartLineItemUuid('');
@@ -2501,6 +2564,15 @@ function Modal() {
     setLastRollbackDetail('');
     setLastRollbackMainLineRemoved(false);
     setLastRollbackFeeLineRemoved(false);
+    if (!bundleAttachConfig || !bundleAttachConfig.enabled) {
+      setBundleParentLineAdded(false);
+      setBundleParentLineUuid('');
+      setBundleReadablePropertyCount(0);
+      setBundleReadableAttachAttempted(false);
+      setBundleReadableAttachStatus('idle');
+      setBundleReadableAttachError('');
+      setBundleFinalParentPropertiesCount(0);
+    }
 
     if (!product || !variant) {
       toast('Select a size first');
@@ -2653,6 +2725,43 @@ function Modal() {
         setLastPropertiesAttachStatus('success');
       } else {
         setLastPropertiesAttachStatus('skipped');
+      }
+
+      if (bundleAttachConfig && bundleAttachConfig.enabled) {
+        setBundleParentLineAdded(true);
+        setBundleParentLineUuid(String(mainUuid));
+        console.log('[BundleAdd] parent line added=yes uuid=', mainUuid);
+        var readableProps = sanitizeLineItemProperties(bundleAttachConfig.readableProperties || {});
+        var readablePropertyCount = Object.keys(readableProps).length;
+        setBundleReadablePropertyCount(readablePropertyCount);
+        var locatedParentLine = findCartLineByUuid(mainUuid);
+        console.log('[BundleAdd] exact parent line located in cart=', locatedParentLine);
+        setBundleReadableAttachAttempted(true);
+        console.log('[BundleAdd] exact property attach method=shopify.cart.addLineItemProperties');
+        console.log('[BundleAdd] exact attach payload=', readableProps);
+        if (shopify.cart && typeof shopify.cart.addLineItemProperties === 'function') {
+          try {
+            await shopify.cart.addLineItemProperties(mainUuid, readableProps);
+            setBundleReadableAttachStatus('success');
+            setBundleReadableAttachError('');
+            console.log('[BundleAdd] readable property attach result=success');
+          } catch (bundleAttachErr) {
+            var readableAttachMessage = bundleAttachErr && bundleAttachErr.message ? bundleAttachErr.message : String(bundleAttachErr);
+            setBundleReadableAttachStatus('failed');
+            setBundleReadableAttachError(readableAttachMessage);
+            console.error('[BundleAdd] readable property attach result=failed error=', readableAttachMessage);
+            toast('Bundle added, but readable properties failed to attach.');
+          }
+        } else {
+          setBundleReadableAttachStatus('failed');
+          setBundleReadableAttachError('Cart API missing addLineItemProperties');
+          console.error('[BundleAdd] readable property attach result=failed error=Cart API missing addLineItemProperties');
+        }
+        var finalParentLine = findCartLineByUuid(mainUuid);
+        var finalPropertiesCount = countLineProperties(finalParentLine);
+        setBundleFinalParentPropertiesCount(finalPropertiesCount);
+        console.log('[BundleAdd] final cart line snapshot after attach=', finalParentLine);
+        console.log('[BundleAdd] final cart line properties count=', finalPropertiesCount);
       }
 
       if (feeRequired) {
@@ -2898,6 +3007,13 @@ function Modal() {
             <s-text size="small">selected variants: {selectedSummary.length === 0 ? 'none' : selectedSummary.join(' | ')}</s-text>
             <s-text size="small">bundle add status: {bundleAddStatus}</s-text>
             <s-text size="small">bundle add error: {bundleAddError === '' ? 'none' : bundleAddError}</s-text>
+            <s-text size="small">parent line added: {bundleParentLineAdded ? 'yes' : 'no'}</s-text>
+            <s-text size="small">parent line uuid: {bundleParentLineUuid === '' ? 'none' : bundleParentLineUuid}</s-text>
+            <s-text size="small">readable property count: {bundleReadablePropertyCount}</s-text>
+            <s-text size="small">readable property attach attempted: {bundleReadableAttachAttempted ? 'yes' : 'no'}</s-text>
+            <s-text size="small">readable property attach status: {bundleReadableAttachStatus}</s-text>
+            <s-text size="small">readable property attach error: {bundleReadableAttachError === '' ? 'none' : bundleReadableAttachError}</s-text>
+            <s-text size="small">final cart line properties count: {bundleFinalParentPropertiesCount}</s-text>
             <s-text size="small">bundle properties preview: {bundlePreview.length === 0 ? 'none' : ('Bundle:' + product.title + ' | ' + bundlePreview.join(' | '))}</s-text>
             <s-text size="small">bundle fetch errors: {bundleDebugFetchErrors.length === 0 ? 'none' : bundleDebugFetchErrors.join(' | ')}</s-text>
             {names.length > 0 ? <s-text size="small">components: {names.join(', ')}</s-text> : null}
