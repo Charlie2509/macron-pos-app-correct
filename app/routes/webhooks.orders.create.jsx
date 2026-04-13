@@ -9,7 +9,6 @@ const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
       lineItems(first: 250) {
         nodes {
           id
-          legacyResourceId
           title
           quantity
           customAttributes {
@@ -29,7 +28,6 @@ const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
               totalQuantity
               lineItem {
                 id
-                legacyResourceId
                 title
                 customAttributes {
                   key
@@ -299,7 +297,6 @@ export const action = async ({ request }) => {
 
     const eligibleOrderLineGids = new Set();
     const eligibleOrderLineNumericIds = new Set();
-    const eligibleOrderLineLegacyIds = new Set();
     const eligibleOrderLines = [];
     const lineDecisions = [];
     const simplifiedOrderLines = [];
@@ -313,7 +310,6 @@ export const action = async ({ request }) => {
       const attributes = attributeMap(orderLine.customAttributes);
       const { source, rawMode, mode, rawTakeNow, takeNow, eligible, feeOrSystem } = evaluateLineEligibility(attributes);
       const orderLineGid = String(orderLine?.id || "");
-      const orderLineLegacyId = String(orderLine?.legacyResourceId || "");
       const orderLineNumericId = parseNumericId(orderLineGid);
 
       if (feeOrSystem) feeSystemCount += 1;
@@ -323,7 +319,6 @@ export const action = async ({ request }) => {
 
       const decision = {
         orderLineGid,
-        orderLineLegacyId,
         title: orderLine?.title || "",
         quantity: Number(orderLine?.quantity || 0),
         source,
@@ -340,7 +335,6 @@ export const action = async ({ request }) => {
       simplifiedOrderLines.push({
         id: orderLineGid,
         numericId: orderLineNumericId,
-        legacyResourceId: orderLineLegacyId,
         title: orderLine?.title || "",
         quantity: Number(orderLine?.quantity || 0),
         attributes: summarizeAttributes(attributes),
@@ -356,11 +350,9 @@ export const action = async ({ request }) => {
       if (eligible) {
         if (orderLineGid) eligibleOrderLineGids.add(orderLineGid);
         if (orderLineNumericId) eligibleOrderLineNumericIds.add(orderLineNumericId);
-        if (orderLineLegacyId) eligibleOrderLineLegacyIds.add(orderLineLegacyId);
         eligibleOrderLines.push({
           orderLineGid,
           orderLineNumericId,
-          orderLineLegacyId,
           title: orderLine?.title || "",
           quantity: Number(orderLine?.quantity || 0),
           mode,
@@ -399,7 +391,6 @@ export const action = async ({ request }) => {
         const linkedOrderLine = foLineItem.lineItem || {};
         const orderLineGid = String(linkedOrderLine.id || "");
         const orderLineNumericId = parseNumericId(orderLineGid);
-        const legacyId = String(linkedOrderLine.legacyResourceId || "");
         const foLineId = String(foLineItem.id || "");
         const quantity = Number(foLineItem.remainingQuantity || 0);
 
@@ -407,8 +398,7 @@ export const action = async ({ request }) => {
         const matchedByNumericId = Boolean(
           !matchedByGid && orderLineNumericId && eligibleOrderLineNumericIds.has(orderLineNumericId),
         );
-        const matchedByLegacyId = Boolean(legacyId && eligibleOrderLineLegacyIds.has(legacyId));
-        const matched = matchedByGid || matchedByNumericId || matchedByLegacyId;
+        const matched = matchedByGid || matchedByNumericId;
         const validFoLineId = foLineId.startsWith("gid://shopify/FulfillmentOrderLineItem/");
 
         const foDecision = {
@@ -417,12 +407,10 @@ export const action = async ({ request }) => {
           fulfillmentOrderLineId: foLineId,
           linkedOrderLineId: orderLineGid,
           linkedOrderLineNumericId: orderLineNumericId,
-          linkedOrderLineLegacyId: legacyId,
           linkedOrderLineTitle: linkedOrderLine?.title || "",
           remainingQuantity: quantity,
           matchedByGid,
           matchedByNumericId,
-          matchedByLegacyId,
           matchedEligibleOrderLine: matched,
           validFulfillmentOrderLineId: validFoLineId,
           selectedForMutation: false,
@@ -445,13 +433,11 @@ export const action = async ({ request }) => {
           linkedLineItem: {
             id: orderLineGid,
             numericId: orderLineNumericId,
-            legacyResourceId: legacyId,
             title: linkedOrderLine?.title || "",
           },
           matchedBy: {
             gid: matchedByGid,
             numericId: matchedByNumericId,
-            legacyId: matchedByLegacyId,
           },
           selectedForMutation: foDecision.selectedForMutation,
         });
