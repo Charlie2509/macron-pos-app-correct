@@ -3692,6 +3692,27 @@ function Modal() {
     );
   }
 
+  function renderCheckoutReminderPanel() {
+    return (
+      <s-box style="background:#f6f7f8; border:1px solid #dfe3e8; border-radius:10px; padding:12px;">
+        <s-stack direction="block" gap="micro">
+          <s-text emphasis="bold" size="small">Delivery method chosen at checkout</s-text>
+          <s-text size="small" appearance="subdued">
+            After adding this order to cart, use Shopify POS checkout to choose either Ship to customer for delivery or complete it as pickup / in-store.
+          </s-text>
+        </s-stack>
+      </s-box>
+    );
+  }
+
+  function renderPostAddCheckoutReminder() {
+    return (
+      <s-text size="small" appearance="subdued">
+        Next step after add: choose delivery or pickup in Shopify POS checkout.
+      </s-text>
+    );
+  }
+
 
   function renderProductDetailScreen() {
     if (!selectedProduct) {
@@ -3726,16 +3747,20 @@ function Modal() {
           {renderFulfilmentControls()}
           <s-section heading="Actions">
             <s-stack direction="block" gap="small">
+              {showAddToCart ? renderCheckoutReminderPanel() : null}
               {showAddToCart ? (
-                <s-button
-                  variant="primary"
-                  onClick={function () {
-                    setLastEnteredPersonalisation(false);
-                    addSelectedProductToCart(selectedProduct, selectedVariant, buildMshIntentProperties(fulfilmentMode, splitTakeNow), null);
-                  }}
-                >
-                  Add to cart
-                </s-button>
+                <s-stack direction="block" gap="micro">
+                  <s-button
+                    variant="primary"
+                    onClick={function () {
+                      setLastEnteredPersonalisation(false);
+                      addSelectedProductToCart(selectedProduct, selectedVariant, buildMshIntentProperties(fulfilmentMode, splitTakeNow), null);
+                    }}
+                  >
+                    Add to cart
+                  </s-button>
+                  {renderPostAddCheckoutReminder()}
+                </s-stack>
               ) : (!isBundleProduct ? (
                 <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
                   Add personalisation
@@ -3903,13 +3928,17 @@ function Modal() {
               ) : null}
               <s-section heading="Actions">
                 <s-stack direction="block" gap="small">
-                  <s-button
-                    variant="primary"
-                    onClick={addBundleParentToCart}
-                    disabled={bundleLoading}
-                  >
-                    Add bundle to cart
-                  </s-button>
+                  {renderCheckoutReminderPanel()}
+                  <s-stack direction="block" gap="micro">
+                    <s-button
+                      variant="primary"
+                      onClick={addBundleParentToCart}
+                      disabled={bundleLoading}
+                    >
+                      Add bundle to cart
+                    </s-button>
+                    {renderPostAddCheckoutReminder()}
+                  </s-stack>
                   <s-button variant="secondary" onClick={handleBack}>Back</s-button>
                 </s-stack>
               </s-section>
@@ -4057,9 +4086,13 @@ function Modal() {
               {renderFulfilmentControls()}
               <s-section heading="Actions">
                 <s-stack direction="block" gap="small">
-                  <s-button variant="primary" onClick={submitPersonalisation}>
-                    Add to cart
-                  </s-button>
+                  {renderCheckoutReminderPanel()}
+                  <s-stack direction="block" gap="micro">
+                    <s-button variant="primary" onClick={submitPersonalisation}>
+                      Add to cart
+                    </s-button>
+                    {renderPostAddCheckoutReminder()}
+                  </s-stack>
                   <s-button variant="secondary" onClick={handleBack}>
                     Back
                   </s-button>
