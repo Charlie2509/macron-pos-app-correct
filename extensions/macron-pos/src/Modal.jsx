@@ -302,12 +302,9 @@ function buildMshIntentProperties(mode, takeNowInSplit) {
   };
 }
 
-function defaultBundleComponentFulfilment(mode, takeNowInSplit) {
+function defaultBundleComponentFulfilment(mode) {
   if (mode === 'order_in') {
     return 'order_later';
-  }
-  if (mode === 'split') {
-    return 'take_now';
   }
   return 'take_now';
 }
@@ -1815,7 +1812,7 @@ function Modal() {
     setBundleComponentFulfilment(function (previousState) {
       var previous = previousState || {};
       var next = {};
-      var modeDefault = defaultBundleComponentFulfilment(fulfilmentMode, splitTakeNow);
+      var modeDefault = defaultBundleComponentFulfilment(fulfilmentMode);
       var hasChanged = false;
       for (var i = 0; i < bundleComponents.length; i += 1) {
         var componentKey = bundleComponents[i].key;
@@ -1909,10 +1906,12 @@ function Modal() {
       var selected = bundleSelections[item.key];
       var componentFulfilment = bundleComponentFulfilment[item.key];
       if (componentFulfilment !== 'take_now' && componentFulfilment !== 'order_later') {
-        componentFulfilment = defaultBundleComponentFulfilment(fulfilmentMode, splitTakeNow);
+        componentFulfilment = defaultBundleComponentFulfilment(fulfilmentMode);
       }
       bundleProps['Item ' + String(idx + 1)] = item.title + ' — ' + selected.title;
-      bundleProps['Bundle Component ' + String(idx + 1) + ' Fulfilment'] = componentFulfilment;
+      if (fulfilmentMode === 'split') {
+        bundleProps['Bundle Component ' + String(idx + 1) + ' Fulfilment'] = componentFulfilment;
+      }
     }
 
     var personalisationProps = buildPersonalisationProperties(
@@ -2634,7 +2633,7 @@ function Modal() {
       var chosen = bundleSelections[component.key];
       var chosenFulfilment = bundleComponentFulfilment[component.key];
       if (chosenFulfilment !== 'take_now' && chosenFulfilment !== 'order_later') {
-        chosenFulfilment = defaultBundleComponentFulfilment(fulfilmentMode, splitTakeNow);
+        chosenFulfilment = defaultBundleComponentFulfilment(fulfilmentMode);
       }
       if (chosen && chosen.title) {
         bundlePreview.push('Item ' + String(p + 1) + ': ' + component.title + ' — ' + chosen.title);
@@ -3279,6 +3278,31 @@ function Modal() {
     );
   }
 
+  function renderBundleFulfilmentControls() {
+    return (
+      <s-section heading="Bundle fulfilment">
+        <s-stack direction="block" gap="small">
+          <s-stack direction="inline" wrap="true" gap="small">
+            <s-button variant={fulfilmentMode === 'take_today' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('take_today'); }}>
+              Take today
+            </s-button>
+            <s-button variant={fulfilmentMode === 'order_in' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('order_in'); }}>
+              Order in
+            </s-button>
+            <s-button variant={fulfilmentMode === 'split' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('split'); }}>
+              Split fulfilment
+            </s-button>
+          </s-stack>
+          <s-text size="small" appearance="subdued">
+            {fulfilmentMode === 'take_today' ? 'All bundle components will be marked Take now.' : null}
+            {fulfilmentMode === 'order_in' ? 'All bundle components will be marked Order later.' : null}
+            {fulfilmentMode === 'split' ? 'Choose fulfilment per component below.' : null}
+          </s-text>
+        </s-stack>
+      </s-section>
+    );
+  }
+
 
   function renderProductDetailScreen() {
     if (!selectedProduct) {
@@ -3368,7 +3392,6 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
-          {renderFulfilmentControls({hideSplitLineChoice: true})}
           <s-section heading="Build bundle">
             <s-stack direction="block" gap="base">
               <s-text>{selectedProduct.title}</s-text>
@@ -3377,10 +3400,6 @@ function Modal() {
               {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
               {bundleComponents.map(function (component) {
                 var chosen = bundleSelections[component.key];
-                var componentFulfilmentValue = bundleComponentFulfilment[component.key];
-                if (componentFulfilmentValue !== 'take_now' && componentFulfilmentValue !== 'order_later') {
-                  componentFulfilmentValue = defaultBundleComponentFulfilment(fulfilmentMode, splitTakeNow);
-                }
                 return (
                   <s-section key={component.key} heading={component.title}>
                     <s-box border="base" cornerRadius="large" padding="small">
@@ -3404,33 +3423,6 @@ function Modal() {
                         ) : (
                           <s-text appearance="critical">No variants available for this component</s-text>
                         )}
-                        <s-box border="base" cornerRadius="base" padding="small">
-                          <s-stack direction="block" gap="small">
-                            <s-text emphasis="bold" size="small">Component fulfilment</s-text>
-                            {fulfilmentMode === 'split' ? (
-                              <s-stack direction="inline" wrap="true" gap="small">
-                                {[
-                                  {value: 'take_now', label: 'Take now'},
-                                  {value: 'order_later', label: 'Order later'},
-                                ].map(function (option) {
-                                  var active = componentFulfilmentValue === option.value;
-                                  return (
-                                    <s-box key={option.value} padding="none">
-                                      <s-button
-                                        variant={active ? 'primary' : 'secondary'}
-                                        onClick={function () { handleBundleComponentFulfilmentSelect(component.key, option.value); }}
-                                      >
-                                        {option.label}
-                                      </s-button>
-                                    </s-box>
-                                  );
-                                })}
-                              </s-stack>
-                            ) : (
-                              <s-text appearance="subdued">{componentFulfilmentValue === 'order_later' ? 'Order later' : 'Take now'}</s-text>
-                            )}
-                          </s-stack>
-                        </s-box>
                       </s-stack>
                     </s-box>
                   </s-section>
@@ -3483,7 +3475,43 @@ function Modal() {
                   </s-stack>
                 </s-section>
               ) : null}
-              {renderFulfilmentControls()}
+              {renderBundleFulfilmentControls()}
+              {fulfilmentMode === 'split' ? (
+                <s-section heading="Component fulfilment">
+                  <s-stack direction="block" gap="small">
+                    {bundleComponents.map(function (component) {
+                      var componentFulfilmentValue = bundleComponentFulfilment[component.key];
+                      if (componentFulfilmentValue !== 'take_now' && componentFulfilmentValue !== 'order_later') {
+                        componentFulfilmentValue = 'take_now';
+                      }
+                      return (
+                        <s-box key={'fulfilment-' + component.key} border="base" cornerRadius="base" padding="small">
+                          <s-stack direction="block" gap="small">
+                            <s-text emphasis="bold" size="small">{component.title}</s-text>
+                            <s-stack direction="inline" wrap="true" gap="small">
+                              {[
+                                {value: 'take_now', label: 'Take now'},
+                                {value: 'order_later', label: 'Order later'},
+                              ].map(function (option) {
+                                var active = componentFulfilmentValue === option.value;
+                                return (
+                                  <s-button
+                                    key={option.value}
+                                    variant={active ? 'primary' : 'secondary'}
+                                    onClick={function () { handleBundleComponentFulfilmentSelect(component.key, option.value); }}
+                                  >
+                                    {option.label}
+                                  </s-button>
+                                );
+                              })}
+                            </s-stack>
+                          </s-stack>
+                        </s-box>
+                      );
+                    })}
+                  </s-stack>
+                </s-section>
+              ) : null}
               <s-section heading="Actions">
                 <s-stack direction="block" gap="small">
                   <s-button
