@@ -3395,18 +3395,22 @@ function Modal() {
                             <s-text emphasis="bold" size="small">Component fulfilment</s-text>
                             {fulfilmentMode === 'split' ? (
                               <s-stack direction="inline" wrap="true" gap="small">
-                                <s-button
-                                  variant={componentFulfilmentValue === 'take_now' ? 'primary' : 'secondary'}
-                                  onClick={function () { handleBundleComponentFulfilmentSelect(component.key, 'take_now'); }}
-                                >
-                                  Take now
-                                </s-button>
-                                <s-button
-                                  variant={componentFulfilmentValue === 'order_later' ? 'primary' : 'secondary'}
-                                  onClick={function () { handleBundleComponentFulfilmentSelect(component.key, 'order_later'); }}
-                                >
-                                  Order later
-                                </s-button>
+                                {[
+                                  {value: 'take_now', label: 'Take now'},
+                                  {value: 'order_later', label: 'Order later'},
+                                ].map(function (option) {
+                                  var active = componentFulfilmentValue === option.value;
+                                  return (
+                                    <s-box key={option.value} padding="none">
+                                      <s-button
+                                        variant={active ? 'primary' : 'secondary'}
+                                        onClick={function () { handleBundleComponentFulfilmentSelect(component.key, option.value); }}
+                                      >
+                                        {option.label}
+                                      </s-button>
+                                    </s-box>
+                                  );
+                                })}
                               </s-stack>
                             ) : (
                               <s-text appearance="subdued">{componentFulfilmentValue === 'order_later' ? 'Order later' : 'Take now'}</s-text>
