@@ -1786,23 +1786,29 @@ function Modal() {
   }
 
   function handleBundleVariantSelect(componentKey, variant) {
-    var next = {};
-    var keys = Object.keys(bundleSelections || {});
-    for (var i = 0; i < keys.length; i += 1) {
-      next[keys[i]] = bundleSelections[keys[i]];
-    }
-    next[componentKey] = variant;
-    setBundleSelections(next);
+    setBundleSelections(function (previousState) {
+      var previous = previousState || {};
+      var next = {};
+      var keys = Object.keys(previous);
+      for (var i = 0; i < keys.length; i += 1) {
+        next[keys[i]] = previous[keys[i]];
+      }
+      next[componentKey] = variant;
+      return next;
+    });
   }
 
   function handleBundleComponentFulfilmentSelect(componentKey, nextValue) {
-    var next = {};
-    var keys = Object.keys(bundleComponentFulfilment || {});
-    for (var i = 0; i < keys.length; i += 1) {
-      next[keys[i]] = bundleComponentFulfilment[keys[i]];
-    }
-    next[componentKey] = nextValue;
-    setBundleComponentFulfilment(next);
+    setBundleComponentFulfilment(function (previousState) {
+      var previous = previousState || {};
+      var next = {};
+      var keys = Object.keys(previous);
+      for (var i = 0; i < keys.length; i += 1) {
+        next[keys[i]] = previous[keys[i]];
+      }
+      next[componentKey] = nextValue;
+      return next;
+    });
   }
 
   useEffect(function () {
@@ -1901,17 +1907,42 @@ function Modal() {
 
     var bundleProps = {};
     bundleProps.Bundle = selectedProduct.title;
+    console.log('[BundleAdd] mode=', fulfilmentMode, 'componentCount=', bundleComponents.length);
     for (var idx = 0; idx < bundleComponents.length; idx += 1) {
       var item = bundleComponents[idx];
       var selected = bundleSelections[item.key];
-      var componentFulfilment = bundleComponentFulfilment[item.key];
-      if (componentFulfilment !== 'take_now' && componentFulfilment !== 'order_later') {
-        componentFulfilment = defaultBundleComponentFulfilment(fulfilmentMode);
+      var selectedComponentFulfilment = bundleComponentFulfilment[item.key];
+      var componentFulfilment = defaultBundleComponentFulfilment(fulfilmentMode);
+      if (fulfilmentMode === 'split') {
+        componentFulfilment = selectedComponentFulfilment;
+        if (componentFulfilment !== 'take_now' && componentFulfilment !== 'order_later') {
+          toast('Select fulfilment for each bundle component');
+          setBundleAddStatus('failed');
+          setBundleAddError('Missing split fulfilment for component: ' + item.title);
+          return;
+        }
+      } else if (fulfilmentMode === 'order_in') {
+        componentFulfilment = 'order_later';
+      } else {
+        componentFulfilment = 'take_now';
       }
       bundleProps['Item ' + String(idx + 1)] = item.title + ' — ' + selected.title;
-      if (fulfilmentMode === 'split') {
-        bundleProps['Bundle Component ' + String(idx + 1) + ' Fulfilment'] = componentFulfilment;
-      }
+      var fulfilmentKey = 'Bundle Component ' + String(idx + 1) + ' Fulfilment';
+      bundleProps[fulfilmentKey] = componentFulfilment;
+      console.log(
+        '[BundleAdd] component',
+        idx + 1,
+        'title=',
+        item.title,
+        'variant=',
+        selected ? selected.title : '',
+        'state=',
+        selectedComponentFulfilment,
+        'property=',
+        fulfilmentKey,
+        '=>',
+        componentFulfilment
+      );
     }
 
     var personalisationProps = buildPersonalisationProperties(
