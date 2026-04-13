@@ -218,28 +218,17 @@ export const action = async ({ request }) => {
       return new Response();
     }
 
-    const orderLineByLegacyId = new Map();
-    const orderLineByGid = new Map();
-    for (const orderLine of order.lineItems?.nodes || []) {
-      const gid = String(orderLine?.id || "");
-      const legacyId = String(orderLine?.legacyResourceId || "");
-      const normalized = {
-        ...orderLine,
-        attributes: attributeMap(orderLine.customAttributes),
-      };
-      if (gid) {
-        orderLineByGid.set(gid, normalized);
-      }
-      if (!legacyId) continue;
-      orderLineByLegacyId.set(legacyId, normalized);
-    }
-
+    const eligibleOrderLineGids = new Set();
+    const eligibleOrderLineLegacyIds = new Set();
+    const eligibleOrderLineTitles = new Set();
+    const eligibleOrderLines = [];
     const lineDecisions = [];
     for (const orderLine of order.lineItems?.nodes || []) {
       const attributes = attributeMap(orderLine.customAttributes);
       const { source, rawMode, mode, rawTakeNow, takeNow, eligible, feeOrSystem } = evaluateLineEligibility(attributes);
       const orderLineGid = String(orderLine?.id || "");
       const orderLineLegacyId = String(orderLine?.legacyResourceId || "");
+      const normalizedTitle = normalizeStringValue(orderLine?.title || "");
       lineDecisions.push({
         orderLineGid,
         orderLineLegacyId,
@@ -252,12 +241,30 @@ export const action = async ({ request }) => {
         eligible,
         attributes: summarizeAttributes(attributes),
       });
+      if (eligible) {
+        if (orderLineGid) eligibleOrderLineGids.add(orderLineGid);
+        if (orderLineLegacyId) eligibleOrderLineLegacyIds.add(orderLineLegacyId);
+        if (normalizedTitle) eligibleOrderLineTitles.add(normalizedTitle);
+        eligibleOrderLines.push({
+          orderLineGid,
+          orderLineLegacyId,
+          title: orderLine?.title || "",
+          quantity: Number(orderLine?.quantity || 0),
+          mode,
+          takeNow,
+        });
+      }
       console.log(
         `[orders/create] Decision for order ${order.id} (${order.name || "unknown"}) line "${orderLine.title}": source=${source || "missing"} mode=${mode || "missing"} take_now=${
           takeNow === null ? "missing" : String(takeNow)
         } fee_or_system=${String(feeOrSystem)} => ${eligible ? "FULFILL" : "SKIP"}`,
       );
     }
+    console.log(
+      `[orders/create] Precomputed eligible order lines for order ${order.id} (${order.name || "unknown"}): ${JSON.stringify(
+        eligibleOrderLines,
+      )}`,
+    );
 
     const hasSplitLines = lineDecisions.some((line) => normalizeMode(line.rawMode) === "split");
     if (hasSplitLines) {
@@ -266,7 +273,7 @@ export const action = async ({ request }) => {
       );
     }
 
-    if (!lineDecisions.some((line) => line.eligible)) {
+    if (eligibleOrderLines.length === 0) {
       console.log(`[orders/create] No lines eligible for immediate fulfillment for order ${order.id}`);
       return new Response();
     }
@@ -280,13 +287,11 @@ export const action = async ({ request }) => {
         const linkedOrderLine = foLineItem.lineItem || {};
         const orderLineGid = String(linkedOrderLine.id || "");
         const legacyId = String(linkedOrderLine.legacyResourceId || "");
-        const orderLine = (orderLineGid && orderLineByGid.get(orderLineGid)) || (legacyId && orderLineByLegacyId.get(legacyId));
-        const linkedOrderLineAttributes = attributeMap(linkedOrderLine.customAttributes);
-        const fallbackAttributes = orderLine?.attributes || {};
-        const selection = evaluateLineEligibility({
-          ...fallbackAttributes,
-          ...linkedOrderLineAttributes,
-        });
+        const normalizedTitle = normalizeStringValue(linkedOrderLine?.title || "");
+        const matchedByGid = Boolean(orderLineGid && eligibleOrderLineGids.has(orderLineGid));
+        const matchedByLegacyId = Boolean(legacyId && eligibleOrderLineLegacyIds.has(legacyId));
+        const matchedByTitle = Boolean(!matchedByGid && !matchedByLegacyId && normalizedTitle && eligibleOrderLineTitles.has(normalizedTitle));
+        const matched = matchedByGid || matchedByLegacyId || matchedByTitle;
         const quantity = Number(foLineItem.remainingQuantity || 0);
 
         splitDebugFoLines.push({
@@ -296,28 +301,29 @@ export const action = async ({ request }) => {
           linkedOrderLineLegacyId: legacyId,
           linkedOrderLineTitle: linkedOrderLine?.title || "",
           remainingQuantity: quantity,
-          parsedMode: selection.mode || "",
-          parsedTakeNow: selection.takeNow,
-          isFeeLine: selection.feeOrSystem,
-          isSelectedByOrderLine: selection.eligible,
-          attributes: summarizeAttributes({
-            ...fallbackAttributes,
-            ...linkedOrderLineAttributes,
-          }),
+          matchedByGid,
+          matchedByLegacyId,
+          matchedByTitle,
+          matchedEligibleOrderLine: matched,
         });
 
-        if (!selection.eligible) continue;
+        console.log(
+          `[orders/create] FO line match for order ${order.id} (${order.name || "unknown"}): fo=${fulfillmentOrder.id} fo_line=${foLineItem.id} title="${
+            linkedOrderLine?.title || ""
+          }" order_line_gid=${orderLineGid || "missing"} order_line_legacy_id=${legacyId || "missing"} remaining_quantity=${quantity} matched_by_gid=${String(
+            matchedByGid,
+          )} matched_by_legacy_id=${String(matchedByLegacyId)} matched_by_title=${String(matchedByTitle)} => ${
+            matched ? "SELECTABLE" : "SKIP"
+          }`,
+        );
+
+        if (!matched) continue;
         if (!quantity || quantity < 1) continue;
 
         selectedLineItems.push({
           id: foLineItem.id,
           quantity,
         });
-        console.log(
-          `[orders/create] Selected fulfillment-order line for order ${order.id} (${order.name || "unknown"}): "${linkedOrderLine.title}" mode=${
-            selection.mode || "missing"
-          } take_now=${selection.takeNow === null ? "missing" : String(selection.takeNow)} qty=${quantity} fo=${fulfillmentOrder.id} fo_line=${foLineItem.id}`,
-        );
       }
 
       if (hasSplitLines) {
