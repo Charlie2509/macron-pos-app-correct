@@ -3354,6 +3354,7 @@ function Modal() {
     return (
       <s-page heading="Macron POS">
         <ScreenScroll>
+          {renderFulfilmentControls()}
           <s-section heading="Build bundle">
             <s-stack direction="block" gap="base">
               <s-text>{selectedProduct.title}</s-text>
