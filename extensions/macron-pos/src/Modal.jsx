@@ -259,6 +259,47 @@ function toStr(value) {
   return String(value).trim();
 }
 
+function sanitizeLineItemProperties(rawProperties) {
+  var sanitized = {};
+  if (!rawProperties || typeof rawProperties !== 'object' || Array.isArray(rawProperties)) {
+    return sanitized;
+  }
+  var keys = Object.keys(rawProperties);
+  for (var i = 0; i < keys.length; i += 1) {
+    var rawKey = keys[i];
+    var trimmedKey = toStr(rawKey).trim();
+    if (trimmedKey === '') {
+      continue;
+    }
+    var value = rawProperties[rawKey];
+    if (value === null || value === undefined) {
+      continue;
+    }
+    var converted = '';
+    if (typeof value === 'boolean') {
+      converted = value ? 'true' : 'false';
+    } else if (typeof value === 'number') {
+      converted = String(value);
+    } else if (Array.isArray(value)) {
+      converted = value.join(' | ');
+    } else if (typeof value === 'object') {
+      try {
+        converted = JSON.stringify(value);
+      } catch (jsonErr) {
+        converted = String(value);
+      }
+    } else {
+      converted = String(value);
+    }
+    var trimmedValue = toStr(converted).trim();
+    if (trimmedValue === '') {
+      continue;
+    }
+    sanitized[trimmedKey] = trimmedValue;
+  }
+  return sanitized;
+}
+
 function normalizeBundleComponentReference(rawReference) {
   var raw = toStr(rawReference);
   if (raw === '') {
@@ -1898,6 +1939,19 @@ function Modal() {
       setBundleAddError('No parent variant selected');
       return;
     }
+    if (isMockVariant(parentVariant.id)) {
+      toast('Mock products cannot be added to the POS cart.');
+      setBundleAddStatus('failed');
+      setBundleAddError('Mock parent variant id');
+      return;
+    }
+    var normalizedParentVariant = normalizeVariantId(parentVariant.id);
+    if (!normalizedParentVariant.valid || normalizedParentVariant.value === null) {
+      toast('Variant ID is invalid for POS cart add.');
+      setBundleAddStatus('failed');
+      setBundleAddError('Invalid normalized parent variant id');
+      return;
+    }
     if (!bundleComponents || bundleComponents.length === 0) {
       toast('Bundle components not loaded');
       setBundleAddStatus('failed');
@@ -2024,10 +2078,16 @@ function Modal() {
       }
       bundleProps['Personalisation Summary'] = summaryParts.join(' | ');
     }
+    var sanitizedBundleProps = sanitizeLineItemProperties(bundleProps);
+    console.log('[BundleAdd] parentTitle=', selectedProduct.title);
+    console.log('[BundleAdd] selectedParentVariantId(raw)=', parentVariant.id);
+    console.log('[BundleAdd] selectedParentVariantId(normalized)=', normalizedParentVariant.value);
+    console.log('[BundleAdd] rawBundleProperties=', bundleProps);
+    console.log('[BundleAdd] sanitizedBundleProperties=', sanitizedBundleProps);
 
     setBundleAddStatus(bundleFeeAmount !== null ? 'resolving_fee' : 'adding_parent');
     setBundleAddError('');
-    var ok = await addSelectedProductToCart(selectedProduct, parentVariant, bundleProps, bundleFeeAmount);
+    var ok = await addSelectedProductToCart(selectedProduct, parentVariant, sanitizedBundleProps, bundleFeeAmount);
     if (!ok) {
       setBundleAddStatus('failed');
       setBundleAddError('Bundle add failed. See cart debug for detail.');
@@ -2404,18 +2464,7 @@ function Modal() {
     setLastFeeRequired(feeRequired);
     setLastFeeAmount(feeRequired ? numericFee : null);
 
-    var propertiesObject = {};
-    if (lineItemProperties && typeof lineItemProperties === 'object' && !Array.isArray(lineItemProperties)) {
-      var inputPropertyKeys = Object.keys(lineItemProperties);
-      for (var propIndex = 0; propIndex < inputPropertyKeys.length; propIndex += 1) {
-        var inputKey = inputPropertyKeys[propIndex];
-        var inputValue = lineItemProperties[inputKey];
-        if (inputValue === null || inputValue === undefined) {
-          continue;
-        }
-        propertiesObject[String(inputKey)] = String(inputValue);
-      }
-    }
+    var propertiesObject = sanitizeLineItemProperties(lineItemProperties);
 
     var expectedIncrease = 1 + (feeRequired ? 1 : 0);
     var mainUuid = '';
@@ -2496,11 +2545,17 @@ function Modal() {
       }
 
       console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
-      mainUuid = await shopify.cart.addLineItem({
-        variantId: normalized.value,
-        quantity: 1,
-        properties: propertiesObject,
-      });
+      try {
+        mainUuid = await shopify.cart.addLineItem({
+          variantId: normalized.value,
+          quantity: 1,
+          properties: propertiesObject,
+        });
+      } catch (mainAddErr) {
+        console.error('[BundleAdd] main addLineItem error object=', mainAddErr);
+        console.error('[BundleAdd] main addLineItem error message=', mainAddErr && mainAddErr.message ? mainAddErr.message : String(mainAddErr));
+        throw mainAddErr;
+      }
       setLastCartLineItemUuid(mainUuid ? String(mainUuid) : '');
       if (!mainUuid) {
         toast('Could not add to cart.');
