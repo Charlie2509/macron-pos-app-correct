@@ -168,6 +168,83 @@ function summarizeAttributes(attributes = {}) {
   );
 }
 
+function splitBundleItemValue(rawValue) {
+  const text = String(rawValue == null ? "" : rawValue).trim();
+  if (!text) return { componentTitle: "", variantTitle: "" };
+  if (text.includes(" — ")) {
+    const [componentTitle, ...variantParts] = text.split(" — ");
+    return {
+      componentTitle: String(componentTitle || "").trim(),
+      variantTitle: String(variantParts.join(" — ") || "").trim(),
+    };
+  }
+  if (text.includes(" - ")) {
+    const [componentTitle, ...variantParts] = text.split(" - ");
+    return {
+      componentTitle: String(componentTitle || "").trim(),
+      variantTitle: String(variantParts.join(" - ") || "").trim(),
+    };
+  }
+  return { componentTitle: text, variantTitle: "" };
+}
+
+function parseBundleComponentFulfillment(rawValue, defaultTakeNow) {
+  const normalized = normalizeStringValue(rawValue);
+  if (normalized === "take_now" || normalized === "take now") return true;
+  if (normalized === "order_later" || normalized === "order later") return false;
+  return defaultTakeNow;
+}
+
+function parseBundleComponentsFromAttributes(attributes = {}, mode = "", takeNow = null) {
+  if (!attributes.Bundle) return null;
+  const defaultTakeNow = shouldFulfillNowForMode(mode, takeNow);
+  const componentRows = {};
+
+  for (const [key, value] of Object.entries(attributes)) {
+    const itemMatch = key.match(/^Item\s+(\d+)$/i);
+    if (itemMatch) {
+      const index = Number(itemMatch[1]);
+      componentRows[index] = componentRows[index] || {};
+      componentRows[index].itemRaw = value;
+      continue;
+    }
+    const fulfilmentMatch = key.match(/^Bundle Component\s+(\d+)\s+Fulfi(?:l|ll)ment$/i);
+    if (fulfilmentMatch) {
+      const index = Number(fulfilmentMatch[1]);
+      componentRows[index] = componentRows[index] || {};
+      componentRows[index].fulfilmentRaw = value;
+    }
+  }
+
+  const indexes = Object.keys(componentRows).map((k) => Number(k)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  if (indexes.length === 0) return null;
+
+  return indexes.map((index) => {
+    const row = componentRows[index] || {};
+    const { componentTitle, variantTitle } = splitBundleItemValue(row.itemRaw);
+    return {
+      index,
+      componentTitle,
+      variantTitle,
+      fulfillNow: parseBundleComponentFulfillment(row.fulfilmentRaw, defaultTakeNow),
+      itemRaw: row.itemRaw == null ? "" : String(row.itemRaw),
+      fulfilmentRaw: row.fulfilmentRaw == null ? "" : String(row.fulfilmentRaw),
+    };
+  });
+}
+
+function scoreBundleComponentCandidate(orderLineTitle, componentTitle, variantTitle) {
+  const title = normalizeStringValue(orderLineTitle);
+  const component = normalizeStringValue(componentTitle);
+  const variant = normalizeStringValue(variantTitle);
+  if (!title || !component) return 0;
+  if (variant && (title === `${component} - ${variant}` || title === `${component} / ${variant}`)) return 5;
+  if (variant && title.includes(component) && title.includes(variant)) return 4;
+  if (title.startsWith(component)) return 3;
+  if (title.includes(component)) return 2;
+  return 0;
+}
+
 function toOrderGid(payload) {
   if (payload && typeof payload.admin_graphql_api_id === "string" && payload.admin_graphql_api_id.length > 0) {
     return payload.admin_graphql_api_id;
@@ -306,16 +383,22 @@ export const action = async ({ request }) => {
     let orderInCount = 0;
     let feeSystemCount = 0;
 
+    const allOrderLines = [];
+    const bundleParents = [];
+
     for (const orderLine of order.lineItems?.nodes || []) {
       const attributes = attributeMap(orderLine.customAttributes);
       const { source, rawMode, mode, rawTakeNow, takeNow, eligible, feeOrSystem } = evaluateLineEligibility(attributes);
       const orderLineGid = String(orderLine?.id || "");
       const orderLineNumericId = parseNumericId(orderLineGid);
+      const parsedBundleComponents = parseBundleComponentsFromAttributes(attributes, mode, takeNow);
+      const isBundleParent = Array.isArray(parsedBundleComponents) && parsedBundleComponents.length > 0;
+      const effectiveEligible = isBundleParent ? false : eligible;
 
       if (feeOrSystem) feeSystemCount += 1;
       if (mode === "order_in") orderInCount += 1;
-      if (mode === "take_today" && source === "macron_pos" && !feeOrSystem) takeTodayEligibleCount += 1;
-      if (mode === "split" && source === "macron_pos" && !feeOrSystem && takeNow === true) splitEligibleCount += 1;
+      if (mode === "take_today" && source === "macron_pos" && !feeOrSystem && !isBundleParent) takeTodayEligibleCount += 1;
+      if (mode === "split" && source === "macron_pos" && !feeOrSystem && takeNow === true && !isBundleParent) splitEligibleCount += 1;
 
       const decision = {
         orderLineGid,
@@ -327,7 +410,9 @@ export const action = async ({ request }) => {
         rawTakeNow,
         parsedTakeNow: takeNow,
         feeOrSystem,
-        eligible,
+        isBundleParent,
+        bundleComponents: parsedBundleComponents || [],
+        eligible: effectiveEligible,
         attributes: summarizeAttributes(attributes),
       };
 
@@ -343,11 +428,34 @@ export const action = async ({ request }) => {
           mode,
           takeNow,
           feeOrSystem,
-          eligible,
+          isBundleParent,
+          eligible: effectiveEligible,
         },
       });
 
-      if (eligible) {
+      allOrderLines.push({
+        orderLineGid,
+        orderLineNumericId,
+        title: orderLine?.title || "",
+        quantity: Number(orderLine?.quantity || 0),
+        source,
+        mode,
+        takeNow,
+        feeOrSystem,
+        isBundleParent,
+        attributes,
+      });
+
+      if (isBundleParent) {
+        bundleParents.push({
+          orderLineGid,
+          orderLineNumericId,
+          title: orderLine?.title || "",
+          parsedBundleComponents,
+        });
+      }
+
+      if (effectiveEligible) {
         if (orderLineGid) eligibleOrderLineGids.add(orderLineGid);
         if (orderLineNumericId) eligibleOrderLineNumericIds.add(orderLineNumericId);
         eligibleOrderLines.push({
@@ -365,6 +473,92 @@ export const action = async ({ request }) => {
       "ELIGIBLE ORDER LINE COUNT",
       `order_id=${order.id} eligible_count=${eligibleOrderLines.length} take_today_eligible_count=${takeTodayEligibleCount} split_eligible_count=${splitEligibleCount} order_in_count=${orderInCount} fee_system_count=${feeSystemCount}`,
     );
+    if (bundleParents.length > 0) {
+      const unmatchedBundleComponents = [];
+      const alreadyMatchedLineIds = new Set([...eligibleOrderLineGids]);
+      const candidateLines = allOrderLines.filter((line) => !line.feeOrSystem && !line.isBundleParent);
+      const bundleMappings = [];
+
+      for (const parent of bundleParents) {
+        for (const component of parent.parsedBundleComponents || []) {
+          if (!component.fulfillNow) {
+            bundleMappings.push({
+              parentLineId: parent.orderLineGid,
+              parentTitle: parent.title,
+              componentIndex: component.index,
+              componentTitle: component.componentTitle,
+              variantTitle: component.variantTitle,
+              fulfillNow: false,
+              matchedOrderLineId: "",
+              matchScore: 0,
+              skipped: "order_later",
+            });
+            continue;
+          }
+          let bestLine = null;
+          let bestScore = 0;
+          for (const candidate of candidateLines) {
+            if (!candidate.orderLineGid || alreadyMatchedLineIds.has(candidate.orderLineGid)) continue;
+            const score = scoreBundleComponentCandidate(candidate.title, component.componentTitle, component.variantTitle);
+            if (score > bestScore) {
+              bestLine = candidate;
+              bestScore = score;
+            }
+          }
+          if (bestLine && bestScore > 0) {
+            eligibleOrderLineGids.add(bestLine.orderLineGid);
+            if (bestLine.orderLineNumericId) eligibleOrderLineNumericIds.add(bestLine.orderLineNumericId);
+            eligibleOrderLines.push({
+              orderLineGid: bestLine.orderLineGid,
+              orderLineNumericId: bestLine.orderLineNumericId,
+              title: bestLine.title,
+              quantity: bestLine.quantity,
+              mode: "bundle_component",
+              takeNow: true,
+            });
+            alreadyMatchedLineIds.add(bestLine.orderLineGid);
+            bundleMappings.push({
+              parentLineId: parent.orderLineGid,
+              parentTitle: parent.title,
+              componentIndex: component.index,
+              componentTitle: component.componentTitle,
+              variantTitle: component.variantTitle,
+              fulfillNow: true,
+              matchedOrderLineId: bestLine.orderLineGid,
+              matchedOrderLineTitle: bestLine.title,
+              matchScore: bestScore,
+            });
+          } else {
+            unmatchedBundleComponents.push({
+              parentLineId: parent.orderLineGid,
+              parentTitle: parent.title,
+              componentIndex: component.index,
+              componentTitle: component.componentTitle,
+              variantTitle: component.variantTitle,
+              fulfillNow: true,
+            });
+            bundleMappings.push({
+              parentLineId: parent.orderLineGid,
+              parentTitle: parent.title,
+              componentIndex: component.index,
+              componentTitle: component.componentTitle,
+              variantTitle: component.variantTitle,
+              fulfillNow: true,
+              matchedOrderLineId: "",
+              matchScore: 0,
+            });
+          }
+        }
+      }
+
+      logDebug("BUNDLE COMPONENT MAPPING JSON", `order_id=${order.id} data=${JSON.stringify(bundleMappings)}`);
+      if (unmatchedBundleComponents.length > 0) {
+        logDebugError(
+          "BUNDLE COMPONENTS UNMATCHED",
+          `order_id=${order.id} data=${JSON.stringify(unmatchedBundleComponents)}`,
+        );
+      }
+    }
     logDebug("ORDER LINE DECISIONS JSON", `order_id=${order.id} data=${JSON.stringify(lineDecisions)}`);
     logDebug("SIMPLIFIED ORDER LINES JSON", `order_id=${order.id} data=${JSON.stringify(simplifiedOrderLines)}`);
 

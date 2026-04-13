@@ -2002,9 +2002,29 @@ function Modal() {
 
   function handleProductPress(product) {
     setSelectedProduct(product);
-    setSelectedVariant(null);
-    setSelectedOptionValues({});
+    var defaultVariant = null;
+    if (product && product.bundleMeta && product.bundleMeta.isBundle && Array.isArray(product.variants) && product.variants.length > 0) {
+      defaultVariant = product.variants[0];
+    }
+    setSelectedVariant(defaultVariant);
+    if (defaultVariant && defaultVariant.optionMap) {
+      var initialOptionValues = {};
+      var defaultKeys = Object.keys(defaultVariant.optionMap);
+      for (var dk = 0; dk < defaultKeys.length; dk += 1) {
+        initialOptionValues[defaultKeys[dk]] = defaultVariant.optionMap[defaultKeys[dk]];
+      }
+      setSelectedOptionValues(initialOptionValues);
+    } else {
+      setSelectedOptionValues({});
+    }
     resetBundleBuilderState();
+    if (product && product.bundleMeta && product.bundleMeta.isBundle) {
+      setBundleAddStatus('idle');
+      setBundleAddError('');
+      setScreen('bundleBuilder');
+      loadBundleComponentsForProduct(product);
+      return;
+    }
     setScreen('productDetail');
   }
 
