@@ -108,6 +108,26 @@ function shouldFulfillNowForMode(mode, takeNow) {
   return false;
 }
 
+function evaluateLineEligibility(attributes = {}) {
+  const source = normalizeSource(attributes._msh_source);
+  const rawMode = attributes._msh_fulfillment_mode || attributes._msh_fulfilment_mode;
+  const mode = normalizeMode(rawMode);
+  const rawTakeNow = attributes._msh_take_now;
+  const takeNow = normalizeTakeNow(rawTakeNow);
+  const feeOrSystem = isFeeOrSystemLine(attributes);
+  const eligible = source === "macron_pos" && !feeOrSystem && shouldFulfillNowForMode(mode, takeNow);
+
+  return {
+    source,
+    rawMode: rawMode == null ? "" : String(rawMode),
+    mode,
+    rawTakeNow: rawTakeNow == null ? "" : String(rawTakeNow),
+    takeNow,
+    feeOrSystem,
+    eligible,
+  };
+}
+
 function summarizeAttributes(attributes = {}) {
   return Object.fromEntries(
     Object.entries(attributes).filter(([key]) =>
@@ -214,42 +234,29 @@ export const action = async ({ request }) => {
       orderLineByLegacyId.set(legacyId, normalized);
     }
 
-    const linesToFulfillNowByLegacyId = new Set();
-    const linesToFulfillNowByGid = new Set();
     const lineDecisions = [];
     for (const orderLine of order.lineItems?.nodes || []) {
       const attributes = attributeMap(orderLine.customAttributes);
-      const source = normalizeSource(attributes._msh_source);
-      if (source !== "macron_pos") continue;
-      if (isFeeOrSystemLine(attributes)) continue;
-
-      const rawMode = attributes._msh_fulfillment_mode || attributes._msh_fulfilment_mode;
-      const rawTakeNow = attributes._msh_take_now;
-      const mode = normalizeMode(rawMode);
-      const takeNow = normalizeTakeNow(rawTakeNow);
-      const fulfillNow = shouldFulfillNowForMode(mode, takeNow);
+      const { source, rawMode, mode, rawTakeNow, takeNow, eligible, feeOrSystem } = evaluateLineEligibility(attributes);
       const orderLineGid = String(orderLine?.id || "");
       const orderLineLegacyId = String(orderLine?.legacyResourceId || "");
       lineDecisions.push({
         orderLineGid,
         orderLineLegacyId,
         title: orderLine?.title || "",
-        rawMode: rawMode == null ? "" : String(rawMode),
-        rawTakeNow: rawTakeNow == null ? "" : String(rawTakeNow),
+        rawMode,
+        parsedMode: mode,
+        rawTakeNow,
         parsedTakeNow: takeNow,
-        eligible: fulfillNow,
+        feeOrSystem,
+        eligible,
         attributes: summarizeAttributes(attributes),
       });
       console.log(
         `[orders/create] Decision for order ${order.id} (${order.name || "unknown"}) line "${orderLine.title}": source=${source || "missing"} mode=${mode || "missing"} take_now=${
           takeNow === null ? "missing" : String(takeNow)
-        } => ${fulfillNow ? "FULFILL" : "SKIP"}`,
+        } fee_or_system=${String(feeOrSystem)} => ${eligible ? "FULFILL" : "SKIP"}`,
       );
-
-      if (fulfillNow) {
-        if (orderLineLegacyId) linesToFulfillNowByLegacyId.add(orderLineLegacyId);
-        if (orderLineGid) linesToFulfillNowByGid.add(orderLineGid);
-      }
     }
 
     const hasSplitLines = lineDecisions.some((line) => normalizeMode(line.rawMode) === "split");
@@ -259,7 +266,7 @@ export const action = async ({ request }) => {
       );
     }
 
-    if (linesToFulfillNowByLegacyId.size === 0 && linesToFulfillNowByGid.size === 0) {
+    if (!lineDecisions.some((line) => line.eligible)) {
       console.log(`[orders/create] No lines eligible for immediate fulfillment for order ${order.id}`);
       return new Response();
     }
@@ -273,12 +280,13 @@ export const action = async ({ request }) => {
         const linkedOrderLine = foLineItem.lineItem || {};
         const orderLineGid = String(linkedOrderLine.id || "");
         const legacyId = String(linkedOrderLine.legacyResourceId || "");
-        const matchByGid = Boolean(orderLineGid && linesToFulfillNowByGid.has(orderLineGid));
-        const matchByLegacyId = Boolean(legacyId && linesToFulfillNowByLegacyId.has(legacyId));
-        const isSelectedByOrderLine = matchByGid || matchByLegacyId;
-
         const orderLine = (orderLineGid && orderLineByGid.get(orderLineGid)) || (legacyId && orderLineByLegacyId.get(legacyId));
-        const isFeeLine = Boolean(orderLine && isFeeOrSystemLine(orderLine.attributes || {}));
+        const linkedOrderLineAttributes = attributeMap(linkedOrderLine.customAttributes);
+        const fallbackAttributes = orderLine?.attributes || {};
+        const selection = evaluateLineEligibility({
+          ...fallbackAttributes,
+          ...linkedOrderLineAttributes,
+        });
         const quantity = Number(foLineItem.remainingQuantity || 0);
 
         splitDebugFoLines.push({
@@ -288,15 +296,17 @@ export const action = async ({ request }) => {
           linkedOrderLineLegacyId: legacyId,
           linkedOrderLineTitle: linkedOrderLine?.title || "",
           remainingQuantity: quantity,
-          matchedByGid: matchByGid,
-          matchedByLegacyId: matchByLegacyId,
-          isSelectedByOrderLine,
-          isFeeLine,
+          parsedMode: selection.mode || "",
+          parsedTakeNow: selection.takeNow,
+          isFeeLine: selection.feeOrSystem,
+          isSelectedByOrderLine: selection.eligible,
+          attributes: summarizeAttributes({
+            ...fallbackAttributes,
+            ...linkedOrderLineAttributes,
+          }),
         });
 
-        if (!isSelectedByOrderLine) continue;
-        if (!orderLine || isFeeOrSystemLine(orderLine.attributes || {})) continue;
-
+        if (!selection.eligible) continue;
         if (!quantity || quantity < 1) continue;
 
         selectedLineItems.push({
@@ -304,7 +314,9 @@ export const action = async ({ request }) => {
           quantity,
         });
         console.log(
-          `[orders/create] Selected fulfillment-order line for order ${order.id} (${order.name || "unknown"}): "${linkedOrderLine.title}" qty=${quantity} fo=${fulfillmentOrder.id}`,
+          `[orders/create] Selected fulfillment-order line for order ${order.id} (${order.name || "unknown"}): "${linkedOrderLine.title}" mode=${
+            selection.mode || "missing"
+          } take_now=${selection.takeNow === null ? "missing" : String(selection.takeNow)} qty=${quantity} fo=${fulfillmentOrder.id} fo_line=${foLineItem.id}`,
         );
       }
 
@@ -325,28 +337,39 @@ export const action = async ({ request }) => {
     }
 
     if (lineItemsByFulfillmentOrder.length === 0) {
-      console.log(`[orders/create] No fulfillment-order line items eligible for immediate fulfillment for order ${order.id}`);
+      console.log(
+        `[orders/create] No fulfillment-order line items eligible for immediate fulfillment for order ${order.id}. lineDecisions=${JSON.stringify(
+          lineDecisions,
+        )}`,
+      );
       return new Response();
     }
 
-    if (hasSplitLines) {
-      console.log(
-        `[orders/create][split-debug] Order ${order.id} (${order.name || "unknown"}) mutation lineItemsByFulfillmentOrder: ${JSON.stringify(
-          lineItemsByFulfillmentOrder,
-        )}`,
-      );
-    }
+    const fulfillmentInput = {
+      notifyCustomer: false,
+      lineItemsByFulfillmentOrder,
+    };
+    console.log(
+      `[orders/create] Fulfillment mutation payload for order ${order.id} (${order.name || "unknown"}): ${JSON.stringify(
+        fulfillmentInput,
+      )}`,
+    );
 
     const mutationResponse = await admin.graphql(FULFILLMENT_CREATE_MUTATION, {
       variables: {
-        fulfillment: {
-          notifyCustomer: false,
-          lineItemsByFulfillmentOrder,
-        },
+        fulfillment: fulfillmentInput,
       },
     });
     const mutationBody = await mutationResponse.json();
+    if (Array.isArray(mutationBody?.errors) && mutationBody.errors.length > 0) {
+      console.log(`[orders/create] fulfillmentCreate GraphQL errors for order ${order.id}: ${JSON.stringify(mutationBody.errors)}`);
+      return new Response();
+    }
     const result = mutationBody?.data?.fulfillmentCreate;
+    if (!result) {
+      console.log(`[orders/create] fulfillmentCreate missing result for order ${order.id}: ${JSON.stringify(mutationBody)}`);
+      return new Response();
+    }
     const userErrors = result?.userErrors || [];
 
     if (userErrors.length > 0) {
@@ -355,7 +378,9 @@ export const action = async ({ request }) => {
     }
 
     console.log(
-      `[orders/create] fulfillmentCreate success for order ${order.id}: ${result?.fulfillment?.id || "unknown"}`,
+      `[orders/create] fulfillmentCreate success for order ${order.id}: fulfillment_id=${
+        result?.fulfillment?.id || "unknown"
+      } status=${result?.fulfillment?.status || "unknown"}`,
     );
     return new Response();
   } catch (error) {
