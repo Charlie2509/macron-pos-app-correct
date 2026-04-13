@@ -302,6 +302,16 @@ function buildMshIntentProperties(mode, takeNowInSplit) {
   };
 }
 
+function defaultBundleComponentFulfilment(mode, takeNowInSplit) {
+  if (mode === 'order_in') {
+    return 'order_later';
+  }
+  if (mode === 'split') {
+    return takeNowInSplit ? 'take_now' : 'order_later';
+  }
+  return 'take_now';
+}
+
 function parseFeeDisplay(raw) {
   var text = toStr(raw);
   if (text === '') {
@@ -1345,6 +1355,10 @@ function Modal() {
   var bundleSelections = bundleSelectionsState[0];
   var setBundleSelections = bundleSelectionsState[1];
 
+  var bundleComponentFulfilmentState = useState({});
+  var bundleComponentFulfilment = bundleComponentFulfilmentState[0];
+  var setBundleComponentFulfilment = bundleComponentFulfilmentState[1];
+
   var bundleLoadingState = useState(false);
   var bundleLoading = bundleLoadingState[0];
   var setBundleLoading = bundleLoadingState[1];
@@ -1598,6 +1612,7 @@ function Modal() {
     setProductListLoading(false);
     setBundleComponents([]);
     setBundleSelections({});
+    setBundleComponentFulfilment({});
     setBundleLoading(false);
     setBundleError('');
     setBundleDebugUnresolvedRefs([]);
@@ -1614,6 +1629,7 @@ function Modal() {
   function resetBundleBuilderState() {
     setBundleComponents([]);
     setBundleSelections({});
+    setBundleComponentFulfilment({});
     setBundleLoading(false);
     setBundleError('');
     setBundleDebugUnresolvedRefs([]);
@@ -1770,6 +1786,50 @@ function Modal() {
     setBundleSelections(next);
   }
 
+  function handleBundleComponentFulfilmentSelect(componentKey, nextValue) {
+    var next = {};
+    var keys = Object.keys(bundleComponentFulfilment || {});
+    for (var i = 0; i < keys.length; i += 1) {
+      next[keys[i]] = bundleComponentFulfilment[keys[i]];
+    }
+    next[componentKey] = nextValue;
+    setBundleComponentFulfilment(next);
+  }
+
+  useEffect(function () {
+    if (!bundleComponents || bundleComponents.length === 0) {
+      return;
+    }
+    setBundleComponentFulfilment(function (previousState) {
+      var previous = previousState || {};
+      var next = {};
+      var modeDefault = defaultBundleComponentFulfilment(fulfilmentMode, splitTakeNow);
+      var hasChanged = false;
+      for (var i = 0; i < bundleComponents.length; i += 1) {
+        var componentKey = bundleComponents[i].key;
+        var existing = previous[componentKey];
+        var resolved = existing;
+        if (fulfilmentMode === 'take_today' || fulfilmentMode === 'order_in') {
+          resolved = modeDefault;
+        } else if (resolved !== 'take_now' && resolved !== 'order_later') {
+          resolved = modeDefault;
+        }
+        next[componentKey] = resolved;
+        if (previous[componentKey] !== resolved) {
+          hasChanged = true;
+        }
+      }
+      var previousKeys = Object.keys(previous);
+      if (previousKeys.length !== bundleComponents.length) {
+        hasChanged = true;
+      }
+      if (!hasChanged) {
+        return previousState;
+      }
+      return next;
+    });
+  }, [bundleComponents, fulfilmentMode, splitTakeNow]);
+
   async function addBundleParentToCart() {
     if (!selectedProduct || !selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle) {
       toast('No bundle selected');
@@ -1835,7 +1895,12 @@ function Modal() {
     for (var idx = 0; idx < bundleComponents.length; idx += 1) {
       var item = bundleComponents[idx];
       var selected = bundleSelections[item.key];
+      var componentFulfilment = bundleComponentFulfilment[item.key];
+      if (componentFulfilment !== 'take_now' && componentFulfilment !== 'order_later') {
+        componentFulfilment = defaultBundleComponentFulfilment(fulfilmentMode, splitTakeNow);
+      }
       bundleProps['Item ' + String(idx + 1)] = item.title + ' — ' + selected.title;
+      bundleProps['Bundle Component ' + String(idx + 1) + ' Fulfilment'] = componentFulfilment;
     }
 
     var personalisationProps = buildPersonalisationProperties(
@@ -2535,9 +2600,14 @@ function Modal() {
     for (var p = 0; p < bundleComponents.length; p += 1) {
       var component = bundleComponents[p];
       var chosen = bundleSelections[component.key];
+      var chosenFulfilment = bundleComponentFulfilment[component.key];
+      if (chosenFulfilment !== 'take_now' && chosenFulfilment !== 'order_later') {
+        chosenFulfilment = defaultBundleComponentFulfilment(fulfilmentMode, splitTakeNow);
+      }
       if (chosen && chosen.title) {
         bundlePreview.push('Item ' + String(p + 1) + ': ' + component.title + ' — ' + chosen.title);
       }
+      bundlePreview.push('Bundle Component ' + String(p + 1) + ' Fulfilment: ' + chosenFulfilment);
     }
     var bundlePersonalisationProps = buildPersonalisationProperties(
       product.personalisationMeta || {},
@@ -3272,6 +3342,10 @@ function Modal() {
               {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
               {bundleComponents.map(function (component) {
                 var chosen = bundleSelections[component.key];
+                var componentFulfilmentValue = bundleComponentFulfilment[component.key];
+                if (componentFulfilmentValue !== 'take_now' && componentFulfilmentValue !== 'order_later') {
+                  componentFulfilmentValue = defaultBundleComponentFulfilment(fulfilmentMode, splitTakeNow);
+                }
                 return (
                   <s-section key={component.key} heading={component.title}>
                     <s-box border="base" cornerRadius="large" padding="small">
@@ -3295,6 +3369,29 @@ function Modal() {
                         ) : (
                           <s-text appearance="critical">No variants available for this component</s-text>
                         )}
+                        <s-box border="base" cornerRadius="base" padding="small">
+                          <s-stack direction="block" gap="small">
+                            <s-text emphasis="bold" size="small">Component fulfilment</s-text>
+                            {fulfilmentMode === 'split' ? (
+                              <s-stack direction="inline" wrap="true" gap="small">
+                                <s-button
+                                  variant={componentFulfilmentValue === 'take_now' ? 'primary' : 'secondary'}
+                                  onClick={function () { handleBundleComponentFulfilmentSelect(component.key, 'take_now'); }}
+                                >
+                                  Take now
+                                </s-button>
+                                <s-button
+                                  variant={componentFulfilmentValue === 'order_later' ? 'primary' : 'secondary'}
+                                  onClick={function () { handleBundleComponentFulfilmentSelect(component.key, 'order_later'); }}
+                                >
+                                  Order later
+                                </s-button>
+                              </s-stack>
+                            ) : (
+                              <s-text appearance="subdued">{componentFulfilmentValue === 'order_later' ? 'Order later' : 'Take now'}</s-text>
+                            )}
+                          </s-stack>
+                        </s-box>
                       </s-stack>
                     </s-box>
                   </s-section>
