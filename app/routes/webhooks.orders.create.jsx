@@ -6,6 +6,10 @@ const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
     order(id: $orderId) {
       id
       name
+      sourceName
+      createdAt
+      processedAt
+      updatedAt
       note
       customAttributes {
         key
@@ -15,9 +19,15 @@ const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
       lineItems(first: 250) {
         nodes {
           id
+          name
           title
+          variantTitle
           sku
           quantity
+          variant {
+            id
+            title
+          }
           customAttributes {
             key
             value
@@ -134,6 +144,20 @@ function classifyFeeOrSystemLine({ attributes = {}, title = "", sku = "" } = {})
 
 function normalizeStringValue(value) {
   return String(value == null ? "" : value).trim().toLowerCase();
+}
+
+function normalizeComparableText(value) {
+  return normalizeStringValue(value)
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeVariantIdValue(value) {
+  const raw = String(value == null ? "" : value).trim();
+  if (!raw) return "";
+  const match = raw.match(/(\d+)(?:\?.*)?$/);
+  return match ? match[1] : raw;
 }
 
 function normalizeMode(rawMode) {
@@ -453,6 +477,9 @@ function getOrderLineTitleQuantitySummary(orderLineNodes = []) {
   return (orderLineNodes || [])
     .map((line) => ({
       title: String(line?.title || "").trim(),
+      name: String(line?.name || "").trim(),
+      variantTitle: String(line?.variantTitle || line?.variant?.title || "").trim(),
+      normalizedVariantId: normalizeVariantIdValue(line?.variant?.id),
       quantity: Number(line?.quantity || 0),
       sku: String(line?.sku || "").trim(),
       attributes: attributeMap(line?.customAttributes),
@@ -468,31 +495,101 @@ function getOrderLineTitleQuantitySummary(orderLineNodes = []) {
     });
 }
 
-function evaluatePendingIntentCandidateMatch(intent, orderLineSummary = []) {
-  const normalizedIntentProductTitle = normalizeStringValue(intent.productTitle);
-  const normalizedIntentVariantTitle = normalizeStringValue(intent.variantTitle);
-  const intentQty = Number(intent.quantity || 0);
-  const reasons = [];
-  let matchedLine = null;
-
+function getOrderBundleSummaryHints(orderLineSummary = []) {
+  const summaries = [];
   for (const line of orderLineSummary) {
+    const attrs = line.attributes || {};
+    const values = [
+      attrs._msh_fallback_bundle_summary,
+      attrs["Bundle Summary"],
+      attrs["Bundle Take Now Summary"],
+      attrs["Bundle Order Later Summary"],
+    ];
+    for (const value of values) {
+      const normalized = normalizeComparableText(value);
+      if (normalized) summaries.push(normalized);
+    }
+  }
+  return summaries;
+}
+
+function evaluatePendingIntentCandidateMatch(intent, orderLineSummary = [], orderBundleHints = []) {
+  const normalizedIntentProductTitle = normalizeStringValue(intent.productTitle);
+  const comparableIntentProductTitle = normalizeComparableText(intent.productTitle);
+  const comparableIntentVariantTitle = normalizeComparableText(intent.variantTitle);
+  const normalizedIntentVariantId = normalizeVariantIdValue(intent.normalizedVariantId);
+  const intentQty = Number(intent.quantity || 0);
+  const comparableIntentBundleSummary = normalizeComparableText(intent.bundleSummary);
+  const reasons = [];
+  const lineRejectionReasons = [];
+  let matchedLineIndex = -1;
+
+  for (let index = 0; index < orderLineSummary.length; index += 1) {
+    const line = orderLineSummary[index];
     const normalizedLineTitle = normalizeStringValue(line.title);
-    if (normalizedLineTitle !== normalizedIntentProductTitle) continue;
-    if (intentQty > 0 && intentQty !== Number(line.quantity || 0)) continue;
-    matchedLine = line;
-    reasons.push("product_title+quantity");
+    const comparableLineTitle = normalizeComparableText(line.title);
+    const lineReasons = [];
+
+    if (
+      normalizedLineTitle !== normalizedIntentProductTitle &&
+      comparableLineTitle !== comparableIntentProductTitle
+    ) {
+      lineReasons.push("title_mismatch");
+    }
+    if (intentQty > 0 && intentQty !== Number(line.quantity || 0)) {
+      lineReasons.push("quantity_mismatch");
+    }
+    if (normalizedIntentVariantId && line.normalizedVariantId && line.normalizedVariantId !== normalizedIntentVariantId) {
+      lineReasons.push("variant_id_mismatch");
+    }
+    if (comparableIntentVariantTitle) {
+      const comparableLineVariantTitle = normalizeComparableText(line.variantTitle);
+      if (
+        comparableLineVariantTitle &&
+        comparableLineVariantTitle !== comparableIntentVariantTitle &&
+        !comparableLineTitle.includes(comparableIntentVariantTitle)
+      ) {
+        lineReasons.push("variant_title_mismatch");
+      }
+    }
+
+    if (lineReasons.length > 0) {
+      lineRejectionReasons.push({
+        line_index: index,
+        line_title: line.title,
+        line_qty: Number(line.quantity || 0),
+        reasons: lineReasons,
+      });
+      continue;
+    }
+
+    matchedLineIndex = index;
+    reasons.push("title+quantity_match");
+    if (normalizedIntentVariantId && line.normalizedVariantId === normalizedIntentVariantId) {
+      reasons.push("variant_id_match");
+    }
     break;
   }
 
-  if (!matchedLine) {
-    return { matched: false, reasons: ["no_product_title_quantity_match"], score: 0 };
+  if (matchedLineIndex < 0) {
+    return {
+      matched: false,
+      reasons: ["no_line_match"],
+      score: 0,
+      lineRejectionReasons,
+    };
   }
 
   let score = 2;
-  if (normalizedIntentVariantTitle) {
-    const variantFound = orderLineSummary.some((line) =>
-      normalizeStringValue(line.title).includes(normalizedIntentVariantTitle),
-    );
+  if (comparableIntentVariantTitle) {
+    const variantFound = orderLineSummary.some((line) => {
+      const comparableLineTitle = normalizeComparableText(line.title);
+      const comparableLineVariantTitle = normalizeComparableText(line.variantTitle);
+      return (
+        comparableLineVariantTitle === comparableIntentVariantTitle ||
+        comparableLineTitle.includes(comparableIntentVariantTitle)
+      );
+    });
     if (variantFound) {
       reasons.push("variant_title_hint");
       score += 1;
@@ -502,11 +599,20 @@ function evaluatePendingIntentCandidateMatch(intent, orderLineSummary = []) {
   }
 
   if (intent.isBundle) {
-    reasons.push("bundle_intent");
-    if (orderLineSummary.length > 1) score += 1;
+    if (!comparableIntentBundleSummary) {
+      reasons.push("bundle_summary_missing_on_intent");
+      return { matched: false, reasons, score: 0, lineRejectionReasons };
+    }
+    const bundleSummaryMatched = orderBundleHints.some((summary) => summary === comparableIntentBundleSummary);
+    if (!bundleSummaryMatched) {
+      reasons.push("bundle_summary_mismatch");
+      return { matched: false, reasons, score: 0, lineRejectionReasons };
+    }
+    reasons.push("bundle_summary_match");
+    score += 1;
   }
 
-  return { matched: true, reasons, score };
+  return { matched: true, reasons, score, lineRejectionReasons };
 }
 
 async function tryMatchPendingIntent({ shop, payloadSourceName, order }) {
@@ -523,6 +629,24 @@ async function tryMatchPendingIntent({ shop, payloadSourceName, order }) {
   const now = new Date();
   const earliest = new Date(now.getTime() - PENDING_INTENT_MATCH_WINDOW_MS);
   const orderLineSummary = getOrderLineTitleQuantitySummary(order?.lineItems?.nodes || []);
+  const orderBundleHints = getOrderBundleSummaryHints(orderLineSummary);
+  logDebug(
+    "PENDING INTENT ORDER MATCH FIELDS",
+    `order_id=${order?.id || "unknown"} order_name=${order?.name || "unknown"} source_name=${normalizeStringValue(
+      order?.sourceName,
+    ) || "unknown"} created_at=${order?.createdAt || "unknown"} processed_at=${order?.processedAt || "unknown"} updated_at=${
+      order?.updatedAt || "unknown"
+    } line_summary=${JSON.stringify(
+      orderLineSummary.map((line) => ({
+        title: line.title,
+        name: line.name,
+        quantity: line.quantity,
+        sku: line.sku,
+        variant_title: line.variantTitle,
+        normalized_variant_id: line.normalizedVariantId,
+      })),
+    )} bundle_hints=${JSON.stringify(orderBundleHints)}`,
+  );
   const pendingIntents = await db.pendingMacronPosIntent.findMany({
     where: {
       shop,
@@ -536,14 +660,45 @@ async function tryMatchPendingIntent({ shop, payloadSourceName, order }) {
   });
 
   const evaluatedCandidates = pendingIntents.map((intent) => {
-    const evaluation = evaluatePendingIntentCandidateMatch(intent, orderLineSummary);
+    const evaluation = evaluatePendingIntentCandidateMatch(intent, orderLineSummary, orderBundleHints);
     return {
       intent,
       matched: evaluation.matched,
       reasons: evaluation.reasons,
       score: evaluation.score,
+      lineRejectionReasons: evaluation.lineRejectionReasons || [],
     };
   });
+  logDebug(
+    "PENDING INTENT CANDIDATE LIST",
+    `order_id=${order?.id || "unknown"} shop=${shop} now=${now.toISOString()} window_start=${earliest.toISOString()} source_name=${
+      payloadSourceName || "unknown"
+    } candidates=${JSON.stringify(
+      pendingIntents.map((intent) => ({
+        id: intent.id,
+        shop: intent.shop,
+        created_at: intent.createdAt,
+        expires_at: intent.expiresAt,
+        product_title: intent.productTitle,
+        variant_title: intent.variantTitle,
+        normalized_variant_id: intent.normalizedVariantId,
+        quantity: intent.quantity,
+        has_fee: intent.hasFee,
+        is_bundle: intent.isBundle,
+        bundle_summary: intent.bundleSummary,
+      })),
+    )}`,
+  );
+  for (const candidate of evaluatedCandidates) {
+    if (!candidate.matched) {
+      logDebug(
+        "PENDING INTENT CANDIDATE REJECTED",
+        `order_id=${order?.id || "unknown"} intent_id=${candidate.intent.id} reasons=${JSON.stringify(
+          candidate.reasons,
+        )} line_rejections=${JSON.stringify(candidate.lineRejectionReasons)}`,
+      );
+    }
+  }
 
   const matchedCandidates = evaluatedCandidates.filter((candidate) => candidate.matched);
   if (matchedCandidates.length !== 1) {
@@ -555,6 +710,7 @@ async function tryMatchPendingIntent({ shop, payloadSourceName, order }) {
         matched: candidate.matched,
         score: candidate.score,
         reasons: candidate.reasons,
+        lineRejectionReasons: candidate.lineRejectionReasons,
       })),
       matchedIntent: null,
     };
@@ -574,10 +730,11 @@ async function tryMatchPendingIntent({ shop, payloadSourceName, order }) {
     reason: "single_match",
     candidates: evaluatedCandidates.map((candidate) => ({
       id: candidate.intent.id,
-      matched: candidate.matched,
-      score: candidate.score,
-      reasons: candidate.reasons,
-    })),
+        matched: candidate.matched,
+        score: candidate.score,
+        reasons: candidate.reasons,
+        lineRejectionReasons: candidate.lineRejectionReasons,
+      })),
     matchedIntent,
   };
 }
