@@ -495,6 +495,61 @@ function buildMshOrderFallbackProperties(rawProperties, bundleAttachConfig) {
   return orderFallback;
 }
 
+function sanitizeDurableTokenValue(value) {
+  var text = toStr(value);
+  if (text === '') {
+    return '';
+  }
+  var compact = text.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  compact = compact.replace(/[;[\]]+/g, '');
+  if (compact.length > 80) {
+    compact = compact.slice(0, 80);
+  }
+  return compact;
+}
+
+function buildMshDurableNoteToken(rawProperties, bundleAttachConfig) {
+  var properties = sanitizeLineItemProperties(rawProperties);
+  var source = sanitizeDurableTokenValue(properties._msh_source || 'macron_pos');
+  var mode = sanitizeDurableTokenValue(properties._msh_fulfilment_mode || properties._msh_fulfillment_mode || 'take_today');
+  var takeNow = sanitizeDurableTokenValue(properties._msh_take_now);
+  var bundleSummary = '';
+  if (bundleAttachConfig && bundleAttachConfig.enabled && bundleAttachConfig.readableProperties) {
+    var readableProps = sanitizeLineItemProperties(bundleAttachConfig.readableProperties);
+    bundleSummary = sanitizeDurableTokenValue(
+      readableProps['Bundle Take Now Summary'] || readableProps['Bundle Summary'] || readableProps['Bundle Order Later Summary'],
+    );
+  }
+  if (bundleSummary === '') {
+    bundleSummary = sanitizeDurableTokenValue(
+      properties['Bundle Take Now Summary'] || properties['Bundle Summary'] || properties['Bundle Order Later Summary'],
+    );
+  }
+
+  var tokenParts = [
+    'source=' + (source || 'macron_pos'),
+    'mode=' + (mode || 'take_today'),
+  ];
+  if (takeNow !== '') {
+    tokenParts.push('take_now=' + takeNow);
+  }
+  if (bundleSummary !== '') {
+    tokenParts.push('bundle=' + bundleSummary);
+  }
+  return '[MSH_POS] ' + tokenParts.join(';');
+}
+
+function buildMshDurableNoteProperties(token) {
+  var cleanToken = toStr(token);
+  if (cleanToken === '') {
+    return {};
+  }
+  return {
+    note: cleanToken,
+    _msh_pos_note_token: cleanToken,
+  };
+}
+
 function bundleComponentLineText(index, componentTitle, variantTitle) {
   return String(index) + '. ' + toStr(componentTitle) + ' — ' + toStr(variantTitle);
 }
@@ -2721,8 +2776,11 @@ function Modal() {
     var posProperties = toPosLineItemProperties(lineItemProperties);
     var fallbackMarkerProperties = buildMshFallbackMarkerProperties(propertiesObject);
     var orderFallbackProperties = buildMshOrderFallbackProperties(propertiesObject, bundleAttachConfig);
+    var durableNoteToken = buildMshDurableNoteToken(propertiesObject, bundleAttachConfig);
+    var durableNoteProperties = buildMshDurableNoteProperties(durableNoteToken);
     var fallbackMarkerKeyCount = Object.keys(fallbackMarkerProperties).length;
     var orderFallbackKeyCount = Object.keys(orderFallbackProperties).length;
+    var durableNoteKeyCount = Object.keys(durableNoteProperties).length;
 
     var expectedIncrease = 1 + (feeRequired ? 1 : 0);
     var mainUuid = '';
@@ -2806,6 +2864,8 @@ function Modal() {
       console.log('[MSH Marker] line_item_properties payload=', posProperties);
       console.log('[MSH Marker] fallback_marker payload=', fallbackMarkerProperties);
       console.log('[MSH Marker] order_fallback payload=', orderFallbackProperties);
+      console.log('[MSH Marker] durable_note token=', durableNoteToken);
+      console.log('[MSH Marker] durable_note payload=', durableNoteProperties);
       console.log('[BundleAdd] final parent title=', product && product.title ? product.title : '');
       console.log('[BundleAdd] final normalized parent variant id=', normalized.value);
       console.log('[BundleAdd] final addLineItem args=', [normalized.value, 1, posProperties]);
@@ -2868,6 +2928,25 @@ function Modal() {
         }
       } else {
         console.log('[MSH Marker] order_fallback write=skipped reason=no marker data');
+      }
+
+      if (durableNoteKeyCount > 0) {
+        if (shopify.cart && typeof shopify.cart.addCartProperties === 'function') {
+          console.log('[MSH Marker] durable_note api=shopify.cart.addCartProperties');
+          try {
+            await shopify.cart.addCartProperties(durableNoteProperties);
+            console.log('[MSH Marker] durable_note write=success');
+          } catch (durableNoteErr) {
+            console.error(
+              '[MSH Marker] durable_note write=failed error=',
+              durableNoteErr && durableNoteErr.message ? durableNoteErr.message : String(durableNoteErr),
+            );
+          }
+        } else {
+          console.error('[MSH Marker] durable_note write=skipped error=Cart API missing addCartProperties');
+        }
+      } else {
+        console.log('[MSH Marker] durable_note write=skipped reason=no marker data');
       }
 
       if (bundleAttachConfig && bundleAttachConfig.enabled) {
