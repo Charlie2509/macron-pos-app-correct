@@ -2967,14 +2967,17 @@ function Modal() {
       }
       try {
         try {
-          const pingResponse = await fetch('https://macron-pos-app-correct.onrender.com/api/macron-pos/ping', {
+          var pingResponse = await fetch('https://macron-pos-app-correct.onrender.com/api/macron-pos/ping', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ test: true }),
           });
-          console.log('[MSH PendingIntent] ping status=', pingResponse.status);
+          console.log('[MSH PendingIntent] ping status=', pingResponse.status, 'ok=', pingResponse.ok);
         } catch (pingError) {
-          console.error('[MSH PendingIntent] ping failed=', pingError && pingError.message ? pingError.message : String(pingError));
+          console.error(
+            '[MSH PendingIntent] ping failed=',
+            pingError && pingError.message ? pingError.message : String(pingError)
+          );
         }
 
         var pendingIntentResponse = await fetch(pendingIntentEndpoint, {
