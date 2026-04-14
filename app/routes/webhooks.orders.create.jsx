@@ -1,4 +1,4 @@
-import { authenticate } from "../shopify.server";
+import { authenticate, sessionStorage } from "../shopify.server";
 
 const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
   query MacronOrderForFulfillment($orderId: ID!) {
@@ -10,6 +10,7 @@ const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
         nodes {
           id
           title
+          sku
           quantity
           customAttributes {
             key
@@ -88,12 +89,40 @@ function attributeMap(customAttributes) {
   return attributes;
 }
 
-function isFeeOrSystemLine(attributes) {
-  return Boolean(
-    attributes["Fee For Product"] ||
-      attributes["Linked Product Variant Id"] ||
-      attributes["Linked Fee Variant Id"],
-  );
+function hasTruthyValue(value) {
+  const normalized = normalizeStringValue(value);
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
+function classifyFeeOrSystemLine({ attributes = {}, title = "", sku = "" } = {}) {
+  const normalizedTitle = normalizeStringValue(title);
+  const normalizedSku = normalizeStringValue(sku);
+
+  if (attributes["Fee For Product"]) {
+    return { feeOrSystem: true, reason: "fee_for_product_attribute" };
+  }
+
+  if ("_MSH_PersoFee" in attributes && hasTruthyValue(attributes._MSH_PersoFee)) {
+    return { feeOrSystem: true, reason: "_msh_persofee_attribute" };
+  }
+
+  if (
+    normalizedTitle.includes("personalisation fee") ||
+    normalizedTitle.includes("personalization fee")
+  ) {
+    return { feeOrSystem: true, reason: "title_personalisation_fee" };
+  }
+
+  if (
+    normalizedSku.includes("_msh_persofee") ||
+    normalizedSku.includes("persofee") ||
+    normalizedSku.includes("personalisation-fee") ||
+    normalizedSku.includes("personalization-fee")
+  ) {
+    return { feeOrSystem: true, reason: "sku_fee_marker" };
+  }
+
+  return { feeOrSystem: false, reason: "not_fee_or_system" };
 }
 
 function normalizeStringValue(value) {
@@ -132,13 +161,15 @@ function shouldFulfillNowForMode(mode, takeNow) {
   return false;
 }
 
-function evaluateLineEligibility(attributes = {}) {
+function evaluateLineEligibility({ attributes = {}, title = "", sku = "" } = {}) {
   const source = normalizeSource(attributes._msh_source);
   const rawMode = attributes._msh_fulfillment_mode || attributes._msh_fulfilment_mode;
   const mode = normalizeMode(rawMode);
   const rawTakeNow = attributes._msh_take_now;
   const takeNow = normalizeTakeNow(rawTakeNow);
-  const feeOrSystem = isFeeOrSystemLine(attributes);
+  const feeClassification = classifyFeeOrSystemLine({ attributes, title, sku });
+  const feeOrSystem = feeClassification.feeOrSystem;
+  const feeOrSystemReason = feeClassification.reason;
   const eligible = source === "macron_pos" && !feeOrSystem && shouldFulfillNowForMode(mode, takeNow);
 
   return {
@@ -148,6 +179,7 @@ function evaluateLineEligibility(attributes = {}) {
     rawTakeNow: rawTakeNow == null ? "" : String(rawTakeNow),
     takeNow,
     feeOrSystem,
+    feeOrSystemReason,
     eligible,
   };
 }
@@ -163,9 +195,32 @@ function summarizeAttributes(attributes = {}) {
         "Fee For Product",
         "Linked Product Variant Id",
         "Linked Fee Variant Id",
+        "_MSH_PersoFee",
       ].includes(key),
     ),
   );
+}
+
+async function diagnoseAdminUnavailable(shop) {
+  const details = {
+    offlineSessionLookupAttempted: false,
+    foundSessions: 0,
+    foundOfflineSessions: 0,
+    lookupError: "",
+  };
+
+  if (!shop) return details;
+
+  try {
+    details.offlineSessionLookupAttempted = true;
+    const sessions = await sessionStorage.findSessionsByShop(shop);
+    details.foundSessions = sessions.length;
+    details.foundOfflineSessions = sessions.filter((session) => !session?.isOnline).length;
+  } catch (error) {
+    details.lookupError = error?.message || String(error);
+  }
+
+  return details;
 }
 
 function splitBundleItemValue(rawValue) {
@@ -316,8 +371,21 @@ export const action = async ({ request }) => {
     );
 
     if (!admin) {
-      logDebugError("EARLY EXIT", `reason=admin client unavailable shop=${shop}`);
-      logDebug("FINAL RESULT: failed", "reason=admin client unavailable");
+      const adminDiag = await diagnoseAdminUnavailable(shop);
+      logDebugError(
+        "EARLY EXIT",
+        `reason=admin client unavailable shop=${shop} order_id=${payload?.id || "unknown"} offline_lookup_attempted=${
+          adminDiag.offlineSessionLookupAttempted
+        } found_sessions=${adminDiag.foundSessions} found_offline_sessions=${adminDiag.foundOfflineSessions} lookup_error=${
+          adminDiag.lookupError || "none"
+        }`,
+      );
+      logDebug(
+        "FINAL RESULT: failed",
+        `reason=admin client unavailable shop=${shop} order_id=${payload?.id || "unknown"} offline_lookup_attempted=${
+          adminDiag.offlineSessionLookupAttempted
+        }`,
+      );
       return new Response();
     }
 
@@ -392,21 +460,38 @@ export const action = async ({ request }) => {
 
     for (const orderLine of order.lineItems?.nodes || []) {
       const attributes = attributeMap(orderLine.customAttributes);
-      const { source, rawMode, mode, rawTakeNow, takeNow, eligible, feeOrSystem } = evaluateLineEligibility(attributes);
+      const { source, rawMode, mode, rawTakeNow, takeNow, eligible, feeOrSystem, feeOrSystemReason } =
+        evaluateLineEligibility({
+          attributes,
+          title: orderLine?.title || "",
+          sku: orderLine?.sku || "",
+        });
       const orderLineGid = String(orderLine?.id || "");
       const orderLineNumericId = parseNumericId(orderLineGid);
       const parsedBundleComponents = parseBundleComponentsFromAttributes(attributes, mode, takeNow);
       const isBundleParent = Array.isArray(parsedBundleComponents) && parsedBundleComponents.length > 0;
-      const effectiveEligible = isBundleParent ? false : eligible;
+      const effectiveEligible = eligible;
 
       if (feeOrSystem) feeSystemCount += 1;
       if (mode === "order_in") orderInCount += 1;
-      if (mode === "take_today" && source === "macron_pos" && !feeOrSystem && !isBundleParent) takeTodayEligibleCount += 1;
-      if (mode === "split" && source === "macron_pos" && !feeOrSystem && takeNow === true && !isBundleParent) splitEligibleCount += 1;
+      if (mode === "take_today" && source === "macron_pos" && !feeOrSystem) takeTodayEligibleCount += 1;
+      if (mode === "split" && source === "macron_pos" && !feeOrSystem && takeNow === true) splitEligibleCount += 1;
+
+      if (isBundleParent) {
+        logDebug(
+          "BUNDLE PARENT EVALUATION",
+          `order_line_id=${orderLineGid} title=${orderLine?.title || ""} mode=${mode || "missing"} take_now=${
+            takeNow === null ? "null" : String(takeNow)
+          } fee_or_system=${String(feeOrSystem)} fee_reason=${feeOrSystemReason} eligible=${String(
+            effectiveEligible,
+          )} fallback_parent_line_used=${String(effectiveEligible)}`,
+        );
+      }
 
       const decision = {
         orderLineGid,
         title: orderLine?.title || "",
+        sku: orderLine?.sku || "",
         quantity: Number(orderLine?.quantity || 0),
         source,
         rawMode,
@@ -414,6 +499,7 @@ export const action = async ({ request }) => {
         rawTakeNow,
         parsedTakeNow: takeNow,
         feeOrSystem,
+        feeOrSystemReason,
         isBundleParent,
         bundleComponents: parsedBundleComponents || [],
         eligible: effectiveEligible,
@@ -425,6 +511,7 @@ export const action = async ({ request }) => {
         id: orderLineGid,
         numericId: orderLineNumericId,
         title: orderLine?.title || "",
+        sku: orderLine?.sku || "",
         quantity: Number(orderLine?.quantity || 0),
         attributes: summarizeAttributes(attributes),
         eligibility: {
@@ -432,6 +519,7 @@ export const action = async ({ request }) => {
           mode,
           takeNow,
           feeOrSystem,
+          feeOrSystemReason,
           isBundleParent,
           eligible: effectiveEligible,
         },
@@ -441,6 +529,7 @@ export const action = async ({ request }) => {
         orderLineGid,
         orderLineNumericId,
         title: orderLine?.title || "",
+        sku: orderLine?.sku || "",
         quantity: Number(orderLine?.quantity || 0),
         source,
         mode,
@@ -557,11 +646,17 @@ export const action = async ({ request }) => {
 
       logDebug("BUNDLE COMPONENT MAPPING JSON", `order_id=${order.id} data=${JSON.stringify(bundleMappings)}`);
       if (unmatchedBundleComponents.length > 0) {
-        logDebugError(
+        logDebug(
           "BUNDLE COMPONENTS UNMATCHED",
-          `order_id=${order.id} data=${JSON.stringify(unmatchedBundleComponents)}`,
+          `order_id=${order.id} unmatched_count=${unmatchedBundleComponents.length} bypassed_for_parent_line_fulfillment=true data=${JSON.stringify(
+            unmatchedBundleComponents,
+          )}`,
         );
       }
+      logDebug(
+        "BUNDLE COMPONENT MATCHING STATUS",
+        `order_id=${order.id} candidate_child_lines=${candidateLines.length} parent_fallback_mode=enabled`,
+      );
     }
     logDebug("ORDER LINE DECISIONS JSON", `order_id=${order.id} data=${JSON.stringify(lineDecisions)}`);
     logDebug("SIMPLIFIED ORDER LINES JSON", `order_id=${order.id} data=${JSON.stringify(simplifiedOrderLines)}`);
