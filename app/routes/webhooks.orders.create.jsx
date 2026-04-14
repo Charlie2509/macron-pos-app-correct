@@ -1,3 +1,4 @@
+import db from "../db.server";
 import { authenticate, sessionStorage } from "../shopify.server";
 
 const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
@@ -64,6 +65,7 @@ const FULFILLMENT_CREATE_MUTATION = `#graphql
 `;
 
 const DEBUG_MARKER = "[MSH-FULFILL-DEBUG]";
+const PENDING_INTENT_MATCH_WINDOW_MS = 1000 * 60 * 10;
 
 function logDebug(stage, details = "") {
   if (details) {
@@ -442,6 +444,144 @@ function toOrderGid(payload) {
   return null;
 }
 
+function isLikelyPosSourceName(sourceName) {
+  const normalized = normalizeStringValue(sourceName);
+  return normalized === "pos" || normalized.includes("pos");
+}
+
+function getOrderLineTitleQuantitySummary(orderLineNodes = []) {
+  return (orderLineNodes || [])
+    .map((line) => ({
+      title: String(line?.title || "").trim(),
+      quantity: Number(line?.quantity || 0),
+      sku: String(line?.sku || "").trim(),
+      attributes: attributeMap(line?.customAttributes),
+    }))
+    .filter((line) => {
+      if (!line.title || line.quantity <= 0) return false;
+      const feeClassification = classifyFeeOrSystemLine({
+        attributes: line.attributes,
+        title: line.title,
+        sku: line.sku,
+      });
+      return !feeClassification.feeOrSystem;
+    });
+}
+
+function evaluatePendingIntentCandidateMatch(intent, orderLineSummary = []) {
+  const normalizedIntentProductTitle = normalizeStringValue(intent.productTitle);
+  const normalizedIntentVariantTitle = normalizeStringValue(intent.variantTitle);
+  const intentQty = Number(intent.quantity || 0);
+  const reasons = [];
+  let matchedLine = null;
+
+  for (const line of orderLineSummary) {
+    const normalizedLineTitle = normalizeStringValue(line.title);
+    if (normalizedLineTitle !== normalizedIntentProductTitle) continue;
+    if (intentQty > 0 && intentQty !== Number(line.quantity || 0)) continue;
+    matchedLine = line;
+    reasons.push("product_title+quantity");
+    break;
+  }
+
+  if (!matchedLine) {
+    return { matched: false, reasons: ["no_product_title_quantity_match"], score: 0 };
+  }
+
+  let score = 2;
+  if (normalizedIntentVariantTitle) {
+    const variantFound = orderLineSummary.some((line) =>
+      normalizeStringValue(line.title).includes(normalizedIntentVariantTitle),
+    );
+    if (variantFound) {
+      reasons.push("variant_title_hint");
+      score += 1;
+    } else {
+      reasons.push("variant_title_missing_in_order");
+    }
+  }
+
+  if (intent.isBundle) {
+    reasons.push("bundle_intent");
+    if (orderLineSummary.length > 1) score += 1;
+  }
+
+  return { matched: true, reasons, score };
+}
+
+async function tryMatchPendingIntent({ shop, payloadSourceName, order }) {
+  const shouldAttempt = isLikelyPosSourceName(payloadSourceName);
+  if (!shouldAttempt) {
+    return {
+      attempted: false,
+      reason: "source_name_not_pos",
+      candidates: [],
+      matchedIntent: null,
+    };
+  }
+
+  const now = new Date();
+  const earliest = new Date(now.getTime() - PENDING_INTENT_MATCH_WINDOW_MS);
+  const orderLineSummary = getOrderLineTitleQuantitySummary(order?.lineItems?.nodes || []);
+  const pendingIntents = await db.pendingMacronPosIntent.findMany({
+    where: {
+      shop,
+      source: "macron_pos",
+      consumedAt: null,
+      expiresAt: { gt: now },
+      createdAt: { gte: earliest },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 25,
+  });
+
+  const evaluatedCandidates = pendingIntents.map((intent) => {
+    const evaluation = evaluatePendingIntentCandidateMatch(intent, orderLineSummary);
+    return {
+      intent,
+      matched: evaluation.matched,
+      reasons: evaluation.reasons,
+      score: evaluation.score,
+    };
+  });
+
+  const matchedCandidates = evaluatedCandidates.filter((candidate) => candidate.matched);
+  if (matchedCandidates.length !== 1) {
+    return {
+      attempted: true,
+      reason: matchedCandidates.length === 0 ? "no_candidate_match" : "ambiguous_matches",
+      candidates: evaluatedCandidates.map((candidate) => ({
+        id: candidate.intent.id,
+        matched: candidate.matched,
+        score: candidate.score,
+        reasons: candidate.reasons,
+      })),
+      matchedIntent: null,
+    };
+  }
+
+  const matchedIntent = matchedCandidates[0].intent;
+  await db.pendingMacronPosIntent.update({
+    where: { id: matchedIntent.id },
+    data: {
+      consumedAt: now,
+      matchedOrderId: String(order?.id || ""),
+    },
+  });
+
+  return {
+    attempted: true,
+    reason: "single_match",
+    candidates: evaluatedCandidates.map((candidate) => ({
+      id: candidate.intent.id,
+      matched: candidate.matched,
+      score: candidate.score,
+      reasons: candidate.reasons,
+    })),
+    matchedIntent,
+  };
+}
+
 async function queryOrderWithRetry(admin, orderGid, options = {}) {
   const attempts = Number(options.attempts || 8);
   const baseDelayMs = Number(options.baseDelayMs || 600);
@@ -599,7 +739,7 @@ export const action = async ({ request }) => {
     const recognizedByFallbackMarker = fallbackMarkerFoundInRawPayload || fallbackMarkerFoundAfterFetch;
     const recognizedByOrderFallbackMarker = payloadOrderFallback.markerFound || orderFallbackAfterFetch.markerFound;
     const recognizedByDurableNoteMarker = payloadDurableNote.markerFound || fetchedOrderDurableNote.markerFound;
-    const markerRecognitionPath = recognizedByLineMarker
+    let markerRecognitionPath = recognizedByLineMarker
       ? "line_item_marker"
       : recognizedByFallbackMarker
         ? "fallback_marker"
@@ -643,14 +783,30 @@ export const action = async ({ request }) => {
       } bundle_summary_present=${String(Boolean(resolvedDurableNoteFallback.bundleSummary))}`,
     );
 
-    if (!recognizedByLineMarker && !recognizedByFallbackMarker && !recognizedByOrderFallbackMarker && !recognizedByDurableNoteMarker) {
+    const pendingIntentMatch = await tryMatchPendingIntent({
+      shop,
+      payloadSourceName,
+      order,
+    });
+    const recognizedByPendingIntent = Boolean(pendingIntentMatch.matchedIntent);
+    if (!recognizedByLineMarker && !recognizedByFallbackMarker && !recognizedByOrderFallbackMarker && !recognizedByDurableNoteMarker && recognizedByPendingIntent) {
+      markerRecognitionPath = "pending_intent";
+    }
+    logDebug(
+      "PENDING INTENT MATCH",
+      `order_id=${order.id} attempted=${String(pendingIntentMatch.attempted)} reason=${pendingIntentMatch.reason} candidate_count=${
+        pendingIntentMatch.candidates.length
+      } matched_intent_id=${pendingIntentMatch.matchedIntent?.id || "none"} candidates=${JSON.stringify(pendingIntentMatch.candidates)} final_recognition_path=${markerRecognitionPath}`,
+    );
+
+    if (!recognizedByLineMarker && !recognizedByFallbackMarker && !recognizedByOrderFallbackMarker && !recognizedByDurableNoteMarker && !recognizedByPendingIntent) {
       logDebugError(
         "EARLY EXIT",
-        `reason=no Macron POS marker in payload_or_fetched_order order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} durable_note_marker=[MSH_POS] source=macron_pos source_name=${
+        `reason=no Macron POS marker or pending_intent_match order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} durable_note_marker=[MSH_POS] source=macron_pos source_name=${
           payloadSourceName || "unknown"
-        }`,
+        } pending_intent_attempted=${String(pendingIntentMatch.attempted)} pending_intent_reason=${pendingIntentMatch.reason}`,
       );
-      logDebug("FINAL RESULT: skipped", "reason=no Macron POS marker in payload or fetched order");
+      logDebug("FINAL RESULT: skipped", "reason=no Macron POS marker or pending intent match");
       return new Response();
     }
     logDebug(
@@ -659,7 +815,9 @@ export const action = async ({ request }) => {
         recognizedByFallbackMarker,
       )} order_fallback_marker_found=${String(recognizedByOrderFallbackMarker)} note_marker_found=${String(
         recognizedByDurableNoteMarker,
-      )} recognition_path=${markerRecognitionPath}`,
+      )} pending_intent_found=${String(recognizedByPendingIntent)} pending_intent_id=${
+        pendingIntentMatch.matchedIntent?.id || "none"
+      } recognition_path=${markerRecognitionPath}`,
     );
     if (!recognizedByLineMarker && recognizedByFallbackMarker) {
       logDebug(
@@ -698,6 +856,12 @@ export const action = async ({ request }) => {
     let splitEligibleCount = 0;
     let orderInCount = 0;
     let feeSystemCount = 0;
+    const pendingIntentFallbackOnly =
+      !recognizedByLineMarker &&
+      !recognizedByFallbackMarker &&
+      !recognizedByOrderFallbackMarker &&
+      !recognizedByDurableNoteMarker &&
+      recognizedByPendingIntent;
     const orderLevelFallbackOnly =
       !recognizedByLineMarker &&
       !recognizedByFallbackMarker &&
@@ -719,30 +883,42 @@ export const action = async ({ request }) => {
         orderLevelFallbackOnly && !feeOrSystem && mode === "" ? resolvedIntentFallback.mode : mode;
       const recoveredTakeNow =
         orderLevelFallbackOnly && !feeOrSystem && takeNow === null ? resolvedIntentFallback.takeNow : takeNow;
+      const effectiveSource =
+        pendingIntentFallbackOnly && !feeOrSystem && recoveredSource !== "macron_pos" ? "macron_pos" : recoveredSource;
+      const effectiveMode =
+        pendingIntentFallbackOnly && !feeOrSystem && recoveredMode === ""
+          ? normalizeMode(pendingIntentMatch.matchedIntent?.fulfillmentMode)
+          : recoveredMode;
+      const effectiveTakeNow =
+        pendingIntentFallbackOnly && !feeOrSystem && recoveredTakeNow === null
+          ? pendingIntentMatch.matchedIntent?.takeNow
+          : recoveredTakeNow;
       const recoveredEligible =
-        recoveredSource === "macron_pos" &&
+        effectiveSource === "macron_pos" &&
         !feeOrSystem &&
-        shouldFulfillNowForMode(recoveredMode, recoveredTakeNow);
+        shouldFulfillNowForMode(effectiveMode, effectiveTakeNow);
       const intentRecoverySource =
         recoveredEligible && !eligible
           ? resolvedOrderFallback.markerFound
             ? "order_level_fallback"
-            : "durable_note_fallback"
+            : pendingIntentFallbackOnly
+              ? "pending_intent_fallback"
+              : "durable_note_fallback"
           : "line_level";
       const orderLineGid = String(orderLine?.id || "");
       const orderLineNumericId = parseNumericId(orderLineGid);
       const parsedBundleComponents = parseBundleComponentsFromAttributes(
         attributes,
-        recoveredMode,
-        recoveredTakeNow,
+        effectiveMode,
+        effectiveTakeNow,
       );
       const isBundleParent = Array.isArray(parsedBundleComponents) && parsedBundleComponents.length > 0;
       const effectiveEligible = recoveredEligible;
 
       if (feeOrSystem) feeSystemCount += 1;
-      if (recoveredMode === "order_in") orderInCount += 1;
-      if (recoveredMode === "take_today" && recoveredSource === "macron_pos" && !feeOrSystem) takeTodayEligibleCount += 1;
-      if (recoveredMode === "split" && recoveredSource === "macron_pos" && !feeOrSystem && recoveredTakeNow === true)
+      if (effectiveMode === "order_in") orderInCount += 1;
+      if (effectiveMode === "take_today" && effectiveSource === "macron_pos" && !feeOrSystem) takeTodayEligibleCount += 1;
+      if (effectiveMode === "split" && effectiveSource === "macron_pos" && !feeOrSystem && effectiveTakeNow === true)
         splitEligibleCount += 1;
 
       if (isBundleParent) {
@@ -750,8 +926,8 @@ export const action = async ({ request }) => {
           "BUNDLE PARENT EVALUATION",
           `order_line_id=${orderLineGid} title=${orderLine?.title || ""} mode=${mode || "missing"} take_now=${
             takeNow === null ? "null" : String(takeNow)
-          } recovered_mode=${recoveredMode || "missing"} recovered_take_now=${
-            recoveredTakeNow === null ? "null" : String(recoveredTakeNow)
+          } recovered_mode=${effectiveMode || "missing"} recovered_take_now=${
+            effectiveTakeNow === null ? "null" : String(effectiveTakeNow)
           } fee_or_system=${String(feeOrSystem)} fee_reason=${feeOrSystemReason} eligible=${String(
             effectiveEligible,
           )} fallback_parent_line_used=${String(effectiveEligible)} intent_recovery_source=${intentRecoverySource}`,
@@ -763,11 +939,11 @@ export const action = async ({ request }) => {
         title: orderLine?.title || "",
         sku: orderLine?.sku || "",
         quantity: Number(orderLine?.quantity || 0),
-        source: recoveredSource,
+        source: effectiveSource,
         rawMode,
-        parsedMode: recoveredMode,
+        parsedMode: effectiveMode,
         rawTakeNow,
-        parsedTakeNow: recoveredTakeNow,
+        parsedTakeNow: effectiveTakeNow,
         feeOrSystem,
         feeOrSystemReason,
         isBundleParent,
@@ -786,9 +962,9 @@ export const action = async ({ request }) => {
         quantity: Number(orderLine?.quantity || 0),
         attributes: summarizeAttributes(attributes),
         eligibility: {
-          source: recoveredSource,
-          mode: recoveredMode,
-          takeNow: recoveredTakeNow,
+          source: effectiveSource,
+          mode: effectiveMode,
+          takeNow: effectiveTakeNow,
           feeOrSystem,
           feeOrSystemReason,
           isBundleParent,
@@ -803,9 +979,9 @@ export const action = async ({ request }) => {
         title: orderLine?.title || "",
         sku: orderLine?.sku || "",
         quantity: Number(orderLine?.quantity || 0),
-        source: recoveredSource,
-        mode: recoveredMode,
-        takeNow: recoveredTakeNow,
+        source: effectiveSource,
+        mode: effectiveMode,
+        takeNow: effectiveTakeNow,
         feeOrSystem,
         isBundleParent,
         attributes,
@@ -828,8 +1004,8 @@ export const action = async ({ request }) => {
           orderLineNumericId,
           title: orderLine?.title || "",
           quantity: Number(orderLine?.quantity || 0),
-          mode: recoveredMode,
-          takeNow: recoveredTakeNow,
+          mode: effectiveMode,
+          takeNow: effectiveTakeNow,
         });
       }
     }

@@ -550,6 +550,45 @@ function buildMshDurableNoteProperties(token) {
   };
 }
 
+function buildPendingIntentBundleSummary(rawProperties, bundleAttachConfig) {
+  var properties = sanitizeLineItemProperties(rawProperties);
+  var summary = '';
+  if (bundleAttachConfig && bundleAttachConfig.enabled && bundleAttachConfig.readableProperties) {
+    var readableProps = sanitizeLineItemProperties(bundleAttachConfig.readableProperties);
+    summary = toStr(
+      readableProps['Bundle Take Now Summary'] || readableProps['Bundle Summary'] || readableProps['Bundle Order Later Summary'],
+    );
+  }
+  if (summary === '') {
+    summary = toStr(properties['Bundle Take Now Summary'] || properties['Bundle Summary'] || properties['Bundle Order Later Summary']);
+  }
+  return summary;
+}
+
+async function resolveShopDomainForIntentPost() {
+  try {
+    var response = await fetch('shopify:admin/api/graphql.json', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: 'query MacronPosIntentShopDomain { shop { myshopifyDomain } }'}),
+    });
+    var body = await response.json();
+    var domain = toStr(body && body.data && body.data.shop ? body.data.shop.myshopifyDomain : '');
+    return domain;
+  } catch (error) {
+    console.error('[MSH PendingIntent] shop domain lookup failed=', error && error.message ? error.message : String(error));
+    return '';
+  }
+}
+
+function resolvePendingIntentEndpoint() {
+  var runtimeAppUrl = typeof globalThis !== 'undefined' && globalThis && globalThis.SHOPIFY_APP_URL ? toStr(globalThis.SHOPIFY_APP_URL) : '';
+  if (runtimeAppUrl !== '') {
+    return runtimeAppUrl.replace(/\/$/, '') + '/api/macron-pos/intent';
+  }
+  return '/api/macron-pos/intent';
+}
+
 function bundleComponentLineText(index, componentTitle, variantTitle) {
   return String(index) + '. ' + toStr(componentTitle) + ' — ' + toStr(variantTitle);
 }
@@ -2858,6 +2897,53 @@ function Modal() {
       } else {
         setLastFeeVariantStatus('skipped');
         setLastFeePropertiesAttachStatus('skipped');
+      }
+
+      var pendingIntentMode = toStr(propertiesObject._msh_fulfilment_mode || propertiesObject._msh_fulfillment_mode || 'take_today');
+      var pendingIntentTakeNow = toStr(propertiesObject._msh_take_now);
+      var pendingIntentBundleSummary = buildPendingIntentBundleSummary(propertiesObject, bundleAttachConfig);
+      var pendingIntentShop = await resolveShopDomainForIntentPost();
+      var pendingIntentPayload = {
+        shop: pendingIntentShop,
+        source: 'macron_pos',
+        fulfillmentMode: pendingIntentMode,
+        takeNow: pendingIntentTakeNow,
+        productTitle: product && product.title ? String(product.title) : '',
+        variantTitle: variant && variant.title ? String(variant.title) : '',
+        normalizedVariantId: String(normalized.value),
+        quantity: 1,
+        hasFee: feeRequired,
+        isBundle: Boolean(bundleAttachConfig && bundleAttachConfig.enabled),
+        bundleSummary: pendingIntentBundleSummary,
+        createdAtClient: new Date().toISOString(),
+      };
+      console.log('[MSH PendingIntent] request endpoint=', resolvePendingIntentEndpoint());
+      console.log('[MSH PendingIntent] request payload=', pendingIntentPayload);
+      try {
+        var pendingIntentResponse = await fetch(resolvePendingIntentEndpoint(), {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(pendingIntentPayload),
+        });
+        var pendingIntentBody = null;
+        try {
+          pendingIntentBody = await pendingIntentResponse.json();
+        } catch (_pendingIntentParseError) {
+          pendingIntentBody = null;
+        }
+        console.log(
+          '[MSH PendingIntent] response status=',
+          pendingIntentResponse.status,
+          'ok=',
+          pendingIntentResponse.ok,
+          'body=',
+          pendingIntentBody,
+        );
+      } catch (pendingIntentError) {
+        console.error(
+          '[MSH PendingIntent] request failed error=',
+          pendingIntentError && pendingIntentError.message ? pendingIntentError.message : String(pendingIntentError),
+        );
       }
 
       console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
