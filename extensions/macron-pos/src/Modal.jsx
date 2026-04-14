@@ -1697,6 +1697,14 @@ function Modal() {
   var lastRollbackFeeLineRemoved = lastRollbackFeeLineRemovedState[0];
   var setLastRollbackFeeLineRemoved = lastRollbackFeeLineRemovedState[1];
 
+  var lastPingStatusState = useState('');
+  var lastPingStatus = lastPingStatusState[0];
+  var setLastPingStatus = lastPingStatusState[1];
+
+  var lastPingErrorState = useState('');
+  var lastPingError = lastPingErrorState[0];
+  var setLastPingError = lastPingErrorState[1];
+
   var lastEnteredPersonalisationState = useState(false);
   var lastEnteredPersonalisation = lastEnteredPersonalisationState[0];
   var setLastEnteredPersonalisation = lastEnteredPersonalisationState[1];
@@ -2791,6 +2799,8 @@ function Modal() {
     setLastRollbackDetail('');
     setLastRollbackMainLineRemoved(false);
     setLastRollbackFeeLineRemoved(false);
+    setLastPingStatus('');
+    setLastPingError('');
     if (!bundleAttachConfig || !bundleAttachConfig.enabled) {
       setBundleParentLineAdded(false);
       setBundleParentLineUuid('');
@@ -2972,8 +2982,10 @@ function Modal() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ test: true }),
           });
+          setLastPingStatus('status=' + pingResponse.status + ' ok=' + (pingResponse.ok ? 'true' : 'false'));
           console.log('[MSH PendingIntent] ping status=', pingResponse.status, 'ok=', pingResponse.ok);
         } catch (pingError) {
+          setLastPingError(pingError && pingError.message ? pingError.message : String(pingError));
           console.error(
             '[MSH PendingIntent] ping failed=',
             pingError && pingError.message ? pingError.message : String(pingError)
@@ -3490,6 +3502,8 @@ function Modal() {
           <s-text>Rollback detail: {lastRollbackDetail === '' ? 'none' : lastRollbackDetail}</s-text>
           <s-text>Main line removed during rollback: {lastRollbackMainLineRemoved ? 'yes' : 'no'}</s-text>
           <s-text>Fee line removed during rollback: {lastRollbackFeeLineRemoved ? 'yes' : 'no'}</s-text>
+          <s-text>Ping status: {lastPingStatus === '' ? 'none' : lastPingStatus}</s-text>
+          <s-text>Ping error: {lastPingError === '' ? 'none' : lastPingError}</s-text>
           <s-text>Last cart status: {lastCartActionStatus}</s-text>
           <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
           <s-text>Last fee error: {lastFeeErrorMessage === '' ? 'none' : lastFeeErrorMessage}</s-text>
