@@ -276,6 +276,59 @@ function parseOrderLevelFallbackMarker(attributes = {}) {
   };
 }
 
+function parseDurableNoteTokenFromText(rawText) {
+  const text = String(rawText == null ? "" : rawText);
+  const tokenMatch = text.match(/\[MSH_POS\]\s*([^\n\r]+)/i);
+  if (!tokenMatch) {
+    return {
+      tokenFound: false,
+      token: "",
+      source: "",
+      mode: "",
+      takeNow: null,
+      bundleSummary: "",
+      markerFound: false,
+    };
+  }
+  const token = `[MSH_POS] ${String(tokenMatch[1] || "").trim()}`.trim();
+  const body = String(tokenMatch[1] || "");
+  const parts = body.split(";");
+  const parsed = {};
+  for (const part of parts) {
+    const entry = String(part || "").trim();
+    if (!entry) continue;
+    const eqIndex = entry.indexOf("=");
+    if (eqIndex <= 0) continue;
+    const key = normalizeStringValue(entry.slice(0, eqIndex));
+    const value = String(entry.slice(eqIndex + 1) || "").trim();
+    if (!key) continue;
+    parsed[key] = value;
+  }
+
+  const source = normalizeSource(parsed.source);
+  const mode = normalizeMode(parsed.mode);
+  const takeNow = normalizeTakeNow(parsed.take_now);
+  const bundleSummary = String(parsed.bundle || "").trim();
+
+  return {
+    tokenFound: true,
+    token,
+    source,
+    mode,
+    takeNow,
+    bundleSummary,
+    markerFound: source === "macron_pos",
+  };
+}
+
+function parseDurableNoteTokenFromSources(...sources) {
+  for (const source of sources) {
+    const parsed = parseDurableNoteTokenFromText(source);
+    if (parsed.tokenFound) return parsed;
+  }
+  return parseDurableNoteTokenFromText("");
+}
+
 async function diagnoseAdminUnavailable(shop) {
   const details = {
     offlineSessionLookupAttempted: false,
@@ -472,6 +525,11 @@ export const action = async ({ request }) => {
     const payloadLineProperties = payloadLinePropertiesMap(payloadLineItems);
     const payloadNoteAttributes = payloadNoteAttributesMap(payload?.note_attributes || []);
     const payloadOrderFallback = parseOrderLevelFallbackMarker(payloadNoteAttributes);
+    const payloadDurableNote = parseDurableNoteTokenFromSources(
+      payload?.note,
+      payloadNoteAttributes._msh_pos_note_token,
+      ...Object.values(payloadNoteAttributes),
+    );
     const markedPayloadLines = payloadLineProperties.filter(
       (line) => normalizeSource(line.properties[expectedMarkerKey]) === expectedMarkerValue,
     );
@@ -490,7 +548,11 @@ export const action = async ({ request }) => {
         fallbackMarkerFoundInRawPayload,
       )} fallback_marked_line_count=${fallbackMarkedPayloadLines.length} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} order_fallback_found_in_raw_payload=${String(
         payloadOrderFallback.markerFound,
-      )} payload_line_count=${payloadLineItems.length} payload_note_attribute_count=${Object.keys(payloadNoteAttributes).length} source_name=${
+      )} note_token_found_in_raw_payload=${String(payloadDurableNote.tokenFound)} note_marker_found_in_raw_payload=${String(
+        payloadDurableNote.markerFound,
+      )} note_source=${payloadDurableNote.source || "missing"} note_mode=${payloadDurableNote.mode || "missing"} note_take_now=${
+        payloadDurableNote.takeNow === null ? "null" : String(payloadDurableNote.takeNow)
+      } payload_line_count=${payloadLineItems.length} payload_note_attribute_count=${Object.keys(payloadNoteAttributes).length} source_name=${
         payloadSourceName || "unknown"
       }`,
     );
@@ -527,17 +589,25 @@ export const action = async ({ request }) => {
     const fallbackMarkerFoundAfterFetch = hasMacronPosFallbackMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
     const fetchedOrderAttributes = attributeMap(order.customAttributes || []);
     const orderFallbackAfterFetch = parseOrderLevelFallbackMarker(fetchedOrderAttributes);
+    const fetchedOrderDurableNote = parseDurableNoteTokenFromSources(
+      order?.note,
+      fetchedOrderAttributes._msh_pos_note_token,
+      ...Object.values(fetchedOrderAttributes),
+    );
     const usedFallbackOrderFetchForMarkerDetection = !markerFoundInRawPayload;
     const recognizedByLineMarker = markerFoundInRawPayload || markerFoundAfterFetch;
     const recognizedByFallbackMarker = fallbackMarkerFoundInRawPayload || fallbackMarkerFoundAfterFetch;
     const recognizedByOrderFallbackMarker = payloadOrderFallback.markerFound || orderFallbackAfterFetch.markerFound;
+    const recognizedByDurableNoteMarker = payloadDurableNote.markerFound || fetchedOrderDurableNote.markerFound;
     const markerRecognitionPath = recognizedByLineMarker
       ? "line_item_marker"
       : recognizedByFallbackMarker
         ? "fallback_marker"
         : recognizedByOrderFallbackMarker
           ? "order_level_fallback_marker"
-        : "none";
+          : recognizedByDurableNoteMarker
+            ? "durable_note_marker"
+            : "none";
     logDebug(
       "MARKER DETECTION POST FETCH",
       `order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} used_fallback_fetch=${String(
@@ -546,10 +616,16 @@ export const action = async ({ request }) => {
         fallbackMarkerFoundAfterFetch,
       )} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} order_fallback_found_after_fetch=${String(
         orderFallbackAfterFetch.markerFound,
-      )} marker_recognition_path=${markerRecognitionPath}`,
+      )} note_token_found_after_fetch=${String(fetchedOrderDurableNote.tokenFound)} note_marker_found_after_fetch=${String(
+        fetchedOrderDurableNote.markerFound,
+      )} note_source=${fetchedOrderDurableNote.source || "missing"} note_mode=${fetchedOrderDurableNote.mode || "missing"} note_take_now=${
+        fetchedOrderDurableNote.takeNow === null ? "null" : String(fetchedOrderDurableNote.takeNow)
+      } marker_recognition_path=${markerRecognitionPath}`,
     );
 
     const resolvedOrderFallback = orderFallbackAfterFetch.markerFound ? orderFallbackAfterFetch : payloadOrderFallback;
+    const resolvedDurableNoteFallback = fetchedOrderDurableNote.markerFound ? fetchedOrderDurableNote : payloadDurableNote;
+    const resolvedIntentFallback = resolvedOrderFallback.markerFound ? resolvedOrderFallback : resolvedDurableNoteFallback;
     logDebug(
       "ORDER-LEVEL FALLBACK INTENT",
       `order_id=${order.id} found=${String(resolvedOrderFallback.markerFound)} source=${resolvedOrderFallback.source || "missing"} mode=${
@@ -558,11 +634,19 @@ export const action = async ({ request }) => {
         resolvedOrderFallback.takeNow === null ? "null" : String(resolvedOrderFallback.takeNow)
       } bundle_summary_present=${String(Boolean(resolvedOrderFallback.bundleSummary))}`,
     );
+    logDebug(
+      "DURABLE NOTE FALLBACK INTENT",
+      `order_id=${order.id} found=${String(resolvedDurableNoteFallback.markerFound)} source=${resolvedDurableNoteFallback.source || "missing"} mode=${
+        resolvedDurableNoteFallback.mode || "missing"
+      } take_now=${
+        resolvedDurableNoteFallback.takeNow === null ? "null" : String(resolvedDurableNoteFallback.takeNow)
+      } bundle_summary_present=${String(Boolean(resolvedDurableNoteFallback.bundleSummary))}`,
+    );
 
-    if (!recognizedByLineMarker && !recognizedByFallbackMarker && !recognizedByOrderFallbackMarker) {
+    if (!recognizedByLineMarker && !recognizedByFallbackMarker && !recognizedByOrderFallbackMarker && !recognizedByDurableNoteMarker) {
       logDebugError(
         "EARLY EXIT",
-        `reason=no Macron POS marker in payload_or_fetched_order order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} source_name=${
+        `reason=no Macron POS marker in payload_or_fetched_order order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} durable_note_marker=[MSH_POS] source=macron_pos source_name=${
           payloadSourceName || "unknown"
         }`,
       );
@@ -573,7 +657,9 @@ export const action = async ({ request }) => {
       "MARKER DETECTION DECISION",
       `order_id=${order.id} line_marker_found=${String(recognizedByLineMarker)} fallback_marker_found=${String(
         recognizedByFallbackMarker,
-      )} order_fallback_marker_found=${String(recognizedByOrderFallbackMarker)} recognition_path=${markerRecognitionPath}`,
+      )} order_fallback_marker_found=${String(recognizedByOrderFallbackMarker)} note_marker_found=${String(
+        recognizedByDurableNoteMarker,
+      )} recognition_path=${markerRecognitionPath}`,
     );
     if (!recognizedByLineMarker && recognizedByFallbackMarker) {
       logDebug(
@@ -585,6 +671,17 @@ export const action = async ({ request }) => {
       logDebug(
         "MARKER FALLBACK RECOVERY",
         `order_id=${order.id} likely_live_pos_property_stripping=true line_marker_found=false fallback_marker_found=false order_fallback_marker_found=true`,
+      );
+    }
+    if (
+      !recognizedByLineMarker &&
+      !recognizedByFallbackMarker &&
+      !recognizedByOrderFallbackMarker &&
+      recognizedByDurableNoteMarker
+    ) {
+      logDebug(
+        "MARKER FALLBACK RECOVERY",
+        `order_id=${order.id} likely_live_pos_property_stripping=true line_marker_found=false fallback_marker_found=false order_fallback_marker_found=false note_marker_found=true`,
       );
     }
 
@@ -601,7 +698,10 @@ export const action = async ({ request }) => {
     let splitEligibleCount = 0;
     let orderInCount = 0;
     let feeSystemCount = 0;
-    const orderLevelFallbackOnly = !recognizedByLineMarker && !recognizedByFallbackMarker && recognizedByOrderFallbackMarker;
+    const orderLevelFallbackOnly =
+      !recognizedByLineMarker &&
+      !recognizedByFallbackMarker &&
+      (recognizedByOrderFallbackMarker || recognizedByDurableNoteMarker);
 
     const allOrderLines = [];
     const bundleParents = [];
@@ -616,14 +716,19 @@ export const action = async ({ request }) => {
         });
       const recoveredSource = orderLevelFallbackOnly && !feeOrSystem && source !== "macron_pos" ? "macron_pos" : source;
       const recoveredMode =
-        orderLevelFallbackOnly && !feeOrSystem && mode === "" ? resolvedOrderFallback.mode : mode;
+        orderLevelFallbackOnly && !feeOrSystem && mode === "" ? resolvedIntentFallback.mode : mode;
       const recoveredTakeNow =
-        orderLevelFallbackOnly && !feeOrSystem && takeNow === null ? resolvedOrderFallback.takeNow : takeNow;
+        orderLevelFallbackOnly && !feeOrSystem && takeNow === null ? resolvedIntentFallback.takeNow : takeNow;
       const recoveredEligible =
         recoveredSource === "macron_pos" &&
         !feeOrSystem &&
         shouldFulfillNowForMode(recoveredMode, recoveredTakeNow);
-      const intentRecoverySource = recoveredEligible && !eligible ? "order_level_fallback" : "line_level";
+      const intentRecoverySource =
+        recoveredEligible && !eligible
+          ? resolvedOrderFallback.markerFound
+            ? "order_level_fallback"
+            : "durable_note_fallback"
+          : "line_level";
       const orderLineGid = String(orderLine?.id || "");
       const orderLineNumericId = parseNumericId(orderLineGid);
       const parsedBundleComponents = parseBundleComponentsFromAttributes(
