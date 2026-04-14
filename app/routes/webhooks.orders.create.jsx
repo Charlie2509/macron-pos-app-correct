@@ -201,6 +201,27 @@ function summarizeAttributes(attributes = {}) {
   );
 }
 
+function payloadLinePropertiesMap(payloadLineItems = []) {
+  return payloadLineItems.map((line) => {
+    const properties = {};
+    for (const property of line?.properties || []) {
+      if (!property || typeof property.name !== "string") continue;
+      properties[property.name] = property.value == null ? "" : String(property.value);
+    }
+    return {
+      id: line?.id,
+      properties,
+    };
+  });
+}
+
+function hasMacronPosMarkerInOrderLineAttributes(orderLineNodes = []) {
+  return orderLineNodes.some((orderLine) => {
+    const attributes = attributeMap(orderLine?.customAttributes);
+    return normalizeSource(attributes._msh_source) === "macron_pos";
+  });
+}
+
 async function diagnoseAdminUnavailable(shop) {
   const details = {
     offlineSessionLookupAttempted: false,
@@ -389,29 +410,24 @@ export const action = async ({ request }) => {
       return new Response();
     }
 
+    const expectedMarkerKey = "_msh_source";
+    const expectedMarkerValue = "macron_pos";
     const payloadLineItems = Array.isArray(payload?.line_items) ? payload.line_items : [];
-    const markedPayloadLines = payloadLineItems
-      .map((line) => {
-        const properties = {};
-        for (const property of line?.properties || []) {
-          if (!property || typeof property.name !== "string") continue;
-          properties[property.name] = property.value == null ? "" : String(property.value);
-        }
-        return {
-          id: line?.id,
-          properties,
-        };
-      })
-      .filter((line) => normalizeSource(line.properties._msh_source) === "macron_pos");
+    const payloadLineProperties = payloadLinePropertiesMap(payloadLineItems);
+    const markedPayloadLines = payloadLineProperties.filter(
+      (line) => normalizeSource(line.properties[expectedMarkerKey]) === expectedMarkerValue,
+    );
+    const markerFoundInRawPayload = markedPayloadLines.length > 0;
+    const payloadSourceName = normalizeStringValue(payload?.source_name);
 
-    if (markedPayloadLines.length === 0) {
-      logDebugError(
-        "EARLY EXIT",
-        `reason=no Macron POS marker in payload order_id=${payload?.id || "unknown"}`,
-      );
-      logDebug("FINAL RESULT: skipped", "reason=no Macron POS marker in payload");
-      return new Response();
-    }
+    logDebug(
+      "MARKER DETECTION RAW PAYLOAD",
+      `order_id=${payload?.id || "unknown"} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} found_in_raw_payload=${String(
+        markerFoundInRawPayload,
+      )} marked_line_count=${markedPayloadLines.length} payload_line_count=${payloadLineItems.length} source_name=${
+        payloadSourceName || "unknown"
+      }`,
+    );
 
     const orderGid = toOrderGid(payload);
     logDebug("ORDER GID", `${orderGid || "missing"}`);
@@ -440,6 +456,26 @@ export const action = async ({ request }) => {
         order.displayFulfillmentStatus || "unknown"
       } retries_used=${orderLookup.attemptsUsed} exhausted=${String(orderLookup.exhausted)}`,
     );
+
+    const markerFoundAfterFetch = hasMacronPosMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
+    const usedFallbackOrderFetchForMarkerDetection = !markerFoundInRawPayload;
+    logDebug(
+      "MARKER DETECTION POST FETCH",
+      `order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} used_fallback_fetch=${String(
+        usedFallbackOrderFetchForMarkerDetection,
+      )} marker_found_after_fetch=${String(markerFoundAfterFetch)}`,
+    );
+
+    if (!markerFoundInRawPayload && !markerFoundAfterFetch) {
+      logDebugError(
+        "EARLY EXIT",
+        `reason=no Macron POS marker in payload_or_fetched_order order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} source_name=${
+          payloadSourceName || "unknown"
+        }`,
+      );
+      logDebug("FINAL RESULT: skipped", "reason=no Macron POS marker in payload or fetched order");
+      return new Response();
+    }
 
     const foNodes = order.fulfillmentOrders?.nodes || [];
     logDebug("FULFILLMENT ORDER COUNT", `order_id=${order.id} count=${foNodes.length}`);
