@@ -35,6 +35,13 @@ function normalizeQuantity(value) {
   return Math.floor(qty);
 }
 
+function normalizeVariantId(value) {
+  const raw = normalizeString(value);
+  if (!raw) return "";
+  const match = raw.match(/(\d+)(?:\?.*)?$/);
+  return match ? match[1] : raw;
+}
+
 function fingerprintForIntent(intent) {
   return [
     normalizeString(intent.productTitle).toLowerCase(),
@@ -74,11 +81,12 @@ export const action = async ({ request }) => {
   const takeNow = normalizeTakeNow(body?.takeNow);
   const productTitle = normalizeString(body?.productTitle);
   const variantTitle = normalizeString(body?.variantTitle);
-  const normalizedVariantId = normalizeString(body?.normalizedVariantId);
+  const normalizedVariantId = normalizeVariantId(body?.normalizedVariantId);
   const quantity = normalizeQuantity(body?.quantity);
   const hasFee = Boolean(body?.hasFee);
   const isBundle = Boolean(body?.isBundle);
   const bundleSummary = normalizeString(body?.bundleSummary);
+  const createdAtClient = normalizeString(body?.createdAtClient);
 
   if (!shop || !fulfillmentMode || !productTitle) {
     return Response.json({ ok: false, error: "missing_required_fields" }, { status: 400, headers });
@@ -101,6 +109,15 @@ export const action = async ({ request }) => {
     bundleSummary,
   });
 
+  logDebug(
+    "INTENT PAYLOAD SUMMARY",
+    `shop=${shop} source=${source} mode=${fulfillmentMode} take_now=${takeNow === null ? "null" : String(takeNow)} product_title=${productTitle} variant_title=${
+      variantTitle || ""
+    } normalized_variant_id=${normalizedVariantId || ""} quantity=${quantity} has_fee=${String(hasFee)} is_bundle=${String(
+      isBundle,
+    )} bundle_summary_present=${String(Boolean(bundleSummary))} created_at_client=${createdAtClient || "missing"} ttl_ms=${INTENT_TTL_MS}`,
+  );
+
   const createdIntent = await db.pendingMacronPosIntent.create({
     data: {
       shop,
@@ -122,7 +139,13 @@ export const action = async ({ request }) => {
 
   logDebug(
     "INTENT CREATED",
-    `id=${createdIntent.id} shop=${shop} mode=${fulfillmentMode} take_now=${takeNow === null ? "null" : String(takeNow)} qty=${quantity} has_fee=${String(hasFee)} is_bundle=${String(isBundle)} product_title=${productTitle} variant_title=${variantTitle || ""} bundle_summary=${bundleSummary || ""}`,
+    `id=${createdIntent.id} shop=${shop} source=${source} mode=${fulfillmentMode} take_now=${
+      takeNow === null ? "null" : String(takeNow)
+    } qty=${quantity} has_fee=${String(hasFee)} is_bundle=${String(isBundle)} product_title=${productTitle} variant_title=${
+      variantTitle || ""
+    } normalized_variant_id=${normalizedVariantId || ""} bundle_summary=${bundleSummary || ""} created_at_server=${createdAt.toISOString()} expires_at=${
+      expiresAt.toISOString()
+    }`,
   );
 
   return Response.json({ ok: true, intentId: createdIntent.id, expiresAt: createdIntent.expiresAt.toISOString() }, { headers });
