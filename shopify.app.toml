@@ -2,7 +2,7 @@
 
 client_id = "d8042c43f44b53d95f006ebc6b3221cf"
 name = "Macron POS"
-application_url = "https://example.com"
+application_url = "https://macron-pos-app-correct.onrender.com"
 embedded = true
 
 [build]
@@ -27,8 +27,13 @@ api_version = "2026-04"
 scopes = "write_products,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders"
 optional_scopes = []
 use_legacy_install_flow = false
+
 [auth]
-redirect_urls = [ ]
+redirect_urls = [
+  "https://macron-pos-app-correct.onrender.com/auth/callback",
+  "https://macron-pos-app-correct.onrender.com/auth/shopify/callback",
+  "https://macron-pos-app-correct.onrender.com/api/auth/callback"
+]
 
 [pos]
 embedded = true
