@@ -463,6 +463,38 @@ function buildMshFallbackMarkerProperties(rawProperties) {
   return fallback;
 }
 
+function buildMshOrderFallbackProperties(rawProperties, bundleAttachConfig) {
+  var properties = sanitizeLineItemProperties(rawProperties);
+  var source = toStr(properties._msh_source);
+  var mode = toStr(properties._msh_fulfilment_mode || properties._msh_fulfillment_mode);
+  var takeNow = toStr(properties._msh_take_now);
+  var orderFallback = {};
+
+  if (source !== '') {
+    orderFallback._msh_order_source = source;
+  }
+  if (mode !== '') {
+    orderFallback._msh_order_fulfilment_mode = mode;
+  }
+  if (takeNow !== '') {
+    orderFallback._msh_order_take_now = takeNow;
+  }
+
+  var bundleSummary = '';
+  if (bundleAttachConfig && bundleAttachConfig.enabled && bundleAttachConfig.readableProperties) {
+    var readableProps = sanitizeLineItemProperties(bundleAttachConfig.readableProperties);
+    bundleSummary = toStr(readableProps['Bundle Take Now Summary'] || readableProps['Bundle Summary'] || readableProps['Bundle Order Later Summary']);
+  }
+  if (bundleSummary === '') {
+    bundleSummary = toStr(properties['Bundle Take Now Summary'] || properties['Bundle Summary'] || properties['Bundle Order Later Summary']);
+  }
+  if (bundleSummary !== '') {
+    orderFallback._msh_order_bundle_summary = bundleSummary;
+  }
+
+  return orderFallback;
+}
+
 function bundleComponentLineText(index, componentTitle, variantTitle) {
   return String(index) + '. ' + toStr(componentTitle) + ' — ' + toStr(variantTitle);
 }
@@ -2688,7 +2720,9 @@ function Modal() {
     var propertiesObject = sanitizeLineItemProperties(lineItemProperties);
     var posProperties = toPosLineItemProperties(lineItemProperties);
     var fallbackMarkerProperties = buildMshFallbackMarkerProperties(propertiesObject);
+    var orderFallbackProperties = buildMshOrderFallbackProperties(propertiesObject, bundleAttachConfig);
     var fallbackMarkerKeyCount = Object.keys(fallbackMarkerProperties).length;
+    var orderFallbackKeyCount = Object.keys(orderFallbackProperties).length;
 
     var expectedIncrease = 1 + (feeRequired ? 1 : 0);
     var mainUuid = '';
@@ -2771,6 +2805,7 @@ function Modal() {
       console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
       console.log('[MSH Marker] line_item_properties payload=', posProperties);
       console.log('[MSH Marker] fallback_marker payload=', fallbackMarkerProperties);
+      console.log('[MSH Marker] order_fallback payload=', orderFallbackProperties);
       console.log('[BundleAdd] final parent title=', product && product.title ? product.title : '');
       console.log('[BundleAdd] final normalized parent variant id=', normalized.value);
       console.log('[BundleAdd] final addLineItem args=', [normalized.value, 1, posProperties]);
@@ -2814,6 +2849,25 @@ function Modal() {
         }
       } else {
         console.log('[MSH Marker] fallback_marker write=skipped reason=no marker data');
+      }
+
+      if (orderFallbackKeyCount > 0) {
+        if (shopify.cart && typeof shopify.cart.addCartProperties === 'function') {
+          console.log('[MSH Marker] order_fallback api=shopify.cart.addCartProperties');
+          try {
+            await shopify.cart.addCartProperties(orderFallbackProperties);
+            console.log('[MSH Marker] order_fallback write=success');
+          } catch (orderFallbackErr) {
+            console.error(
+              '[MSH Marker] order_fallback write=failed error=',
+              orderFallbackErr && orderFallbackErr.message ? orderFallbackErr.message : String(orderFallbackErr),
+            );
+          }
+        } else {
+          console.error('[MSH Marker] order_fallback write=skipped error=Cart API missing addCartProperties');
+        }
+      } else {
+        console.log('[MSH Marker] order_fallback write=skipped reason=no marker data');
       }
 
       if (bundleAttachConfig && bundleAttachConfig.enabled) {

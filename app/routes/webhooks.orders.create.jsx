@@ -5,6 +5,11 @@ const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
     order(id: $orderId) {
       id
       name
+      note
+      customAttributes {
+        key
+        value
+      }
       displayFulfillmentStatus
       lineItems(first: 250) {
         nodes {
@@ -225,6 +230,22 @@ function payloadLinePropertiesMap(payloadLineItems = []) {
   });
 }
 
+function payloadNoteAttributesMap(payloadNoteAttributes = []) {
+  const attributes = {};
+  for (const attribute of payloadNoteAttributes || []) {
+    if (!attribute) continue;
+    const key =
+      typeof attribute.name === "string"
+        ? attribute.name
+        : typeof attribute.key === "string"
+          ? attribute.key
+          : "";
+    if (!key) continue;
+    attributes[key] = attribute.value == null ? "" : String(attribute.value);
+  }
+  return attributes;
+}
+
 function hasMacronPosMarkerInOrderLineAttributes(orderLineNodes = []) {
   return orderLineNodes.some((orderLine) => {
     const attributes = attributeMap(orderLine?.customAttributes);
@@ -237,6 +258,22 @@ function hasMacronPosFallbackMarkerInOrderLineAttributes(orderLineNodes = []) {
     const attributes = attributeMap(orderLine?.customAttributes);
     return normalizeSource(attributes._msh_fallback_source) === "macron_pos";
   });
+}
+
+function parseOrderLevelFallbackMarker(attributes = {}) {
+  const source = normalizeSource(attributes._msh_order_source);
+  const mode = normalizeMode(
+    attributes._msh_order_fulfillment_mode || attributes._msh_order_fulfilment_mode,
+  );
+  const takeNow = normalizeTakeNow(attributes._msh_order_take_now);
+  const bundleSummary = String(attributes._msh_order_bundle_summary || "").trim();
+  return {
+    source,
+    mode,
+    takeNow,
+    bundleSummary,
+    markerFound: source === "macron_pos",
+  };
 }
 
 async function diagnoseAdminUnavailable(shop) {
@@ -430,8 +467,11 @@ export const action = async ({ request }) => {
     const expectedMarkerKey = "_msh_source";
     const expectedMarkerValue = "macron_pos";
     const expectedFallbackMarkerKey = "_msh_fallback_source";
+    const expectedOrderFallbackMarkerKey = "_msh_order_source";
     const payloadLineItems = Array.isArray(payload?.line_items) ? payload.line_items : [];
     const payloadLineProperties = payloadLinePropertiesMap(payloadLineItems);
+    const payloadNoteAttributes = payloadNoteAttributesMap(payload?.note_attributes || []);
+    const payloadOrderFallback = parseOrderLevelFallbackMarker(payloadNoteAttributes);
     const markedPayloadLines = payloadLineProperties.filter(
       (line) => normalizeSource(line.properties[expectedMarkerKey]) === expectedMarkerValue,
     );
@@ -448,7 +488,9 @@ export const action = async ({ request }) => {
         markerFoundInRawPayload,
       )} marked_line_count=${markedPayloadLines.length} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} fallback_found_in_raw_payload=${String(
         fallbackMarkerFoundInRawPayload,
-      )} fallback_marked_line_count=${fallbackMarkedPayloadLines.length} payload_line_count=${payloadLineItems.length} source_name=${
+      )} fallback_marked_line_count=${fallbackMarkedPayloadLines.length} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} order_fallback_found_in_raw_payload=${String(
+        payloadOrderFallback.markerFound,
+      )} payload_line_count=${payloadLineItems.length} payload_note_attribute_count=${Object.keys(payloadNoteAttributes).length} source_name=${
         payloadSourceName || "unknown"
       }`,
     );
@@ -483,13 +525,18 @@ export const action = async ({ request }) => {
 
     const markerFoundAfterFetch = hasMacronPosMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
     const fallbackMarkerFoundAfterFetch = hasMacronPosFallbackMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
+    const fetchedOrderAttributes = attributeMap(order.customAttributes || []);
+    const orderFallbackAfterFetch = parseOrderLevelFallbackMarker(fetchedOrderAttributes);
     const usedFallbackOrderFetchForMarkerDetection = !markerFoundInRawPayload;
     const recognizedByLineMarker = markerFoundInRawPayload || markerFoundAfterFetch;
     const recognizedByFallbackMarker = fallbackMarkerFoundInRawPayload || fallbackMarkerFoundAfterFetch;
+    const recognizedByOrderFallbackMarker = payloadOrderFallback.markerFound || orderFallbackAfterFetch.markerFound;
     const markerRecognitionPath = recognizedByLineMarker
       ? "line_item_marker"
       : recognizedByFallbackMarker
         ? "fallback_marker"
+        : recognizedByOrderFallbackMarker
+          ? "order_level_fallback_marker"
         : "none";
     logDebug(
       "MARKER DETECTION POST FETCH",
@@ -497,13 +544,25 @@ export const action = async ({ request }) => {
         usedFallbackOrderFetchForMarkerDetection,
       )} marker_found_after_fetch=${String(markerFoundAfterFetch)} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} fallback_marker_found_after_fetch=${String(
         fallbackMarkerFoundAfterFetch,
+      )} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} order_fallback_found_after_fetch=${String(
+        orderFallbackAfterFetch.markerFound,
       )} marker_recognition_path=${markerRecognitionPath}`,
     );
 
-    if (!recognizedByLineMarker && !recognizedByFallbackMarker) {
+    const resolvedOrderFallback = orderFallbackAfterFetch.markerFound ? orderFallbackAfterFetch : payloadOrderFallback;
+    logDebug(
+      "ORDER-LEVEL FALLBACK INTENT",
+      `order_id=${order.id} found=${String(resolvedOrderFallback.markerFound)} source=${resolvedOrderFallback.source || "missing"} mode=${
+        resolvedOrderFallback.mode || "missing"
+      } take_now=${
+        resolvedOrderFallback.takeNow === null ? "null" : String(resolvedOrderFallback.takeNow)
+      } bundle_summary_present=${String(Boolean(resolvedOrderFallback.bundleSummary))}`,
+    );
+
+    if (!recognizedByLineMarker && !recognizedByFallbackMarker && !recognizedByOrderFallbackMarker) {
       logDebugError(
         "EARLY EXIT",
-        `reason=no Macron POS marker in payload_or_fetched_order order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} source_name=${
+        `reason=no Macron POS marker in payload_or_fetched_order order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} source_name=${
           payloadSourceName || "unknown"
         }`,
       );
@@ -514,12 +573,18 @@ export const action = async ({ request }) => {
       "MARKER DETECTION DECISION",
       `order_id=${order.id} line_marker_found=${String(recognizedByLineMarker)} fallback_marker_found=${String(
         recognizedByFallbackMarker,
-      )} recognition_path=${markerRecognitionPath}`,
+      )} order_fallback_marker_found=${String(recognizedByOrderFallbackMarker)} recognition_path=${markerRecognitionPath}`,
     );
     if (!recognizedByLineMarker && recognizedByFallbackMarker) {
       logDebug(
         "MARKER FALLBACK RECOVERY",
         `order_id=${order.id} likely_live_pos_property_stripping=true line_marker_found=false fallback_marker_found=true`,
+      );
+    }
+    if (!recognizedByLineMarker && !recognizedByFallbackMarker && recognizedByOrderFallbackMarker) {
+      logDebug(
+        "MARKER FALLBACK RECOVERY",
+        `order_id=${order.id} likely_live_pos_property_stripping=true line_marker_found=false fallback_marker_found=false order_fallback_marker_found=true`,
       );
     }
 
@@ -536,6 +601,7 @@ export const action = async ({ request }) => {
     let splitEligibleCount = 0;
     let orderInCount = 0;
     let feeSystemCount = 0;
+    const orderLevelFallbackOnly = !recognizedByLineMarker && !recognizedByFallbackMarker && recognizedByOrderFallbackMarker;
 
     const allOrderLines = [];
     const bundleParents = [];
@@ -548,25 +614,42 @@ export const action = async ({ request }) => {
           title: orderLine?.title || "",
           sku: orderLine?.sku || "",
         });
+      const recoveredSource = orderLevelFallbackOnly && !feeOrSystem && source !== "macron_pos" ? "macron_pos" : source;
+      const recoveredMode =
+        orderLevelFallbackOnly && !feeOrSystem && mode === "" ? resolvedOrderFallback.mode : mode;
+      const recoveredTakeNow =
+        orderLevelFallbackOnly && !feeOrSystem && takeNow === null ? resolvedOrderFallback.takeNow : takeNow;
+      const recoveredEligible =
+        recoveredSource === "macron_pos" &&
+        !feeOrSystem &&
+        shouldFulfillNowForMode(recoveredMode, recoveredTakeNow);
+      const intentRecoverySource = recoveredEligible && !eligible ? "order_level_fallback" : "line_level";
       const orderLineGid = String(orderLine?.id || "");
       const orderLineNumericId = parseNumericId(orderLineGid);
-      const parsedBundleComponents = parseBundleComponentsFromAttributes(attributes, mode, takeNow);
+      const parsedBundleComponents = parseBundleComponentsFromAttributes(
+        attributes,
+        recoveredMode,
+        recoveredTakeNow,
+      );
       const isBundleParent = Array.isArray(parsedBundleComponents) && parsedBundleComponents.length > 0;
-      const effectiveEligible = eligible;
+      const effectiveEligible = recoveredEligible;
 
       if (feeOrSystem) feeSystemCount += 1;
-      if (mode === "order_in") orderInCount += 1;
-      if (mode === "take_today" && source === "macron_pos" && !feeOrSystem) takeTodayEligibleCount += 1;
-      if (mode === "split" && source === "macron_pos" && !feeOrSystem && takeNow === true) splitEligibleCount += 1;
+      if (recoveredMode === "order_in") orderInCount += 1;
+      if (recoveredMode === "take_today" && recoveredSource === "macron_pos" && !feeOrSystem) takeTodayEligibleCount += 1;
+      if (recoveredMode === "split" && recoveredSource === "macron_pos" && !feeOrSystem && recoveredTakeNow === true)
+        splitEligibleCount += 1;
 
       if (isBundleParent) {
         logDebug(
           "BUNDLE PARENT EVALUATION",
           `order_line_id=${orderLineGid} title=${orderLine?.title || ""} mode=${mode || "missing"} take_now=${
             takeNow === null ? "null" : String(takeNow)
+          } recovered_mode=${recoveredMode || "missing"} recovered_take_now=${
+            recoveredTakeNow === null ? "null" : String(recoveredTakeNow)
           } fee_or_system=${String(feeOrSystem)} fee_reason=${feeOrSystemReason} eligible=${String(
             effectiveEligible,
-          )} fallback_parent_line_used=${String(effectiveEligible)}`,
+          )} fallback_parent_line_used=${String(effectiveEligible)} intent_recovery_source=${intentRecoverySource}`,
         );
       }
 
@@ -575,16 +658,17 @@ export const action = async ({ request }) => {
         title: orderLine?.title || "",
         sku: orderLine?.sku || "",
         quantity: Number(orderLine?.quantity || 0),
-        source,
+        source: recoveredSource,
         rawMode,
-        parsedMode: mode,
+        parsedMode: recoveredMode,
         rawTakeNow,
-        parsedTakeNow: takeNow,
+        parsedTakeNow: recoveredTakeNow,
         feeOrSystem,
         feeOrSystemReason,
         isBundleParent,
         bundleComponents: parsedBundleComponents || [],
         eligible: effectiveEligible,
+        intentRecoverySource,
         attributes: summarizeAttributes(attributes),
       };
 
@@ -597,13 +681,14 @@ export const action = async ({ request }) => {
         quantity: Number(orderLine?.quantity || 0),
         attributes: summarizeAttributes(attributes),
         eligibility: {
-          source,
-          mode,
-          takeNow,
+          source: recoveredSource,
+          mode: recoveredMode,
+          takeNow: recoveredTakeNow,
           feeOrSystem,
           feeOrSystemReason,
           isBundleParent,
           eligible: effectiveEligible,
+          intentRecoverySource,
         },
       });
 
@@ -613,9 +698,9 @@ export const action = async ({ request }) => {
         title: orderLine?.title || "",
         sku: orderLine?.sku || "",
         quantity: Number(orderLine?.quantity || 0),
-        source,
-        mode,
-        takeNow,
+        source: recoveredSource,
+        mode: recoveredMode,
+        takeNow: recoveredTakeNow,
         feeOrSystem,
         isBundleParent,
         attributes,
@@ -638,8 +723,8 @@ export const action = async ({ request }) => {
           orderLineNumericId,
           title: orderLine?.title || "",
           quantity: Number(orderLine?.quantity || 0),
-          mode,
-          takeNow,
+          mode: recoveredMode,
+          takeNow: recoveredTakeNow,
         });
       }
     }
