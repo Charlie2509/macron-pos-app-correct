@@ -600,17 +600,7 @@ async function resolveShopDomainForIntentPost() {
 }
 
 function resolvePendingIntentEndpoint() {
-  var runtimeAppUrl = '';
-  try {
-    var globalScope = Function('return this')();
-    runtimeAppUrl = globalScope && globalScope.SHOPIFY_APP_URL ? toStr(globalScope.SHOPIFY_APP_URL) : '';
-  } catch (_globalScopeError) {
-    runtimeAppUrl = '';
-  }
-  if (runtimeAppUrl !== '') {
-    return runtimeAppUrl.replace(/\/$/, '') + '/api/macron-pos/intent';
-  }
-  return '/api/macron-pos/intent';
+  return 'https://macron-pos-app-correct.onrender.com/api/macron-pos/intent';
 }
 
 function pendingIntentPayloadSummary(payload) {
