@@ -422,6 +422,39 @@ function buildMshIntentProperties(mode, takeNowInSplit) {
   };
 }
 
+function buildMshLineItemIntentProperties(options) {
+  var config = options || {};
+  var mode = config.mode;
+  var takeNowInSplit = config.takeNowInSplit;
+  var productTitle = toStr(config.productTitle);
+  var variantTitle = toStr(config.variantTitle);
+  var normalizedVariantId = toStr(config.normalizedVariantId);
+  var hasFee = config.hasFee ? true : false;
+  var isBundle = config.isBundle ? true : false;
+  var bundleSummary = toStr(config.bundleSummary);
+  var baseIntent = buildMshIntentProperties(mode, takeNowInSplit);
+  var nowIso = new Date().toISOString();
+  var properties = {
+    _msh_source: baseIntent._msh_source,
+    _msh_fulfilment_mode: baseIntent._msh_fulfilment_mode,
+    _msh_take_now: baseIntent._msh_take_now,
+    _msh_intent_product_title: productTitle,
+    _msh_intent_variant_title: variantTitle,
+    _msh_intent_variant_id: normalizedVariantId,
+    _msh_intent_quantity: '1',
+    _msh_intent_has_fee: hasFee ? 'true' : 'false',
+    _msh_intent_is_bundle: isBundle ? 'true' : 'false',
+    _msh_intent_created_at: nowIso,
+    _msh_intent_source: 'macron_pos',
+    _msh_intent_fulfilment_mode: baseIntent._msh_fulfilment_mode,
+    _msh_intent_take_now: baseIntent._msh_take_now,
+  };
+  if (bundleSummary !== '') {
+    properties._msh_intent_bundle_summary = bundleSummary;
+  }
+  return properties;
+}
+
 function defaultBundleComponentFulfilment(mode) {
   if (mode === 'order_in') {
     return 'order_later';
@@ -430,15 +463,7 @@ function defaultBundleComponentFulfilment(mode) {
 }
 
 function buildBundleMshIntentProperties(mode) {
-  var normalizedMode = mode === 'order_in' || mode === 'split' ? mode : 'take_today';
-  var props = {
-    _msh_source: 'macron_pos',
-    _msh_fulfilment_mode: normalizedMode,
-  };
-  if (normalizedMode !== 'split') {
-    props._msh_take_now = normalizedMode === 'take_today' ? 'true' : 'false';
-  }
-  return props;
+  return buildMshIntentProperties(mode, false);
 }
 
 function buildMshFallbackMarkerProperties(rawProperties) {
@@ -563,64 +588,6 @@ function buildPendingIntentBundleSummary(rawProperties, bundleAttachConfig) {
     summary = toStr(properties['Bundle Take Now Summary'] || properties['Bundle Summary'] || properties['Bundle Order Later Summary']);
   }
   return summary;
-}
-
-async function resolveShopDomainForIntentPost() {
-  console.log('PENDING_INTENT_CREATE SHOP RESOLVE START');
-  try {
-    var response = await fetch('shopify:admin/api/graphql.json', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({query: 'query MacronPosIntentShopDomain { shop { myshopifyDomain } }'}),
-    });
-    var bodyText = await response.text();
-    var body = null;
-    try {
-      body = bodyText ? JSON.parse(bodyText) : null;
-    } catch (_shopDomainParseError) {
-      body = null;
-    }
-    var domain = toStr(body && body.data && body.data.shop ? body.data.shop.myshopifyDomain : '');
-    console.log(
-      'PENDING_INTENT_CREATE SHOP RESOLVE RESULT',
-      'status=',
-      response.status,
-      'ok=',
-      response.ok,
-      'domain=',
-      domain || '(empty)',
-      'body=',
-      bodyText || '(empty)',
-    );
-    return domain;
-  } catch (error) {
-    console.error('PENDING_INTENT_CREATE SHOP RESOLVE ERROR', error && error.message ? error.message : String(error));
-    return '';
-  }
-}
-
-function resolvePendingIntentEndpoint() {
-  return 'https://macron-pos-app-correct.onrender.com/api/macron-pos/intent';
-}
-
-function pendingIntentPayloadSummary(payload) {
-  if (!payload || typeof payload !== 'object') {
-    return {};
-  }
-  return {
-    shop: toStr(payload.shop),
-    source: toStr(payload.source),
-    fulfillmentMode: toStr(payload.fulfillmentMode),
-    takeNow: toStr(payload.takeNow),
-    productTitle: toStr(payload.productTitle),
-    variantTitle: toStr(payload.variantTitle),
-    normalizedVariantId: toStr(payload.normalizedVariantId),
-    quantity: payload.quantity,
-    hasFee: Boolean(payload.hasFee),
-    isBundle: Boolean(payload.isBundle),
-    bundleSummaryPresent: toStr(payload.bundleSummary) !== '',
-    createdAtClient: toStr(payload.createdAtClient),
-  };
 }
 
 function bundleComponentLineText(index, componentTitle, variantTitle) {
@@ -2816,10 +2783,10 @@ function Modal() {
     setLastRollbackMainLineRemoved(false);
     setLastRollbackFeeLineRemoved(false);
     setLastPingAttempted(false);
-    setLastPingStatus('');
+    setLastPingStatus('skipped_direct_fetch');
     setLastPingError('');
     setLastIntentRequestAttempted(false);
-    setLastIntentRequestStatus('');
+    setLastIntentRequestStatus('skipped_direct_fetch');
     setLastIntentRequestError('');
     if (!bundleAttachConfig || !bundleAttachConfig.enabled) {
       setBundleParentLineAdded(false);
@@ -2876,14 +2843,6 @@ function Modal() {
     setLastFeeAmount(feeRequired ? numericFee : null);
 
     var propertiesObject = sanitizeLineItemProperties(lineItemProperties);
-    var posProperties = toPosLineItemProperties(lineItemProperties);
-    var fallbackMarkerProperties = buildMshFallbackMarkerProperties(propertiesObject);
-    var orderFallbackProperties = buildMshOrderFallbackProperties(propertiesObject, bundleAttachConfig);
-    var durableNoteToken = buildMshDurableNoteToken(propertiesObject, bundleAttachConfig);
-    var durableNoteProperties = buildMshDurableNoteProperties(durableNoteToken);
-    var fallbackMarkerKeyCount = Object.keys(fallbackMarkerProperties).length;
-    var orderFallbackKeyCount = Object.keys(orderFallbackProperties).length;
-    var durableNoteKeyCount = Object.keys(durableNoteProperties).length;
 
     var expectedIncrease = 1 + (feeRequired ? 1 : 0);
     var mainUuid = '';
@@ -2966,104 +2925,37 @@ function Modal() {
       var pendingIntentMode = toStr(propertiesObject._msh_fulfilment_mode || propertiesObject._msh_fulfillment_mode || 'take_today');
       var pendingIntentTakeNow = toStr(propertiesObject._msh_take_now);
       var pendingIntentBundleSummary = buildPendingIntentBundleSummary(propertiesObject, bundleAttachConfig);
-      var pendingIntentShop = await resolveShopDomainForIntentPost();
-      var pendingIntentPayload = {
-        shop: pendingIntentShop,
-        source: 'macron_pos',
-        fulfillmentMode: pendingIntentMode,
-        takeNow: pendingIntentTakeNow,
+      var derivedSplitTakeNow = pendingIntentTakeNow === 'true';
+      var explicitLineItemIntentProps = buildMshLineItemIntentProperties({
+        mode: pendingIntentMode,
+        takeNowInSplit: derivedSplitTakeNow,
         productTitle: product && product.title ? String(product.title) : '',
         variantTitle: variant && variant.title ? String(variant.title) : '',
         normalizedVariantId: String(normalized.value),
-        quantity: 1,
         hasFee: feeRequired,
         isBundle: Boolean(bundleAttachConfig && bundleAttachConfig.enabled),
         bundleSummary: pendingIntentBundleSummary,
-        createdAtClient: new Date().toISOString(),
-      };
-      var pendingIntentEndpoint = resolvePendingIntentEndpoint();
-      var pendingIntentSummary = pendingIntentPayloadSummary(pendingIntentPayload);
-      console.log('PENDING_INTENT_CREATE REQUEST START', 'url=', pendingIntentEndpoint, 'payload_summary=', pendingIntentSummary);
-      if (toStr(pendingIntentShop) === '') {
-        console.error('PENDING_INTENT_CREATE REQUEST BLOCKED', 'reason=missing_shop', 'payload_summary=', pendingIntentSummary);
-        if (showDebug) {
-          toast('Debug: pending intent not created (missing shop domain)');
-        }
-      } else if (pendingIntentEndpoint.charAt(0) === '/') {
-        console.error('PENDING_INTENT_CREATE REQUEST WARNING', 'reason=relative_endpoint', 'url=', pendingIntentEndpoint);
-        if (showDebug) {
-          toast('Debug: pending intent endpoint is relative; set SHOPIFY_APP_URL for POS extension');
-        }
+      });
+      var explicitIntentKeys = Object.keys(explicitLineItemIntentProps);
+      for (var i = 0; i < explicitIntentKeys.length; i += 1) {
+        var explicitKey = explicitIntentKeys[i];
+        propertiesObject[explicitKey] = explicitLineItemIntentProps[explicitKey];
       }
-      try {
-        setLastPingAttempted(true);
-        try {
-          var pingResponse = await fetch('https://macron-pos-app-correct.onrender.com/api/macron-pos/ping', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ test: true }),
-          });
-          setLastPingStatus('status=' + String(pingResponse.status) + ' ok=' + String(pingResponse.ok));
-          setLastPingError('');
-          console.log('[MSH PendingIntent] ping status=', pingResponse.status, 'ok=', pingResponse.ok);
-        } catch (pingError) {
-          var pingMessage = pingError && pingError.message ? pingError.message : String(pingError);
-          setLastPingStatus('failed');
-          setLastPingError(pingMessage);
-          console.error('[MSH PendingIntent] ping failed=', pingMessage);
-        }
-
-        setLastIntentRequestAttempted(true);
-        var pendingIntentResponse = await fetch(pendingIntentEndpoint, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(pendingIntentPayload),
-        });
-        var pendingIntentBodyText = '';
-        try {
-          pendingIntentBodyText = await pendingIntentResponse.text();
-        } catch (_pendingIntentParseError) {
-          pendingIntentBodyText = '';
-        }
-        var pendingIntentBody = null;
-        try {
-          pendingIntentBody = pendingIntentBodyText ? JSON.parse(pendingIntentBodyText) : null;
-        } catch (_pendingIntentJsonParseError) {
-          pendingIntentBody = null;
-        }
-        console.log(
-          'PENDING_INTENT_CREATE RESPONSE',
-          'status=',
-          pendingIntentResponse.status,
-          'ok=',
-          pendingIntentResponse.ok,
-          'success=',
-          pendingIntentResponse.ok && pendingIntentBody && pendingIntentBody.ok === true,
-          'body_text=',
-          pendingIntentBodyText || '(empty)',
-        );
-        console.log(
-          'PENDING_INTENT_CREATE RESPONSE BODY JSON',
-          pendingIntentBody,
-        );
-        setLastIntentRequestStatus('status=' + String(pendingIntentResponse.status) + ' ok=' + String(pendingIntentResponse.ok));
-        setLastIntentRequestError('');
-        if (!pendingIntentResponse.ok || !pendingIntentBody || pendingIntentBody.ok !== true) {
-          console.error('PENDING_INTENT_CREATE REQUEST FAILURE', 'status=', pendingIntentResponse.status, 'body=', pendingIntentBodyText || '(empty)');
-          if (showDebug) {
-            toast('Debug: pending intent create failed (see console)');
-          }
-        }
-      } catch (pendingIntentError) {
-        var pendingIntentMessage = pendingIntentError && pendingIntentError.message ? pendingIntentError.message : String(pendingIntentError);
-        setLastIntentRequestStatus('failed');
-        setLastIntentRequestError(pendingIntentMessage);
-        var pendingIntentErrorMessage = pendingIntentMessage;
-        console.error('PENDING_INTENT_CREATE REQUEST CATCH', pendingIntentErrorMessage, pendingIntentError);
-        if (showDebug) {
-          toast('Debug: pending intent request crashed: ' + pendingIntentErrorMessage);
-        }
-      }
+      var posProperties = toPosLineItemProperties(propertiesObject);
+      var fallbackMarkerProperties = buildMshFallbackMarkerProperties(propertiesObject);
+      var orderFallbackProperties = buildMshOrderFallbackProperties(propertiesObject, bundleAttachConfig);
+      var durableNoteToken = buildMshDurableNoteToken(propertiesObject, bundleAttachConfig);
+      var durableNoteProperties = buildMshDurableNoteProperties(durableNoteToken);
+      var fallbackMarkerKeyCount = Object.keys(fallbackMarkerProperties).length;
+      var orderFallbackKeyCount = Object.keys(orderFallbackProperties).length;
+      var durableNoteKeyCount = Object.keys(durableNoteProperties).length;
+      setLastPingAttempted(false);
+      setLastPingStatus('skipped_direct_fetch');
+      setLastPingError('');
+      setLastIntentRequestAttempted(false);
+      setLastIntentRequestStatus('skipped_direct_fetch');
+      setLastIntentRequestError('');
+      console.log('PENDING_INTENT_CREATE REQUEST SKIPPED', 'reason=skipped_direct_fetch', 'intent_source=line_item_properties');
 
       console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
       console.log('[MSH Marker] line_item_properties payload=', posProperties);

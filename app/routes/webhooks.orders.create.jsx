@@ -286,6 +286,82 @@ function hasMacronPosFallbackMarkerInOrderLineAttributes(orderLineNodes = []) {
   });
 }
 
+function parseLineItemIntentFromAttributes(attributes = {}) {
+  const source = normalizeSource(
+    attributes._msh_source || attributes._msh_intent_source || attributes._msh_fallback_source,
+  );
+  const mode = normalizeMode(
+    attributes._msh_intent_fulfillment_mode ||
+      attributes._msh_intent_fulfilment_mode ||
+      attributes._msh_fulfillment_mode ||
+      attributes._msh_fulfilment_mode,
+  );
+  const takeNow = normalizeTakeNow(attributes._msh_intent_take_now || attributes._msh_take_now);
+  const productTitle = String(attributes._msh_intent_product_title || "").trim();
+  const variantTitle = String(attributes._msh_intent_variant_title || "").trim();
+  const variantId = normalizeVariantIdValue(attributes._msh_intent_variant_id || "");
+  const quantity = String(attributes._msh_intent_quantity || "").trim();
+  const hasFee = normalizeTakeNow(attributes._msh_intent_has_fee);
+  const isBundle = normalizeTakeNow(attributes._msh_intent_is_bundle);
+  const bundleSummary = String(attributes._msh_intent_bundle_summary || "").trim();
+  const createdAt = String(attributes._msh_intent_created_at || "").trim();
+  const hasIntentField =
+    productTitle !== "" ||
+    variantTitle !== "" ||
+    variantId !== "" ||
+    quantity !== "" ||
+    hasFee !== null ||
+    isBundle !== null ||
+    bundleSummary !== "" ||
+    createdAt !== "" ||
+    mode !== "" ||
+    takeNow !== null;
+  const found = source === "macron_pos" && hasIntentField;
+
+  return {
+    found,
+    source,
+    mode,
+    takeNow,
+    productTitle,
+    variantTitle,
+    variantId,
+    quantity,
+    hasFee,
+    isBundle,
+    bundleSummary,
+    createdAt,
+  };
+}
+
+function findMacronLineItemIntent(orderLineNodes = []) {
+  for (const orderLine of orderLineNodes || []) {
+    const attributes = attributeMap(orderLine?.customAttributes);
+    const parsedIntent = parseLineItemIntentFromAttributes(attributes);
+    if (!parsedIntent.found) continue;
+    return {
+      found: true,
+      orderLineId: String(orderLine?.id || ""),
+      ...parsedIntent,
+    };
+  }
+  return {
+    found: false,
+    orderLineId: "",
+    source: "",
+    mode: "",
+    takeNow: null,
+    productTitle: "",
+    variantTitle: "",
+    variantId: "",
+    quantity: "",
+    hasFee: null,
+    isBundle: null,
+    bundleSummary: "",
+    createdAt: "",
+  };
+}
+
 function parseOrderLevelFallbackMarker(attributes = {}) {
   const source = normalizeSource(attributes._msh_order_source);
   const mode = normalizeMode(
@@ -300,6 +376,21 @@ function parseOrderLevelFallbackMarker(attributes = {}) {
     bundleSummary,
     markerFound: source === "macron_pos",
   };
+}
+
+function parseOrderLevelIntentProperties(attributes = {}) {
+  const source = normalizeSource(
+    attributes._msh_order_source || attributes._msh_source || attributes._msh_intent_source,
+  );
+  const mode = normalizeMode(
+    attributes._msh_intent_fulfillment_mode ||
+      attributes._msh_intent_fulfilment_mode ||
+      attributes._msh_order_fulfillment_mode ||
+      attributes._msh_order_fulfilment_mode,
+  );
+  const takeNow = normalizeTakeNow(attributes._msh_intent_take_now || attributes._msh_order_take_now);
+  const found = source === "macron_pos" && (mode !== "" || takeNow !== null);
+  return { found, source, mode, takeNow };
 }
 
 function parseDurableNoteTokenFromText(rawText) {
@@ -821,6 +912,7 @@ export const action = async ({ request }) => {
     const payloadLineItems = Array.isArray(payload?.line_items) ? payload.line_items : [];
     const payloadLineProperties = payloadLinePropertiesMap(payloadLineItems);
     const payloadNoteAttributes = payloadNoteAttributesMap(payload?.note_attributes || []);
+    const payloadOrderIntent = parseOrderLevelIntentProperties(payloadNoteAttributes);
     const payloadOrderFallback = parseOrderLevelFallbackMarker(payloadNoteAttributes);
     const payloadDurableNote = parseDurableNoteTokenFromSources(
       payload?.note,
@@ -845,7 +937,9 @@ export const action = async ({ request }) => {
         fallbackMarkerFoundInRawPayload,
       )} fallback_marked_line_count=${fallbackMarkedPayloadLines.length} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} order_fallback_found_in_raw_payload=${String(
         payloadOrderFallback.markerFound,
-      )} note_token_found_in_raw_payload=${String(payloadDurableNote.tokenFound)} note_marker_found_in_raw_payload=${String(
+      )} order_intent_found_in_raw_payload=${String(payloadOrderIntent.found)} order_intent_mode=${
+        payloadOrderIntent.mode || "missing"
+      } order_intent_take_now=${payloadOrderIntent.takeNow === null ? "null" : String(payloadOrderIntent.takeNow)} note_token_found_in_raw_payload=${String(payloadDurableNote.tokenFound)} note_marker_found_in_raw_payload=${String(
         payloadDurableNote.markerFound,
       )} note_source=${payloadDurableNote.source || "missing"} note_mode=${payloadDurableNote.mode || "missing"} note_take_now=${
         payloadDurableNote.takeNow === null ? "null" : String(payloadDurableNote.takeNow)
@@ -884,7 +978,9 @@ export const action = async ({ request }) => {
 
     const markerFoundAfterFetch = hasMacronPosMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
     const fallbackMarkerFoundAfterFetch = hasMacronPosFallbackMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
+    const lineItemIntentAfterFetch = findMacronLineItemIntent(order.lineItems?.nodes || []);
     const fetchedOrderAttributes = attributeMap(order.customAttributes || []);
+    const fetchedOrderIntent = parseOrderLevelIntentProperties(fetchedOrderAttributes);
     const orderFallbackAfterFetch = parseOrderLevelFallbackMarker(fetchedOrderAttributes);
     const fetchedOrderDurableNote = parseDurableNoteTokenFromSources(
       order?.note,
@@ -896,15 +992,34 @@ export const action = async ({ request }) => {
     const recognizedByFallbackMarker = fallbackMarkerFoundInRawPayload || fallbackMarkerFoundAfterFetch;
     const recognizedByOrderFallbackMarker = payloadOrderFallback.markerFound || orderFallbackAfterFetch.markerFound;
     const recognizedByDurableNoteMarker = payloadDurableNote.markerFound || fetchedOrderDurableNote.markerFound;
-    let markerRecognitionPath = recognizedByLineMarker
-      ? "line_item_marker"
-      : recognizedByFallbackMarker
-        ? "fallback_marker"
-        : recognizedByOrderFallbackMarker
-          ? "order_level_fallback_marker"
-          : recognizedByDurableNoteMarker
-            ? "durable_note_marker"
-            : "none";
+    const recognizedByLineItemIntent = lineItemIntentAfterFetch.found;
+    let markerRecognitionPath = recognizedByLineItemIntent
+      ? "line_item_intent_properties"
+      : recognizedByLineMarker
+        ? "line_item_marker"
+        : recognizedByFallbackMarker
+          ? "fallback_marker"
+          : recognizedByOrderFallbackMarker
+            ? "order_level_fallback_marker"
+            : recognizedByDurableNoteMarker
+              ? "durable_note_marker"
+              : "none";
+    logDebug(
+      recognizedByLineItemIntent ? "LINE ITEM INTENT FOUND" : "LINE ITEM INTENT NOT FOUND",
+      `order_id=${order.id} line_item_id=${lineItemIntentAfterFetch.orderLineId || "none"} resolved_fulfillment_mode=${
+        lineItemIntentAfterFetch.mode || "missing"
+      } resolved_take_now=${
+        lineItemIntentAfterFetch.takeNow === null ? "null" : String(lineItemIntentAfterFetch.takeNow)
+      } recognition_path=${recognizedByLineItemIntent ? "line_item_intent_properties" : "none"}`,
+    );
+    logDebug(
+      "LINE ITEM INTENT RESOLVED",
+      `order_id=${order.id} resolved_fulfillment_mode=${
+        lineItemIntentAfterFetch.mode || "missing"
+      } resolved_take_now=${
+        lineItemIntentAfterFetch.takeNow === null ? "null" : String(lineItemIntentAfterFetch.takeNow)
+      }`,
+    );
     logDebug(
       "MARKER DETECTION POST FETCH",
       `order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} used_fallback_fetch=${String(
@@ -913,9 +1028,15 @@ export const action = async ({ request }) => {
         fallbackMarkerFoundAfterFetch,
       )} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} order_fallback_found_after_fetch=${String(
         orderFallbackAfterFetch.markerFound,
-      )} note_token_found_after_fetch=${String(fetchedOrderDurableNote.tokenFound)} note_marker_found_after_fetch=${String(
-        fetchedOrderDurableNote.markerFound,
-      )} note_source=${fetchedOrderDurableNote.source || "missing"} note_mode=${fetchedOrderDurableNote.mode || "missing"} note_take_now=${
+      )} line_item_intent_found=${String(recognizedByLineItemIntent)} order_intent_found_after_fetch=${String(
+        fetchedOrderIntent.found,
+      )} order_intent_mode=${fetchedOrderIntent.mode || "missing"} order_intent_take_now=${
+        fetchedOrderIntent.takeNow === null ? "null" : String(fetchedOrderIntent.takeNow)
+      } note_token_found_after_fetch=${String(
+        fetchedOrderDurableNote.tokenFound,
+      )} note_marker_found_after_fetch=${String(fetchedOrderDurableNote.markerFound)} note_source=${
+        fetchedOrderDurableNote.source || "missing"
+      } note_mode=${fetchedOrderDurableNote.mode || "missing"} note_take_now=${
         fetchedOrderDurableNote.takeNow === null ? "null" : String(fetchedOrderDurableNote.takeNow)
       } marker_recognition_path=${markerRecognitionPath}`,
     );
@@ -923,6 +1044,83 @@ export const action = async ({ request }) => {
     const resolvedOrderFallback = orderFallbackAfterFetch.markerFound ? orderFallbackAfterFetch : payloadOrderFallback;
     const resolvedDurableNoteFallback = fetchedOrderDurableNote.markerFound ? fetchedOrderDurableNote : payloadDurableNote;
     const resolvedIntentFallback = resolvedOrderFallback.markerFound ? resolvedOrderFallback : resolvedDurableNoteFallback;
+
+    const shouldTryPendingIntent =
+      !recognizedByLineItemIntent &&
+      !recognizedByLineMarker &&
+      !recognizedByFallbackMarker &&
+      !recognizedByOrderFallbackMarker &&
+      !recognizedByDurableNoteMarker;
+    const pendingIntentMatch = shouldTryPendingIntent
+      ? await tryMatchPendingIntent({
+          shop,
+          payloadSourceName,
+          order,
+        })
+      : { attempted: false, reason: "skipped_due_to_order_properties", candidates: [], matchedIntent: null };
+    const recognizedByPendingIntent = Boolean(pendingIntentMatch.matchedIntent);
+    if (shouldTryPendingIntent && recognizedByPendingIntent) {
+      markerRecognitionPath = "pending_intent";
+    }
+    logDebug(
+      "PENDING INTENT MATCH",
+      `order_id=${order.id} attempted=${String(pendingIntentMatch.attempted)} reason=${pendingIntentMatch.reason} candidate_count=${
+        pendingIntentMatch.candidates.length
+      } matched_intent_id=${pendingIntentMatch.matchedIntent?.id || "none"} candidates=${JSON.stringify(pendingIntentMatch.candidates)} final_recognition_path=${markerRecognitionPath}`,
+    );
+
+    if (
+      !recognizedByLineItemIntent &&
+      !recognizedByLineMarker &&
+      !recognizedByFallbackMarker &&
+      !recognizedByOrderFallbackMarker &&
+      !recognizedByDurableNoteMarker &&
+      !recognizedByPendingIntent
+    ) {
+      logDebugError(
+        "EARLY EXIT",
+        `reason=no Macron POS marker or pending_intent_match order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} durable_note_marker=[MSH_POS] source=macron_pos source_name=${
+          payloadSourceName || "unknown"
+        } pending_intent_attempted=${String(pendingIntentMatch.attempted)} pending_intent_reason=${pendingIntentMatch.reason}`,
+      );
+      logDebug("FINAL RESULT: skipped", "reason=no Macron POS marker or pending intent match");
+      return new Response();
+    }
+
+    logDebug(
+      "MARKER DETECTION DECISION",
+      `order_id=${order.id} line_item_intent_found=${String(recognizedByLineItemIntent)} line_marker_found=${String(
+        recognizedByLineMarker,
+      )} fallback_marker_found=${String(recognizedByFallbackMarker)} order_fallback_marker_found=${String(
+        recognizedByOrderFallbackMarker,
+      )} note_marker_found=${String(recognizedByDurableNoteMarker)} pending_intent_found=${String(
+        recognizedByPendingIntent,
+      )} pending_intent_id=${pendingIntentMatch.matchedIntent?.id || "none"} recognition_path=${markerRecognitionPath}`,
+    );
+    if (!recognizedByLineItemIntent && !recognizedByLineMarker && recognizedByFallbackMarker) {
+      logDebug(
+        "MARKER FALLBACK RECOVERY",
+        `order_id=${order.id} likely_live_pos_property_stripping=true line_item_intent_found=false line_marker_found=false fallback_marker_found=true`,
+      );
+    }
+    if (!recognizedByLineItemIntent && !recognizedByLineMarker && !recognizedByFallbackMarker && recognizedByOrderFallbackMarker) {
+      logDebug(
+        "MARKER FALLBACK RECOVERY",
+        `order_id=${order.id} likely_live_pos_property_stripping=true line_item_intent_found=false line_marker_found=false fallback_marker_found=false order_fallback_marker_found=true`,
+      );
+    }
+    if (
+      !recognizedByLineItemIntent &&
+      !recognizedByLineMarker &&
+      !recognizedByFallbackMarker &&
+      !recognizedByOrderFallbackMarker &&
+      recognizedByDurableNoteMarker
+    ) {
+      logDebug(
+        "MARKER FALLBACK RECOVERY",
+        `order_id=${order.id} likely_live_pos_property_stripping=true line_item_intent_found=false line_marker_found=false fallback_marker_found=false order_fallback_marker_found=false note_marker_found=true`,
+      );
+    }
     logDebug(
       "ORDER-LEVEL FALLBACK INTENT",
       `order_id=${order.id} found=${String(resolvedOrderFallback.markerFound)} source=${resolvedOrderFallback.source || "missing"} mode=${
@@ -940,65 +1138,6 @@ export const action = async ({ request }) => {
       } bundle_summary_present=${String(Boolean(resolvedDurableNoteFallback.bundleSummary))}`,
     );
 
-    const pendingIntentMatch = await tryMatchPendingIntent({
-      shop,
-      payloadSourceName,
-      order,
-    });
-    const recognizedByPendingIntent = Boolean(pendingIntentMatch.matchedIntent);
-    if (!recognizedByLineMarker && !recognizedByFallbackMarker && !recognizedByOrderFallbackMarker && !recognizedByDurableNoteMarker && recognizedByPendingIntent) {
-      markerRecognitionPath = "pending_intent";
-    }
-    logDebug(
-      "PENDING INTENT MATCH",
-      `order_id=${order.id} attempted=${String(pendingIntentMatch.attempted)} reason=${pendingIntentMatch.reason} candidate_count=${
-        pendingIntentMatch.candidates.length
-      } matched_intent_id=${pendingIntentMatch.matchedIntent?.id || "none"} candidates=${JSON.stringify(pendingIntentMatch.candidates)} final_recognition_path=${markerRecognitionPath}`,
-    );
-
-    if (!recognizedByLineMarker && !recognizedByFallbackMarker && !recognizedByOrderFallbackMarker && !recognizedByDurableNoteMarker && !recognizedByPendingIntent) {
-      logDebugError(
-        "EARLY EXIT",
-        `reason=no Macron POS marker or pending_intent_match order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} order_fallback_marker=${expectedOrderFallbackMarkerKey}:${expectedMarkerValue} durable_note_marker=[MSH_POS] source=macron_pos source_name=${
-          payloadSourceName || "unknown"
-        } pending_intent_attempted=${String(pendingIntentMatch.attempted)} pending_intent_reason=${pendingIntentMatch.reason}`,
-      );
-      logDebug("FINAL RESULT: skipped", "reason=no Macron POS marker or pending intent match");
-      return new Response();
-    }
-    logDebug(
-      "MARKER DETECTION DECISION",
-      `order_id=${order.id} line_marker_found=${String(recognizedByLineMarker)} fallback_marker_found=${String(
-        recognizedByFallbackMarker,
-      )} order_fallback_marker_found=${String(recognizedByOrderFallbackMarker)} note_marker_found=${String(
-        recognizedByDurableNoteMarker,
-      )} pending_intent_found=${String(recognizedByPendingIntent)} pending_intent_id=${
-        pendingIntentMatch.matchedIntent?.id || "none"
-      } recognition_path=${markerRecognitionPath}`,
-    );
-    if (!recognizedByLineMarker && recognizedByFallbackMarker) {
-      logDebug(
-        "MARKER FALLBACK RECOVERY",
-        `order_id=${order.id} likely_live_pos_property_stripping=true line_marker_found=false fallback_marker_found=true`,
-      );
-    }
-    if (!recognizedByLineMarker && !recognizedByFallbackMarker && recognizedByOrderFallbackMarker) {
-      logDebug(
-        "MARKER FALLBACK RECOVERY",
-        `order_id=${order.id} likely_live_pos_property_stripping=true line_marker_found=false fallback_marker_found=false order_fallback_marker_found=true`,
-      );
-    }
-    if (
-      !recognizedByLineMarker &&
-      !recognizedByFallbackMarker &&
-      !recognizedByOrderFallbackMarker &&
-      recognizedByDurableNoteMarker
-    ) {
-      logDebug(
-        "MARKER FALLBACK RECOVERY",
-        `order_id=${order.id} likely_live_pos_property_stripping=true line_marker_found=false fallback_marker_found=false order_fallback_marker_found=false note_marker_found=true`,
-      );
-    }
 
     const foNodes = order.fulfillmentOrders?.nodes || [];
     logDebug("FULFILLMENT ORDER COUNT", `order_id=${order.id} count=${foNodes.length}`);
@@ -1014,12 +1153,14 @@ export const action = async ({ request }) => {
     let orderInCount = 0;
     let feeSystemCount = 0;
     const pendingIntentFallbackOnly =
+      !recognizedByLineItemIntent &&
       !recognizedByLineMarker &&
       !recognizedByFallbackMarker &&
       !recognizedByOrderFallbackMarker &&
       !recognizedByDurableNoteMarker &&
       recognizedByPendingIntent;
     const orderLevelFallbackOnly =
+      !recognizedByLineItemIntent &&
       !recognizedByLineMarker &&
       !recognizedByFallbackMarker &&
       (recognizedByOrderFallbackMarker || recognizedByDurableNoteMarker);
@@ -1035,6 +1176,10 @@ export const action = async ({ request }) => {
           title: orderLine?.title || "",
           sku: orderLine?.sku || "",
         });
+      const lineItemIntent = parseLineItemIntentFromAttributes(attributes);
+      const lineIntentMode = lineItemIntent.found ? lineItemIntent.mode : "";
+      const lineIntentTakeNow = lineItemIntent.found ? lineItemIntent.takeNow : null;
+      const lineIntentSource = lineItemIntent.found ? lineItemIntent.source : "";
       const recoveredSource = orderLevelFallbackOnly && !feeOrSystem && source !== "macron_pos" ? "macron_pos" : source;
       const recoveredMode =
         orderLevelFallbackOnly && !feeOrSystem && mode === "" ? resolvedIntentFallback.mode : mode;
@@ -1050,13 +1195,19 @@ export const action = async ({ request }) => {
         pendingIntentFallbackOnly && !feeOrSystem && recoveredTakeNow === null
           ? pendingIntentMatch.matchedIntent?.takeNow
           : recoveredTakeNow;
+      const intentAuthoritativeSource = lineItemIntent.found ? lineIntentSource : effectiveSource;
+      const intentAuthoritativeMode = lineItemIntent.found && lineIntentMode !== "" ? lineIntentMode : effectiveMode;
+      const intentAuthoritativeTakeNow =
+        lineItemIntent.found && lineIntentTakeNow !== null ? lineIntentTakeNow : effectiveTakeNow;
       const recoveredEligible =
-        effectiveSource === "macron_pos" &&
+        intentAuthoritativeSource === "macron_pos" &&
         !feeOrSystem &&
-        shouldFulfillNowForMode(effectiveMode, effectiveTakeNow);
+        shouldFulfillNowForMode(intentAuthoritativeMode, intentAuthoritativeTakeNow);
       const intentRecoverySource =
         recoveredEligible && !eligible
-          ? resolvedOrderFallback.markerFound
+          ? lineItemIntent.found
+            ? "line_item_intent_properties"
+            : resolvedOrderFallback.markerFound
             ? "order_level_fallback"
             : pendingIntentFallbackOnly
               ? "pending_intent_fallback"
@@ -1066,16 +1217,16 @@ export const action = async ({ request }) => {
       const orderLineNumericId = parseNumericId(orderLineGid);
       const parsedBundleComponents = parseBundleComponentsFromAttributes(
         attributes,
-        effectiveMode,
-        effectiveTakeNow,
+        intentAuthoritativeMode,
+        intentAuthoritativeTakeNow,
       );
       const isBundleParent = Array.isArray(parsedBundleComponents) && parsedBundleComponents.length > 0;
       const effectiveEligible = recoveredEligible;
 
       if (feeOrSystem) feeSystemCount += 1;
-      if (effectiveMode === "order_in") orderInCount += 1;
-      if (effectiveMode === "take_today" && effectiveSource === "macron_pos" && !feeOrSystem) takeTodayEligibleCount += 1;
-      if (effectiveMode === "split" && effectiveSource === "macron_pos" && !feeOrSystem && effectiveTakeNow === true)
+      if (intentAuthoritativeMode === "order_in") orderInCount += 1;
+      if (intentAuthoritativeMode === "take_today" && intentAuthoritativeSource === "macron_pos" && !feeOrSystem) takeTodayEligibleCount += 1;
+      if (intentAuthoritativeMode === "split" && intentAuthoritativeSource === "macron_pos" && !feeOrSystem && intentAuthoritativeTakeNow === true)
         splitEligibleCount += 1;
 
       if (isBundleParent) {
@@ -1096,11 +1247,11 @@ export const action = async ({ request }) => {
         title: orderLine?.title || "",
         sku: orderLine?.sku || "",
         quantity: Number(orderLine?.quantity || 0),
-        source: effectiveSource,
+        source: intentAuthoritativeSource,
         rawMode,
-        parsedMode: effectiveMode,
+        parsedMode: intentAuthoritativeMode,
         rawTakeNow,
-        parsedTakeNow: effectiveTakeNow,
+        parsedTakeNow: intentAuthoritativeTakeNow,
         feeOrSystem,
         feeOrSystemReason,
         isBundleParent,
@@ -1119,9 +1270,9 @@ export const action = async ({ request }) => {
         quantity: Number(orderLine?.quantity || 0),
         attributes: summarizeAttributes(attributes),
         eligibility: {
-          source: effectiveSource,
-          mode: effectiveMode,
-          takeNow: effectiveTakeNow,
+          source: intentAuthoritativeSource,
+          mode: intentAuthoritativeMode,
+          takeNow: intentAuthoritativeTakeNow,
           feeOrSystem,
           feeOrSystemReason,
           isBundleParent,
