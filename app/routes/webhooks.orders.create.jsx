@@ -162,10 +162,15 @@ function shouldFulfillNowForMode(mode, takeNow) {
 }
 
 function evaluateLineEligibility({ attributes = {}, title = "", sku = "" } = {}) {
-  const source = normalizeSource(attributes._msh_source);
-  const rawMode = attributes._msh_fulfillment_mode || attributes._msh_fulfilment_mode;
+  const rawSource = attributes._msh_source || attributes._msh_fallback_source;
+  const source = normalizeSource(rawSource);
+  const rawMode =
+    attributes._msh_fulfillment_mode ||
+    attributes._msh_fulfilment_mode ||
+    attributes._msh_fallback_fulfillment_mode ||
+    attributes._msh_fallback_fulfilment_mode;
   const mode = normalizeMode(rawMode);
-  const rawTakeNow = attributes._msh_take_now;
+  const rawTakeNow = attributes._msh_take_now || attributes._msh_fallback_take_now;
   const takeNow = normalizeTakeNow(rawTakeNow);
   const feeClassification = classifyFeeOrSystemLine({ attributes, title, sku });
   const feeOrSystem = feeClassification.feeOrSystem;
@@ -189,9 +194,14 @@ function summarizeAttributes(attributes = {}) {
     Object.entries(attributes).filter(([key]) =>
       [
         "_msh_source",
+        "_msh_fallback_source",
         "_msh_fulfillment_mode",
         "_msh_fulfilment_mode",
+        "_msh_fallback_fulfillment_mode",
+        "_msh_fallback_fulfilment_mode",
         "_msh_take_now",
+        "_msh_fallback_take_now",
+        "_msh_fallback_bundle_summary",
         "Fee For Product",
         "Linked Product Variant Id",
         "Linked Fee Variant Id",
@@ -219,6 +229,13 @@ function hasMacronPosMarkerInOrderLineAttributes(orderLineNodes = []) {
   return orderLineNodes.some((orderLine) => {
     const attributes = attributeMap(orderLine?.customAttributes);
     return normalizeSource(attributes._msh_source) === "macron_pos";
+  });
+}
+
+function hasMacronPosFallbackMarkerInOrderLineAttributes(orderLineNodes = []) {
+  return orderLineNodes.some((orderLine) => {
+    const attributes = attributeMap(orderLine?.customAttributes);
+    return normalizeSource(attributes._msh_fallback_source) === "macron_pos";
   });
 }
 
@@ -412,19 +429,26 @@ export const action = async ({ request }) => {
 
     const expectedMarkerKey = "_msh_source";
     const expectedMarkerValue = "macron_pos";
+    const expectedFallbackMarkerKey = "_msh_fallback_source";
     const payloadLineItems = Array.isArray(payload?.line_items) ? payload.line_items : [];
     const payloadLineProperties = payloadLinePropertiesMap(payloadLineItems);
     const markedPayloadLines = payloadLineProperties.filter(
       (line) => normalizeSource(line.properties[expectedMarkerKey]) === expectedMarkerValue,
     );
+    const fallbackMarkedPayloadLines = payloadLineProperties.filter(
+      (line) => normalizeSource(line.properties[expectedFallbackMarkerKey]) === expectedMarkerValue,
+    );
     const markerFoundInRawPayload = markedPayloadLines.length > 0;
+    const fallbackMarkerFoundInRawPayload = fallbackMarkedPayloadLines.length > 0;
     const payloadSourceName = normalizeStringValue(payload?.source_name);
 
     logDebug(
       "MARKER DETECTION RAW PAYLOAD",
       `order_id=${payload?.id || "unknown"} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} found_in_raw_payload=${String(
         markerFoundInRawPayload,
-      )} marked_line_count=${markedPayloadLines.length} payload_line_count=${payloadLineItems.length} source_name=${
+      )} marked_line_count=${markedPayloadLines.length} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} fallback_found_in_raw_payload=${String(
+        fallbackMarkerFoundInRawPayload,
+      )} fallback_marked_line_count=${fallbackMarkedPayloadLines.length} payload_line_count=${payloadLineItems.length} source_name=${
         payloadSourceName || "unknown"
       }`,
     );
@@ -458,23 +482,45 @@ export const action = async ({ request }) => {
     );
 
     const markerFoundAfterFetch = hasMacronPosMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
+    const fallbackMarkerFoundAfterFetch = hasMacronPosFallbackMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
     const usedFallbackOrderFetchForMarkerDetection = !markerFoundInRawPayload;
+    const recognizedByLineMarker = markerFoundInRawPayload || markerFoundAfterFetch;
+    const recognizedByFallbackMarker = fallbackMarkerFoundInRawPayload || fallbackMarkerFoundAfterFetch;
+    const markerRecognitionPath = recognizedByLineMarker
+      ? "line_item_marker"
+      : recognizedByFallbackMarker
+        ? "fallback_marker"
+        : "none";
     logDebug(
       "MARKER DETECTION POST FETCH",
       `order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} used_fallback_fetch=${String(
         usedFallbackOrderFetchForMarkerDetection,
-      )} marker_found_after_fetch=${String(markerFoundAfterFetch)}`,
+      )} marker_found_after_fetch=${String(markerFoundAfterFetch)} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} fallback_marker_found_after_fetch=${String(
+        fallbackMarkerFoundAfterFetch,
+      )} marker_recognition_path=${markerRecognitionPath}`,
     );
 
-    if (!markerFoundInRawPayload && !markerFoundAfterFetch) {
+    if (!recognizedByLineMarker && !recognizedByFallbackMarker) {
       logDebugError(
         "EARLY EXIT",
-        `reason=no Macron POS marker in payload_or_fetched_order order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} source_name=${
+        `reason=no Macron POS marker in payload_or_fetched_order order_id=${order.id} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} fallback_marker=${expectedFallbackMarkerKey}:${expectedMarkerValue} source_name=${
           payloadSourceName || "unknown"
         }`,
       );
       logDebug("FINAL RESULT: skipped", "reason=no Macron POS marker in payload or fetched order");
       return new Response();
+    }
+    logDebug(
+      "MARKER DETECTION DECISION",
+      `order_id=${order.id} line_marker_found=${String(recognizedByLineMarker)} fallback_marker_found=${String(
+        recognizedByFallbackMarker,
+      )} recognition_path=${markerRecognitionPath}`,
+    );
+    if (!recognizedByLineMarker && recognizedByFallbackMarker) {
+      logDebug(
+        "MARKER FALLBACK RECOVERY",
+        `order_id=${order.id} likely_live_pos_property_stripping=true line_marker_found=false fallback_marker_found=true`,
+      );
     }
 
     const foNodes = order.fulfillmentOrders?.nodes || [];
@@ -696,6 +742,10 @@ export const action = async ({ request }) => {
     }
     logDebug("ORDER LINE DECISIONS JSON", `order_id=${order.id} data=${JSON.stringify(lineDecisions)}`);
     logDebug("SIMPLIFIED ORDER LINES JSON", `order_id=${order.id} data=${JSON.stringify(simplifiedOrderLines)}`);
+    logDebug(
+      "RECOVERED FULFILMENT INTENT",
+      `order_id=${order.id} eligible_lines=${eligibleOrderLines.length} take_today_lines=${takeTodayEligibleCount} split_take_now_lines=${splitEligibleCount} order_in_lines=${orderInCount} fee_or_system_lines=${feeSystemCount}`,
+    );
 
     if (eligibleOrderLines.length === 0) {
       logDebugError(
