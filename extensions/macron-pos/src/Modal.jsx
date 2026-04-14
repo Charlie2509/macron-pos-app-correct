@@ -1697,6 +1697,10 @@ function Modal() {
   var lastRollbackFeeLineRemoved = lastRollbackFeeLineRemovedState[0];
   var setLastRollbackFeeLineRemoved = lastRollbackFeeLineRemovedState[1];
 
+  var lastPingAttemptedState = useState(false);
+  var lastPingAttempted = lastPingAttemptedState[0];
+  var setLastPingAttempted = lastPingAttemptedState[1];
+
   var lastPingStatusState = useState('');
   var lastPingStatus = lastPingStatusState[0];
   var setLastPingStatus = lastPingStatusState[1];
@@ -1704,6 +1708,18 @@ function Modal() {
   var lastPingErrorState = useState('');
   var lastPingError = lastPingErrorState[0];
   var setLastPingError = lastPingErrorState[1];
+
+  var lastIntentRequestAttemptedState = useState(false);
+  var lastIntentRequestAttempted = lastIntentRequestAttemptedState[0];
+  var setLastIntentRequestAttempted = lastIntentRequestAttemptedState[1];
+
+  var lastIntentRequestStatusState = useState('');
+  var lastIntentRequestStatus = lastIntentRequestStatusState[0];
+  var setLastIntentRequestStatus = lastIntentRequestStatusState[1];
+
+  var lastIntentRequestErrorState = useState('');
+  var lastIntentRequestError = lastIntentRequestErrorState[0];
+  var setLastIntentRequestError = lastIntentRequestErrorState[1];
 
   var lastEnteredPersonalisationState = useState(false);
   var lastEnteredPersonalisation = lastEnteredPersonalisationState[0];
@@ -2799,8 +2815,12 @@ function Modal() {
     setLastRollbackDetail('');
     setLastRollbackMainLineRemoved(false);
     setLastRollbackFeeLineRemoved(false);
+    setLastPingAttempted(false);
     setLastPingStatus('');
     setLastPingError('');
+    setLastIntentRequestAttempted(false);
+    setLastIntentRequestStatus('');
+    setLastIntentRequestError('');
     if (!bundleAttachConfig || !bundleAttachConfig.enabled) {
       setBundleParentLineAdded(false);
       setBundleParentLineUuid('');
@@ -2976,22 +2996,24 @@ function Modal() {
         }
       }
       try {
+        setLastPingAttempted(true);
         try {
           var pingResponse = await fetch('https://macron-pos-app-correct.onrender.com/api/macron-pos/ping', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ test: true }),
           });
-          setLastPingStatus('status=' + pingResponse.status + ' ok=' + (pingResponse.ok ? 'true' : 'false'));
+          setLastPingStatus('status=' + String(pingResponse.status) + ' ok=' + String(pingResponse.ok));
+          setLastPingError('');
           console.log('[MSH PendingIntent] ping status=', pingResponse.status, 'ok=', pingResponse.ok);
         } catch (pingError) {
-          setLastPingError(pingError && pingError.message ? pingError.message : String(pingError));
-          console.error(
-            '[MSH PendingIntent] ping failed=',
-            pingError && pingError.message ? pingError.message : String(pingError)
-          );
+          var pingMessage = pingError && pingError.message ? pingError.message : String(pingError);
+          setLastPingStatus('failed');
+          setLastPingError(pingMessage);
+          console.error('[MSH PendingIntent] ping failed=', pingMessage);
         }
 
+        setLastIntentRequestAttempted(true);
         var pendingIntentResponse = await fetch(pendingIntentEndpoint, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
@@ -3024,6 +3046,8 @@ function Modal() {
           'PENDING_INTENT_CREATE RESPONSE BODY JSON',
           pendingIntentBody,
         );
+        setLastIntentRequestStatus('status=' + String(pendingIntentResponse.status) + ' ok=' + String(pendingIntentResponse.ok));
+        setLastIntentRequestError('');
         if (!pendingIntentResponse.ok || !pendingIntentBody || pendingIntentBody.ok !== true) {
           console.error('PENDING_INTENT_CREATE REQUEST FAILURE', 'status=', pendingIntentResponse.status, 'body=', pendingIntentBodyText || '(empty)');
           if (showDebug) {
@@ -3031,7 +3055,10 @@ function Modal() {
           }
         }
       } catch (pendingIntentError) {
-        var pendingIntentErrorMessage = pendingIntentError && pendingIntentError.message ? pendingIntentError.message : String(pendingIntentError);
+        var pendingIntentMessage = pendingIntentError && pendingIntentError.message ? pendingIntentError.message : String(pendingIntentError);
+        setLastIntentRequestStatus('failed');
+        setLastIntentRequestError(pendingIntentMessage);
+        var pendingIntentErrorMessage = pendingIntentMessage;
         console.error('PENDING_INTENT_CREATE REQUEST CATCH', pendingIntentErrorMessage, pendingIntentError);
         if (showDebug) {
           toast('Debug: pending intent request crashed: ' + pendingIntentErrorMessage);
@@ -3502,8 +3529,12 @@ function Modal() {
           <s-text>Rollback detail: {lastRollbackDetail === '' ? 'none' : lastRollbackDetail}</s-text>
           <s-text>Main line removed during rollback: {lastRollbackMainLineRemoved ? 'yes' : 'no'}</s-text>
           <s-text>Fee line removed during rollback: {lastRollbackFeeLineRemoved ? 'yes' : 'no'}</s-text>
+          <s-text>Ping attempted: {lastPingAttempted ? 'yes' : 'no'}</s-text>
           <s-text>Ping status: {lastPingStatus === '' ? 'none' : lastPingStatus}</s-text>
           <s-text>Ping error: {lastPingError === '' ? 'none' : lastPingError}</s-text>
+          <s-text>Intent request attempted: {lastIntentRequestAttempted ? 'yes' : 'no'}</s-text>
+          <s-text>Intent request status: {lastIntentRequestStatus === '' ? 'none' : lastIntentRequestStatus}</s-text>
+          <s-text>Intent request error: {lastIntentRequestError === '' ? 'none' : lastIntentRequestError}</s-text>
           <s-text>Last cart status: {lastCartActionStatus}</s-text>
           <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
           <s-text>Last fee error: {lastFeeErrorMessage === '' ? 'none' : lastFeeErrorMessage}</s-text>
