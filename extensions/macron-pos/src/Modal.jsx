@@ -566,27 +566,71 @@ function buildPendingIntentBundleSummary(rawProperties, bundleAttachConfig) {
 }
 
 async function resolveShopDomainForIntentPost() {
+  console.log('PENDING_INTENT_CREATE SHOP RESOLVE START');
   try {
     var response = await fetch('shopify:admin/api/graphql.json', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({query: 'query MacronPosIntentShopDomain { shop { myshopifyDomain } }'}),
     });
-    var body = await response.json();
+    var bodyText = await response.text();
+    var body = null;
+    try {
+      body = bodyText ? JSON.parse(bodyText) : null;
+    } catch (_shopDomainParseError) {
+      body = null;
+    }
     var domain = toStr(body && body.data && body.data.shop ? body.data.shop.myshopifyDomain : '');
+    console.log(
+      'PENDING_INTENT_CREATE SHOP RESOLVE RESULT',
+      'status=',
+      response.status,
+      'ok=',
+      response.ok,
+      'domain=',
+      domain || '(empty)',
+      'body=',
+      bodyText || '(empty)',
+    );
     return domain;
   } catch (error) {
-    console.error('[MSH PendingIntent] shop domain lookup failed=', error && error.message ? error.message : String(error));
+    console.error('PENDING_INTENT_CREATE SHOP RESOLVE ERROR', error && error.message ? error.message : String(error));
     return '';
   }
 }
 
 function resolvePendingIntentEndpoint() {
-  var runtimeAppUrl = typeof globalThis !== 'undefined' && globalThis && globalThis.SHOPIFY_APP_URL ? toStr(globalThis.SHOPIFY_APP_URL) : '';
+  var runtimeAppUrl = '';
+  try {
+    var globalScope = Function('return this')();
+    runtimeAppUrl = globalScope && globalScope.SHOPIFY_APP_URL ? toStr(globalScope.SHOPIFY_APP_URL) : '';
+  } catch (_globalScopeError) {
+    runtimeAppUrl = '';
+  }
   if (runtimeAppUrl !== '') {
     return runtimeAppUrl.replace(/\/$/, '') + '/api/macron-pos/intent';
   }
   return '/api/macron-pos/intent';
+}
+
+function pendingIntentPayloadSummary(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return {};
+  }
+  return {
+    shop: toStr(payload.shop),
+    source: toStr(payload.source),
+    fulfillmentMode: toStr(payload.fulfillmentMode),
+    takeNow: toStr(payload.takeNow),
+    productTitle: toStr(payload.productTitle),
+    variantTitle: toStr(payload.variantTitle),
+    normalizedVariantId: toStr(payload.normalizedVariantId),
+    quantity: payload.quantity,
+    hasFee: Boolean(payload.hasFee),
+    isBundle: Boolean(payload.isBundle),
+    bundleSummaryPresent: toStr(payload.bundleSummary) !== '',
+    createdAtClient: toStr(payload.createdAtClient),
+  };
 }
 
 function bundleComponentLineText(index, componentTitle, variantTitle) {
@@ -2917,33 +2961,65 @@ function Modal() {
         bundleSummary: pendingIntentBundleSummary,
         createdAtClient: new Date().toISOString(),
       };
-      console.log('[MSH PendingIntent] request endpoint=', resolvePendingIntentEndpoint());
-      console.log('[MSH PendingIntent] request payload=', pendingIntentPayload);
+      var pendingIntentEndpoint = resolvePendingIntentEndpoint();
+      var pendingIntentSummary = pendingIntentPayloadSummary(pendingIntentPayload);
+      console.log('PENDING_INTENT_CREATE REQUEST START', 'url=', pendingIntentEndpoint, 'payload_summary=', pendingIntentSummary);
+      if (toStr(pendingIntentShop) === '') {
+        console.error('PENDING_INTENT_CREATE REQUEST BLOCKED', 'reason=missing_shop', 'payload_summary=', pendingIntentSummary);
+        if (showDebug) {
+          toast('Debug: pending intent not created (missing shop domain)');
+        }
+      } else if (pendingIntentEndpoint.charAt(0) === '/') {
+        console.error('PENDING_INTENT_CREATE REQUEST WARNING', 'reason=relative_endpoint', 'url=', pendingIntentEndpoint);
+        if (showDebug) {
+          toast('Debug: pending intent endpoint is relative; set SHOPIFY_APP_URL for POS extension');
+        }
+      }
       try {
-        var pendingIntentResponse = await fetch(resolvePendingIntentEndpoint(), {
+        var pendingIntentResponse = await fetch(pendingIntentEndpoint, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(pendingIntentPayload),
         });
+        var pendingIntentBodyText = '';
+        try {
+          pendingIntentBodyText = await pendingIntentResponse.text();
+        } catch (_pendingIntentParseError) {
+          pendingIntentBodyText = '';
+        }
         var pendingIntentBody = null;
         try {
-          pendingIntentBody = await pendingIntentResponse.json();
-        } catch (_pendingIntentParseError) {
+          pendingIntentBody = pendingIntentBodyText ? JSON.parse(pendingIntentBodyText) : null;
+        } catch (_pendingIntentJsonParseError) {
           pendingIntentBody = null;
         }
         console.log(
-          '[MSH PendingIntent] response status=',
+          'PENDING_INTENT_CREATE RESPONSE',
+          'status=',
           pendingIntentResponse.status,
           'ok=',
           pendingIntentResponse.ok,
-          'body=',
+          'success=',
+          pendingIntentResponse.ok && pendingIntentBody && pendingIntentBody.ok === true,
+          'body_text=',
+          pendingIntentBodyText || '(empty)',
+        );
+        console.log(
+          'PENDING_INTENT_CREATE RESPONSE BODY JSON',
           pendingIntentBody,
         );
+        if (!pendingIntentResponse.ok || !pendingIntentBody || pendingIntentBody.ok !== true) {
+          console.error('PENDING_INTENT_CREATE REQUEST FAILURE', 'status=', pendingIntentResponse.status, 'body=', pendingIntentBodyText || '(empty)');
+          if (showDebug) {
+            toast('Debug: pending intent create failed (see console)');
+          }
+        }
       } catch (pendingIntentError) {
-        console.error(
-          '[MSH PendingIntent] request failed error=',
-          pendingIntentError && pendingIntentError.message ? pendingIntentError.message : String(pendingIntentError),
-        );
+        var pendingIntentErrorMessage = pendingIntentError && pendingIntentError.message ? pendingIntentError.message : String(pendingIntentError);
+        console.error('PENDING_INTENT_CREATE REQUEST CATCH', pendingIntentErrorMessage, pendingIntentError);
+        if (showDebug) {
+          toast('Debug: pending intent request crashed: ' + pendingIntentErrorMessage);
+        }
       }
 
       console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
