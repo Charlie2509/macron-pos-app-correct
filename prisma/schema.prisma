@@ -32,3 +32,23 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+
+model PendingMacronPosIntent {
+  id               String   @id @default(cuid())
+  shop             String
+  source           String   @default("macron_pos")
+  fulfillmentMode  String
+  takeNow          Boolean?
+  productTitle     String
+  variantTitle     String?
+  normalizedVariantId String?
+  quantity         Int      @default(1)
+  hasFee           Boolean  @default(false)
+  isBundle         Boolean  @default(false)
+  bundleSummary    String?
+  fingerprint      String?
+  createdAt        DateTime @default(now())
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  matchedOrderId   String?
+}
