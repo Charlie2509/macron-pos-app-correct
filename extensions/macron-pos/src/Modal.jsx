@@ -300,85 +300,6 @@ function sanitizeLineItemProperties(rawProperties) {
   return sanitized;
 }
 
-function toPosLineItemProperties(rawProperties) {
-  var entries = [];
-  if (!rawProperties) {
-    return entries;
-  }
-
-  function pushSanitizedEntry(rawKey, rawValue) {
-    var key = toStr(rawKey).trim();
-    if (key === '') {
-      return;
-    }
-    if (rawValue === null || rawValue === undefined) {
-      return;
-    }
-
-    var converted = '';
-    if (typeof rawValue === 'boolean') {
-      converted = rawValue ? 'true' : 'false';
-    } else if (typeof rawValue === 'number') {
-      converted = String(rawValue);
-    } else if (Array.isArray(rawValue)) {
-      converted = rawValue.join(' | ');
-    } else if (typeof rawValue === 'object') {
-      try {
-        converted = JSON.stringify(rawValue);
-      } catch (err) {
-        converted = String(rawValue);
-      }
-    } else {
-      converted = String(rawValue);
-    }
-
-    var value = toStr(converted).trim();
-    if (value === '') {
-      return;
-    }
-    entries.push({key: key, value: value});
-  }
-
-  if (Array.isArray(rawProperties)) {
-    for (var i = 0; i < rawProperties.length; i += 1) {
-      var row = rawProperties[i];
-      if (Array.isArray(row) && row.length >= 2) {
-        pushSanitizedEntry(row[0], row[1]);
-        continue;
-      }
-      if (row && typeof row === 'object' && !Array.isArray(row) && row.key !== undefined) {
-        pushSanitizedEntry(row.key, row.value);
-      }
-    }
-    return entries;
-  }
-
-  if (typeof rawProperties === 'object') {
-    var keys = Object.keys(rawProperties);
-    for (var k = 0; k < keys.length; k += 1) {
-      var rawKey = keys[k];
-      pushSanitizedEntry(rawKey, rawProperties[rawKey]);
-    }
-    return entries;
-  }
-
-  if (typeof rawProperties.length === 'number') {
-    try {
-      var arr = Array.from(rawProperties);
-      for (var j = 0; j < arr.length; j += 1) {
-        var item = arr[j];
-        if (item && typeof item === 'object' && item.key !== undefined) {
-          pushSanitizedEntry(item.key, item.value);
-        }
-      }
-    } catch (arrayLikeErr) {
-      // ignore invalid array-like input
-    }
-  }
-
-  return entries;
-}
-
 function normalizeBundleComponentReference(rawReference) {
   var raw = toStr(rawReference);
   if (raw === '') {
@@ -432,6 +353,7 @@ function buildMshLineItemIntentProperties(options) {
   var hasFee = config.hasFee ? true : false;
   var isBundle = config.isBundle ? true : false;
   var bundleSummary = toStr(config.bundleSummary);
+  var quantity = toStr(config.quantity || '1');
   var baseIntent = buildMshIntentProperties(mode, takeNowInSplit);
   var nowIso = new Date().toISOString();
   var properties = {
@@ -441,7 +363,7 @@ function buildMshLineItemIntentProperties(options) {
     _msh_intent_product_title: productTitle,
     _msh_intent_variant_title: variantTitle,
     _msh_intent_variant_id: normalizedVariantId,
-    _msh_intent_quantity: '1',
+    _msh_intent_quantity: quantity,
     _msh_intent_has_fee: hasFee ? 'true' : 'false',
     _msh_intent_is_bundle: isBundle ? 'true' : 'false',
     _msh_intent_created_at: nowIso,
@@ -449,9 +371,7 @@ function buildMshLineItemIntentProperties(options) {
     _msh_intent_fulfilment_mode: baseIntent._msh_fulfilment_mode,
     _msh_intent_take_now: baseIntent._msh_take_now,
   };
-  if (bundleSummary !== '') {
-    properties._msh_intent_bundle_summary = bundleSummary;
-  }
+  properties._msh_intent_bundle_summary = bundleSummary;
   return properties;
 }
 
@@ -1559,6 +1479,14 @@ function Modal() {
   var lastCartLineItemUuidState = useState('');
   var lastCartLineItemUuid = lastCartLineItemUuidState[0];
   var setLastCartLineItemUuid = lastCartLineItemUuidState[1];
+
+  var lastMainLineAddStatusState = useState('idle');
+  var lastMainLineAddStatus = lastMainLineAddStatusState[0];
+  var setLastMainLineAddStatus = lastMainLineAddStatusState[1];
+
+  var lastPropertiesAttachAttemptedState = useState(false);
+  var lastPropertiesAttachAttempted = lastPropertiesAttachAttemptedState[0];
+  var setLastPropertiesAttachAttempted = lastPropertiesAttachAttemptedState[1];
 
   var lastPropertiesAttachStatusState = useState('idle');
   var lastPropertiesAttachStatus = lastPropertiesAttachStatusState[0];
@@ -2755,8 +2683,10 @@ function Modal() {
     setLastCartActionStatus('idle');
     setLastCartErrorMessage('');
     setLastCartLineItemUuid('');
+    setLastMainLineAddStatus('idle');
+    setLastPropertiesAttachAttempted(false);
     setLastPropertiesAttachStatus('idle');
-    setLastLineItemProperties(lineItemProperties || {});
+    setLastLineItemProperties({});
     setLastFeeAmount(null);
     setLastFeeRequired(false);
     setLastFeeVariantId('');
@@ -2926,25 +2856,28 @@ function Modal() {
       var pendingIntentTakeNow = toStr(propertiesObject._msh_take_now);
       var pendingIntentBundleSummary = buildPendingIntentBundleSummary(propertiesObject, bundleAttachConfig);
       var derivedSplitTakeNow = pendingIntentTakeNow === 'true';
+      var mainLineQuantity = 1;
       var explicitLineItemIntentProps = buildMshLineItemIntentProperties({
         mode: pendingIntentMode,
         takeNowInSplit: derivedSplitTakeNow,
         productTitle: product && product.title ? String(product.title) : '',
         variantTitle: variant && variant.title ? String(variant.title) : '',
         normalizedVariantId: String(normalized.value),
+        quantity: String(mainLineQuantity),
         hasFee: feeRequired,
         isBundle: Boolean(bundleAttachConfig && bundleAttachConfig.enabled),
-        bundleSummary: pendingIntentBundleSummary,
+        bundleSummary: pendingIntentBundleSummary || '',
       });
       var explicitIntentKeys = Object.keys(explicitLineItemIntentProps);
       for (var i = 0; i < explicitIntentKeys.length; i += 1) {
         var explicitKey = explicitIntentKeys[i];
         propertiesObject[explicitKey] = explicitLineItemIntentProps[explicitKey];
       }
-      var posProperties = toPosLineItemProperties(propertiesObject);
-      var fallbackMarkerProperties = buildMshFallbackMarkerProperties(propertiesObject);
-      var orderFallbackProperties = buildMshOrderFallbackProperties(propertiesObject, bundleAttachConfig);
-      var durableNoteToken = buildMshDurableNoteToken(propertiesObject, bundleAttachConfig);
+      var mainLineProperties = sanitizeLineItemProperties(propertiesObject);
+      setLastLineItemProperties(mainLineProperties);
+      var fallbackMarkerProperties = buildMshFallbackMarkerProperties(mainLineProperties);
+      var orderFallbackProperties = buildMshOrderFallbackProperties(mainLineProperties, bundleAttachConfig);
+      var durableNoteToken = buildMshDurableNoteToken(mainLineProperties, bundleAttachConfig);
       var durableNoteProperties = buildMshDurableNoteProperties(durableNoteToken);
       var fallbackMarkerKeyCount = Object.keys(fallbackMarkerProperties).length;
       var orderFallbackKeyCount = Object.keys(orderFallbackProperties).length;
@@ -2958,20 +2891,21 @@ function Modal() {
       console.log('PENDING_INTENT_CREATE REQUEST SKIPPED', 'reason=skipped_direct_fetch', 'intent_source=line_item_properties');
 
       console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
-      console.log('[MSH Marker] line_item_properties payload=', posProperties);
+      console.log('[MSH Marker] line_item_properties payload=', mainLineProperties);
       console.log('[MSH Marker] fallback_marker payload=', fallbackMarkerProperties);
       console.log('[MSH Marker] order_fallback payload=', orderFallbackProperties);
       console.log('[MSH Marker] durable_note token=', durableNoteToken);
       console.log('[MSH Marker] durable_note payload=', durableNoteProperties);
       console.log('[BundleAdd] final parent title=', product && product.title ? product.title : '');
       console.log('[BundleAdd] final normalized parent variant id=', normalized.value);
-      console.log('[BundleAdd] final addLineItem args=', [normalized.value, 1, posProperties]);
-      console.log('[BundleAdd] final properties typeof=', typeof posProperties);
-      console.log('[BundleAdd] final properties Array.isArray=', Array.isArray(posProperties));
-      console.log('[BundleAdd] first 3 properties=', Array.isArray(posProperties) ? posProperties.slice(0, 3) : []);
+      console.log('[BundleAdd] final addLineItem args=', [normalized.value, mainLineQuantity]);
+      setLastMainLineAddStatus('attempting');
       try {
-        mainUuid = await shopify.cart.addLineItem(normalized.value, 1, posProperties);
+        mainUuid = await shopify.cart.addLineItem(normalized.value, mainLineQuantity);
+        setLastMainLineAddStatus('success');
+        console.log('[MSH POS DEBUG] MAIN LINE ADDED', { uuid: mainUuid ? String(mainUuid) : '', variantId: String(normalized.value), quantity: String(mainLineQuantity) });
       } catch (mainAddErr) {
+        setLastMainLineAddStatus('failed');
         console.error('[BundleAdd] main addLineItem error object=', mainAddErr);
         console.error('[BundleAdd] main addLineItem error message=', mainAddErr && mainAddErr.message ? mainAddErr.message : String(mainAddErr));
         throw mainAddErr;
@@ -2984,10 +2918,22 @@ function Modal() {
         return false;
       }
 
-      if (posProperties.length > 0) {
-        setLastPropertiesAttachStatus('success');
+      setLastPropertiesAttachAttempted(true);
+      if (shopify.cart && typeof shopify.cart.addLineItemProperties === 'function') {
+        console.log('[MSH POS DEBUG] LINE ITEM PROPERTIES OUTBOUND', mainLineProperties);
+        try {
+          await shopify.cart.addLineItemProperties(mainUuid, mainLineProperties);
+          setLastPropertiesAttachStatus('success');
+          console.log('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH SUCCESS', { uuid: String(mainUuid) });
+        } catch (mainPropsErr) {
+          setLastPropertiesAttachStatus('failed');
+          console.error('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH FAILURE', mainPropsErr && mainPropsErr.message ? mainPropsErr.message : String(mainPropsErr));
+          throw mainPropsErr;
+        }
       } else {
-        setLastPropertiesAttachStatus('skipped');
+        setLastPropertiesAttachStatus('failed');
+        console.error('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH FAILURE', 'Cart API missing addLineItemProperties');
+        throw new Error('Cart API missing addLineItemProperties for main line');
       }
       if (fallbackMarkerKeyCount > 0) {
         if (shopify.cart && typeof shopify.cart.addLineItemProperties === 'function') {
@@ -3394,8 +3340,10 @@ function Modal() {
           <s-text>Cart line count: {cartLineCount()}</s-text>
           <s-text>Last cart before: {lastCartBeforeCount}</s-text>
           <s-text>Last cart after: {lastCartAfterCount}</s-text>
-          <s-text>Last line item uuid: {lastCartLineItemUuid}</s-text>
-          <s-text>Properties attach: {lastPropertiesAttachStatus}</s-text>
+          <s-text>Last main line uuid: {lastCartLineItemUuid === '' ? 'none' : lastCartLineItemUuid}</s-text>
+          <s-text>Main line add status: {lastMainLineAddStatus}</s-text>
+          <s-text>Properties attach attempted: {lastPropertiesAttachAttempted ? 'yes' : 'no'}</s-text>
+          <s-text>Properties attach status: {lastPropertiesAttachStatus}</s-text>
           <s-text>Fee amount: {lastFeeAmount === null ? 'none' : '£' + Number(lastFeeAmount).toFixed(2)}</s-text>
           <s-text>Entered personalisation: {lastEnteredPersonalisation ? 'yes' : 'no'}</s-text>
           <s-text>Fee required: {lastFeeRequired ? 'yes' : 'no'}</s-text>
@@ -3430,16 +3378,7 @@ function Modal() {
           <s-text>Last cart status: {lastCartActionStatus}</s-text>
           <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
           <s-text>Last fee error: {lastFeeErrorMessage === '' ? 'none' : lastFeeErrorMessage}</s-text>
-          <s-text size="small">
-            Line item properties preview:{' '}
-            {lastLineItemProperties && Object.keys(lastLineItemProperties).length > 0
-              ? Object.keys(lastLineItemProperties)
-                  .map(function (k) {
-                    return k + ':' + lastLineItemProperties[k];
-                  })
-                  .join(', ')
-              : 'none'}
-          </s-text>
+          <s-text size="small">Line item properties preview: {lastLineItemProperties && Object.keys(lastLineItemProperties).length > 0 ? JSON.stringify(lastLineItemProperties) : 'none'}</s-text>
           </s-stack>
         </s-box>
       </s-section>

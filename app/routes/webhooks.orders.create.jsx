@@ -929,6 +929,29 @@ export const action = async ({ request }) => {
     const fallbackMarkerFoundInRawPayload = fallbackMarkedPayloadLines.length > 0;
     const payloadSourceName = normalizeStringValue(payload?.source_name);
 
+    for (const payloadLine of payloadLineItems) {
+      const rawProperties = Array.isArray(payloadLine?.properties) ? payloadLine.properties : [];
+      const rawPropertyMap = {};
+      for (const property of rawProperties) {
+        if (!property || typeof property.name !== "string") continue;
+        rawPropertyMap[property.name] = property.value == null ? "" : String(property.value);
+      }
+      const hasMshSource = normalizeSource(rawPropertyMap._msh_source) === expectedMarkerValue;
+      const hasIntentKeys = Object.keys(rawPropertyMap).some((key) => key.startsWith("_msh_intent_"));
+      logDebug(
+        "LINE ITEM RAW PROPERTIES",
+        `line_title=${String(payloadLine?.title || payloadLine?.name || "")} quantity=${String(payloadLine?.quantity || "")} variant_id=${String(
+          payloadLine?.variant_id || "",
+        )} raw_properties=${JSON.stringify(rawProperties)} has_msh_source=${String(hasMshSource)} has_msh_intent_keys=${String(hasIntentKeys)}`,
+      );
+      logDebug(
+        hasMshSource && hasIntentKeys ? "LINE ITEM INTENT FOUND" : "LINE ITEM INTENT NOT FOUND",
+        `line_title=${String(payloadLine?.title || payloadLine?.name || "")} quantity=${String(payloadLine?.quantity || "")} variant_id=${String(
+          payloadLine?.variant_id || "",
+        )} has_msh_source=${String(hasMshSource)} has_msh_intent_keys=${String(hasIntentKeys)}`,
+      );
+    }
+
     logDebug(
       "MARKER DETECTION RAW PAYLOAD",
       `order_id=${payload?.id || "unknown"} expected_marker=${expectedMarkerKey}:${expectedMarkerValue} found_in_raw_payload=${String(
@@ -1169,7 +1192,22 @@ export const action = async ({ request }) => {
     const bundleParents = [];
 
     for (const orderLine of order.lineItems?.nodes || []) {
+      const rawCustomAttributes = Array.isArray(orderLine?.customAttributes) ? orderLine.customAttributes : [];
       const attributes = attributeMap(orderLine.customAttributes);
+      const hasMshSource = normalizeSource(attributes._msh_source) === expectedMarkerValue;
+      const hasIntentKeys = Object.keys(attributes).some((key) => key.startsWith("_msh_intent_"));
+      logDebug(
+        "LINE ITEM RAW PROPERTIES",
+        `line_title=${String(orderLine?.title || "")} quantity=${String(orderLine?.quantity || "")} variant_id=${String(
+          orderLine?.variant?.id || "",
+        )} raw_properties=${JSON.stringify(rawCustomAttributes)} has_msh_source=${String(hasMshSource)} has_msh_intent_keys=${String(hasIntentKeys)}`,
+      );
+      logDebug(
+        hasMshSource && hasIntentKeys ? "LINE ITEM INTENT FOUND" : "LINE ITEM INTENT NOT FOUND",
+        `line_title=${String(orderLine?.title || "")} quantity=${String(orderLine?.quantity || "")} variant_id=${String(
+          orderLine?.variant?.id || "",
+        )} has_msh_source=${String(hasMshSource)} has_msh_intent_keys=${String(hasIntentKeys)}`,
+      );
       const { source, rawMode, mode, rawTakeNow, takeNow, eligible, feeOrSystem, feeOrSystemReason } =
         evaluateLineEligibility({
           attributes,
