@@ -17,3 +17,12 @@ target = "pos.home.tile.render"
 [[extensions.targeting]]
 module = "./src/Modal.jsx"
 target = "pos.home.modal.render"
+
+
+[[extensions.targeting]]
+module = "./src/GiftCardTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/GiftCardModal.jsx"
+target = "pos.home.modal.render"
