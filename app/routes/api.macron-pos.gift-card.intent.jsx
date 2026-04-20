@@ -60,6 +60,8 @@ function validateAmount(rawAmount) {
 }
 
 export const action = async ({ request }) => {
+  console.log("[gift-card-intent] request reached", { method: request.method });
+
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: responseHeaders() });
   }
@@ -71,7 +73,11 @@ export const action = async ({ request }) => {
   let posContext;
   try {
     posContext = await authenticate.pos(request);
+    console.log("[gift-card-intent] POS auth success");
   } catch (error) {
+    console.error("[gift-card-intent] POS auth failure", {
+      message: error?.message || String(error),
+    });
     return jsonResponse({ ok: false, error: "Unauthorized POS request" }, 401);
   }
 
@@ -99,6 +105,7 @@ export const action = async ({ request }) => {
   }
 
   const shop = extractShopDomain(posContext?.sessionToken?.dest);
+  console.log("[gift-card-intent] shop resolved", { shop });
   if (!shop) {
     return jsonResponse({ ok: false, error: "shop_resolution_failed" }, 400);
   }
@@ -107,20 +114,29 @@ export const action = async ({ request }) => {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + INTENT_TTL_MS);
 
-  const created = await db.pendingGiftCardActivation.create({
-    data: {
-      shop,
-      intentToken,
-      code: codeValidation.code,
-      amount: amountValidation.amount,
-      currency,
-      note: note || null,
-      lineItemUuid,
-      lineItemTitle: lineItemTitle || null,
-      status: "pending",
-      expiresAt,
-    },
-  });
+  let created;
+  try {
+    created = await db.pendingGiftCardActivation.create({
+      data: {
+        shop,
+        intentToken,
+        code: codeValidation.code,
+        amount: amountValidation.amount,
+        currency,
+        note: note || null,
+        lineItemUuid,
+        lineItemTitle: lineItemTitle || null,
+        status: "pending",
+        expiresAt,
+      },
+    });
+    console.log("[gift-card-intent] DB create success", { id: created.id });
+  } catch (error) {
+    console.error("[gift-card-intent] DB create failure", {
+      message: error?.message || String(error),
+    });
+    throw error;
+  }
 
   return jsonResponse(
     {
