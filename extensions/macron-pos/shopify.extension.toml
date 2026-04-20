@@ -17,3 +17,18 @@ target = "pos.home.tile.render"
 [[extensions.targeting]]
 module = "./src/Modal.jsx"
 target = "pos.home.modal.render"
+
+[[extensions]]
+type = "ui_extension"
+name = "Macron Gift Cards"
+handle = "macron-pos-gift-cards"
+uid = "00ce0987-2587-1468-55c2-269988dc769e16104a9b"
+description = "Macron POS gift card activation tool"
+
+[[extensions.targeting]]
+module = "./src/GiftCardTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/GiftCardModal.jsx"
+target = "pos.home.modal.render"

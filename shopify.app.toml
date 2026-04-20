@@ -24,7 +24,7 @@ api_version = "2026-04"
   uri = "/webhooks/orders/create"
 
 [access_scopes]
-scopes = "write_products,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders"
+scopes = "write_products,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,write_gift_cards"
 optional_scopes = []
 use_legacy_install_flow = false
 
