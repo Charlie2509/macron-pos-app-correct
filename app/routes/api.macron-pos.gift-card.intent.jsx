@@ -59,6 +59,14 @@ function validateAmount(rawAmount) {
   return { ok: true, amount: parsed.toFixed(2) };
 }
 
+export const loader = async ({ request }) => {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: responseHeaders() });
+  }
+
+  return new Response("Not Found", { status: 404 });
+};
+
 export const action = async ({ request }) => {
   console.log("[gift-card-intent] request reached", { method: request.method });
 
