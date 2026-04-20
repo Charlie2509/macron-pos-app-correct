@@ -1,5 +1,5 @@
 import db from "../db.server";
-import { authenticate, sessionStorage } from "../shopify.server";
+import { authenticate, sessionStorage, unauthenticated } from "../shopify.server";
 
 const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
   query MacronOrderForFulfillment($orderId: ID!) {
@@ -94,6 +94,116 @@ const GIFT_CARD_CREATE_MUTATION = `#graphql
     }
   }
 `;
+
+function normalizeShopDomain(rawShop) {
+  const value = String(rawShop == null ? "" : rawShop).trim().toLowerCase();
+  if (!value) return "";
+  const urlMatch = value.match(/^https?:\/\/([^/?#]+)/i);
+  if (urlMatch && urlMatch[1]) return String(urlMatch[1]).trim().toLowerCase();
+  return value.replace(/\/$/, "");
+}
+
+async function findOfflineSessionsForShop(shop) {
+  const normalizedShop = normalizeShopDomain(shop);
+  if (!normalizedShop) {
+    return { normalizedShop, sessions: [], lookupError: "" };
+  }
+
+  const sessionsById = new Map();
+  let lookupError = "";
+
+  try {
+    const direct = await sessionStorage.findSessionsByShop(normalizedShop);
+    for (const session of direct || []) {
+      if (session?.id) sessionsById.set(session.id, session);
+    }
+  } catch (error) {
+    lookupError = error?.message || String(error);
+  }
+
+  try {
+    const allSessions = await db.session.findMany({
+      select: { id: true, shop: true, isOnline: true, accessToken: true, expires: true },
+      take: 200,
+      orderBy: { id: "desc" },
+    });
+
+    for (const session of allSessions || []) {
+      const sessionShop = normalizeShopDomain(session?.shop);
+      if (!sessionShop || sessionShop !== normalizedShop) continue;
+      if (session?.id) sessionsById.set(session.id, session);
+    }
+  } catch (error) {
+    const message = error?.message || String(error);
+    lookupError = lookupError ? `${lookupError}; ${message}` : message;
+  }
+
+  return {
+    normalizedShop,
+    sessions: Array.from(sessionsById.values()),
+    lookupError,
+  };
+}
+
+function pickBestOfflineSession(sessions = []) {
+  const offline = (sessions || []).filter((session) => !session?.isOnline && String(session?.accessToken || "").trim());
+  if (offline.length === 0) return null;
+
+  const preferred = offline.find((session) => String(session?.id || "").toLowerCase().includes("offline"));
+  return preferred || offline[0];
+}
+
+async function resolveWebhookAdminClient({ shop, adminFromWebhook }) {
+  const details = {
+    shopInput: String(shop || ""),
+    normalizedShop: normalizeShopDomain(shop),
+    offlineSessionLookupAttempted: false,
+    foundSessions: 0,
+    foundOfflineSessions: 0,
+    selectedOfflineSessionId: "",
+    adminClientSource: "",
+    adminClientReady: false,
+    lookupError: "",
+    adminClientError: "",
+  };
+
+  if (adminFromWebhook) {
+    details.adminClientSource = "authenticate.webhook";
+    details.adminClientReady = true;
+    return { admin: adminFromWebhook, details };
+  }
+
+  details.offlineSessionLookupAttempted = true;
+  const lookup = await findOfflineSessionsForShop(shop);
+  details.normalizedShop = lookup.normalizedShop;
+  details.lookupError = lookup.lookupError;
+  details.foundSessions = lookup.sessions.length;
+  details.foundOfflineSessions = lookup.sessions.filter((session) => !session?.isOnline).length;
+
+  const selectedOfflineSession = pickBestOfflineSession(lookup.sessions);
+  if (selectedOfflineSession?.id) {
+    details.selectedOfflineSessionId = String(selectedOfflineSession.id);
+  }
+
+  if (!details.normalizedShop) {
+    details.adminClientError = "missing normalized shop";
+    return { admin: null, details };
+  }
+
+  try {
+    const adminContext = await unauthenticated.admin(details.normalizedShop);
+    if (adminContext?.admin) {
+      details.adminClientSource = "unauthenticated.admin";
+      details.adminClientReady = true;
+      return { admin: adminContext.admin, details };
+    }
+    details.adminClientError = "unauthenticated.admin returned no admin client";
+  } catch (error) {
+    details.adminClientError = error?.message || String(error);
+  }
+
+  return { admin: null, details };
+}
 
 function logDebug(stage, details = "") {
   if (details) {
@@ -369,12 +479,14 @@ function buildGiftCardNote(baseNote, orderName, orderId, intentId) {
   return parts.join(" | ");
 }
 
-async function attemptGiftCardActivation({ admin, intentRecord, orderId, orderName }) {
+async function attemptGiftCardActivation({ admin, intentRecord, orderId, orderName, shop }) {
   const mutationInput = {
     code: intentRecord.code,
     initialValue: intentRecord.amount,
     note: buildGiftCardNote(intentRecord.note, orderName, orderId, intentRecord.id),
   };
+
+  logDebug("GIFT CARD CREATE REQUEST", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id} code_suffix=${String(intentRecord.code || "").slice(-4)} amount=${intentRecord.amount}`);
 
   const response = await admin.graphql(GIFT_CARD_CREATE_MUTATION, {
     variables: { input: mutationInput },
@@ -382,19 +494,26 @@ async function attemptGiftCardActivation({ admin, intentRecord, orderId, orderNa
   const body = await response.json();
 
   if (body?.errors?.length > 0) {
-    return { ok: false, error: firstGraphQlError(body.errors) };
+    const gqlError = firstGraphQlError(body.errors);
+    logDebugError("GIFT CARD CREATE GRAPHQL ERROR", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id} error=${gqlError}`);
+    return { ok: false, error: gqlError };
   }
 
   const createPayload = body?.data?.giftCardCreate;
   if (!createPayload) {
+    logDebugError("GIFT CARD CREATE PAYLOAD MISSING", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id}`);
     return { ok: false, error: "Gift card creation payload missing" };
   }
   if (Array.isArray(createPayload.userErrors) && createPayload.userErrors.length > 0) {
-    return { ok: false, error: String(createPayload.userErrors[0]?.message || "Gift card create user error") };
+    const userError = String(createPayload.userErrors[0]?.message || "Gift card create user error");
+    logDebugError("GIFT CARD CREATE USER ERROR", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id} error=${userError}`);
+    return { ok: false, error: userError };
   }
   if (!createPayload.giftCard?.id) {
+    logDebugError("GIFT CARD CREATE MISSING ID", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id}`);
     return { ok: false, error: "Gift card create returned no id" };
   }
+  logDebug("GIFT CARD CREATE SUCCESS", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id} gift_card_id=${String(createPayload.giftCard.id)}`);
   return { ok: true, giftCardId: String(createPayload.giftCard.id) };
 }
 
@@ -485,6 +604,7 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
       intentRecord,
       orderId,
       orderName: String(order?.name || ""),
+      shop,
     });
 
     if (!activationResult.ok) {
@@ -676,28 +796,6 @@ function parseDurableNoteTokenFromSources(...sources) {
     if (parsed.tokenFound) return parsed;
   }
   return parseDurableNoteTokenFromText("");
-}
-
-async function diagnoseAdminUnavailable(shop) {
-  const details = {
-    offlineSessionLookupAttempted: false,
-    foundSessions: 0,
-    foundOfflineSessions: 0,
-    lookupError: "",
-  };
-
-  if (!shop) return details;
-
-  try {
-    details.offlineSessionLookupAttempted = true;
-    const sessions = await sessionStorage.findSessionsByShop(shop);
-    details.foundSessions = sessions.length;
-    details.foundOfflineSessions = sessions.filter((session) => !session?.isOnline).length;
-  } catch (error) {
-    details.lookupError = error?.message || String(error);
-  }
-
-  return details;
 }
 
 function splitBundleItemValue(rawValue) {
@@ -1112,27 +1210,30 @@ async function queryOrderWithRetry(admin, orderGid, options = {}) {
 
 export const action = async ({ request }) => {
   try {
-    const { payload, topic, shop, admin } = await authenticate.webhook(request);
+    const { payload, topic, shop, admin: webhookAdmin } = await authenticate.webhook(request);
     logDebug(
       "WEBHOOK START",
       `topic=${topic} shop=${shop} payload_order_id=${payload?.id || "unknown"}`,
     );
 
+    const { admin, details: adminDiag } = await resolveWebhookAdminClient({
+      shop,
+      adminFromWebhook: webhookAdmin,
+    });
+
+    logDebug(
+      "ADMIN CLIENT RESOLUTION",
+      `shop=${shop} normalized_shop=${adminDiag.normalizedShop || "missing"} offline_lookup_attempted=${adminDiag.offlineSessionLookupAttempted} found_sessions=${adminDiag.foundSessions} found_offline_sessions=${adminDiag.foundOfflineSessions} selected_offline_session_id=${adminDiag.selectedOfflineSessionId || "none"} admin_client_source=${adminDiag.adminClientSource || "none"} admin_client_ready=${adminDiag.adminClientReady} lookup_error=${adminDiag.lookupError || "none"} admin_client_error=${adminDiag.adminClientError || "none"}`,
+    );
+
     if (!admin) {
-      const adminDiag = await diagnoseAdminUnavailable(shop);
       logDebugError(
         "EARLY EXIT",
-        `reason=admin client unavailable shop=${shop} order_id=${payload?.id || "unknown"} offline_lookup_attempted=${
-          adminDiag.offlineSessionLookupAttempted
-        } found_sessions=${adminDiag.foundSessions} found_offline_sessions=${adminDiag.foundOfflineSessions} lookup_error=${
-          adminDiag.lookupError || "none"
-        }`,
+        `reason=admin client unavailable shop=${shop} normalized_shop=${adminDiag.normalizedShop || "missing"} order_id=${payload?.id || "unknown"} offline_lookup_attempted=${adminDiag.offlineSessionLookupAttempted} found_sessions=${adminDiag.foundSessions} found_offline_sessions=${adminDiag.foundOfflineSessions} selected_offline_session_id=${adminDiag.selectedOfflineSessionId || "none"} lookup_error=${adminDiag.lookupError || "none"} admin_client_error=${adminDiag.adminClientError || "none"}`,
       );
       logDebug(
         "FINAL RESULT: failed",
-        `reason=admin client unavailable shop=${shop} order_id=${payload?.id || "unknown"} offline_lookup_attempted=${
-          adminDiag.offlineSessionLookupAttempted
-        }`,
+        `reason=admin client unavailable shop=${shop} order_id=${payload?.id || "unknown"} offline_lookup_attempted=${adminDiag.offlineSessionLookupAttempted} found_offline_sessions=${adminDiag.foundOfflineSessions}`,
       );
       return new Response();
     }
