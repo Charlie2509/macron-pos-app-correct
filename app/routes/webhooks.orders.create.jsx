@@ -76,6 +76,24 @@ const FULFILLMENT_CREATE_MUTATION = `#graphql
 
 const DEBUG_MARKER = "[MSH-FULFILL-DEBUG]";
 const PENDING_INTENT_MATCH_WINDOW_MS = 1000 * 60 * 10;
+const GIFT_CARD_MARKER_KEY = "_msh_gc_sale";
+const GIFT_CARD_MARKER_VALUE = "true";
+const GIFT_CARD_PROCESSING_TTL_MS = 1000 * 60 * 30;
+
+const GIFT_CARD_CREATE_MUTATION = `#graphql
+  mutation GiftCardCreateFromPosOrder($input: GiftCardCreateInput!) {
+    giftCardCreate(input: $input) {
+      giftCard {
+        id
+      }
+      userErrors {
+        field
+        message
+        code
+      }
+    }
+  }
+`;
 
 function logDebug(stage, details = "") {
   if (details) {
@@ -144,6 +162,20 @@ function classifyFeeOrSystemLine({ attributes = {}, title = "", sku = "" } = {})
 
 function normalizeStringValue(value) {
   return String(value == null ? "" : value).trim().toLowerCase();
+}
+
+function normalizeBooleanString(value) {
+  const normalized = normalizeStringValue(value);
+  return normalized === "true" || normalized === "1" || normalized === "yes";
+}
+
+function normalizeMoneyString(value) {
+  const raw = String(value == null ? "" : value).trim().replace(/,/g, "");
+  const match = raw.match(/\d+(\.\d{1,2})?/);
+  if (!match || !match[0]) return "";
+  const parsed = Number(match[0]);
+  if (!Number.isFinite(parsed) || parsed <= 0) return "";
+  return parsed.toFixed(2);
 }
 
 function normalizeComparableText(value) {
@@ -284,6 +316,206 @@ function hasMacronPosFallbackMarkerInOrderLineAttributes(orderLineNodes = []) {
     const attributes = attributeMap(orderLine?.customAttributes);
     return normalizeSource(attributes._msh_fallback_source) === "macron_pos";
   });
+}
+
+function isGiftCardSaleMarker(value) {
+  return normalizeBooleanString(value) || normalizeStringValue(value) === GIFT_CARD_MARKER_VALUE;
+}
+
+function extractGiftCardCandidatesFromOrder(orderLineNodes = [], orderAttributes = {}) {
+  const candidates = [];
+  for (const line of orderLineNodes || []) {
+    const attributes = attributeMap(line?.customAttributes);
+    if (!isGiftCardSaleMarker(attributes[GIFT_CARD_MARKER_KEY])) continue;
+    candidates.push({
+      lineItemId: String(line?.id || ""),
+      lineTitle: String(line?.title || line?.name || "").trim(),
+      intentId: String(attributes._msh_gc_intent_id || "").trim(),
+      intentToken: String(attributes._msh_gc_intent_token || "").trim(),
+      code: String(attributes._msh_gc_code || "").trim(),
+      amount: normalizeMoneyString(attributes._msh_gc_amount || ""),
+      currency: String(attributes._msh_gc_currency || "GBP").trim().toUpperCase() || "GBP",
+      note: String(attributes._msh_gc_note || "").trim(),
+    });
+  }
+
+  if (candidates.length === 0 && isGiftCardSaleMarker(orderAttributes[GIFT_CARD_MARKER_KEY])) {
+    candidates.push({
+      lineItemId: "",
+      lineTitle: "",
+      intentId: String(orderAttributes._msh_gc_pending_intent_id || "").trim(),
+      intentToken: String(orderAttributes._msh_gc_pending_intent_token || "").trim(),
+      code: String(orderAttributes._msh_gc_pending_code || "").trim(),
+      amount: normalizeMoneyString(orderAttributes._msh_gc_pending_amount || ""),
+      currency: "GBP",
+      note: "",
+    });
+  }
+
+  return candidates;
+}
+
+function firstGraphQlError(errors) {
+  if (!Array.isArray(errors) || errors.length === 0) return "";
+  return String(errors[0]?.message || "").trim() || "GraphQL request failed";
+}
+
+function buildGiftCardNote(baseNote, orderName, orderId, intentId) {
+  const parts = [];
+  const normalizedBase = String(baseNote || "").trim();
+  if (normalizedBase) parts.push(normalizedBase);
+  parts.push(`POS gift card sale order ${orderName || "unknown"} (${orderId || "unknown"})`);
+  if (intentId) parts.push(`intent ${intentId}`);
+  return parts.join(" | ");
+}
+
+async function attemptGiftCardActivation({ admin, intentRecord, orderId, orderName }) {
+  const mutationInput = {
+    code: intentRecord.code,
+    initialValue: intentRecord.amount,
+    note: buildGiftCardNote(intentRecord.note, orderName, orderId, intentRecord.id),
+  };
+
+  const response = await admin.graphql(GIFT_CARD_CREATE_MUTATION, {
+    variables: { input: mutationInput },
+  });
+  const body = await response.json();
+
+  if (body?.errors?.length > 0) {
+    return { ok: false, error: firstGraphQlError(body.errors) };
+  }
+
+  const createPayload = body?.data?.giftCardCreate;
+  if (!createPayload) {
+    return { ok: false, error: "Gift card creation payload missing" };
+  }
+  if (Array.isArray(createPayload.userErrors) && createPayload.userErrors.length > 0) {
+    return { ok: false, error: String(createPayload.userErrors[0]?.message || "Gift card create user error") };
+  }
+  if (!createPayload.giftCard?.id) {
+    return { ok: false, error: "Gift card create returned no id" };
+  }
+  return { ok: true, giftCardId: String(createPayload.giftCard.id) };
+}
+
+async function processGiftCardActivationsForOrder({ shop, admin, order }) {
+  const orderId = parseNumericId(order?.id) || String(order?.id || "");
+  if (!orderId) return;
+
+  const orderAttributes = attributeMap(order?.customAttributes || []);
+  const candidates = extractGiftCardCandidatesFromOrder(order?.lineItems?.nodes || [], orderAttributes);
+  if (candidates.length === 0) {
+    return;
+  }
+
+  logDebug(
+    "GIFT CARD CANDIDATES",
+    `order_id=${orderId} count=${candidates.length} data=${JSON.stringify(candidates)}`,
+  );
+
+  for (const candidate of candidates) {
+    let intentRecord = null;
+    if (candidate.intentId) {
+      intentRecord = await db.pendingGiftCardActivation.findFirst({
+        where: {
+          id: candidate.intentId,
+          shop,
+        },
+      });
+    }
+    if (!intentRecord && candidate.intentToken) {
+      intentRecord = await db.pendingGiftCardActivation.findFirst({
+        where: {
+          shop,
+          intentToken: candidate.intentToken,
+        },
+      });
+    }
+    if (!intentRecord && candidate.code && candidate.amount) {
+      intentRecord = await db.pendingGiftCardActivation.findFirst({
+        where: {
+          shop,
+          code: candidate.code,
+          amount: candidate.amount,
+          status: { in: ["pending", "failed", "processing"] },
+          expiresAt: { gt: new Date(Date.now() - GIFT_CARD_PROCESSING_TTL_MS) },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+    }
+
+    if (!intentRecord) {
+      logDebugError("GIFT CARD INTENT MISSING", `order_id=${orderId} candidate=${JSON.stringify(candidate)}`);
+      continue;
+    }
+
+    if (intentRecord.status === "activated" && intentRecord.giftCardId) {
+      logDebug("GIFT CARD SKIP ALREADY ACTIVATED", `order_id=${orderId} intent_id=${intentRecord.id}`);
+      continue;
+    }
+
+    if (intentRecord.orderId && intentRecord.orderId !== orderId) {
+      logDebugError(
+        "GIFT CARD ORDER CONFLICT",
+        `intent_id=${intentRecord.id} existing_order=${intentRecord.orderId} incoming_order=${orderId}`,
+      );
+      continue;
+    }
+
+    const claimResult = await db.pendingGiftCardActivation.updateMany({
+      where: {
+        id: intentRecord.id,
+        shop,
+        status: { in: ["pending", "failed", "processing"] },
+      },
+      data: {
+        status: "processing",
+        orderId,
+        orderName: String(order?.name || ""),
+        lastError: null,
+        activationAttempts: { increment: 1 },
+      },
+    });
+    if (claimResult.count === 0) {
+      continue;
+    }
+
+    const activationResult = await attemptGiftCardActivation({
+      admin,
+      intentRecord,
+      orderId,
+      orderName: String(order?.name || ""),
+    });
+
+    if (!activationResult.ok) {
+      await db.pendingGiftCardActivation.update({
+        where: { id: intentRecord.id },
+        data: {
+          status: "failed",
+          lastError: activationResult.error || "activation_failed",
+        },
+      });
+      logDebugError(
+        "GIFT CARD ACTIVATION FAILED",
+        `order_id=${orderId} intent_id=${intentRecord.id} error=${activationResult.error || "unknown"}`,
+      );
+      continue;
+    }
+
+    await db.pendingGiftCardActivation.update({
+      where: { id: intentRecord.id },
+      data: {
+        status: "activated",
+        activatedAt: new Date(),
+        giftCardId: activationResult.giftCardId,
+        lastError: null,
+      },
+    });
+    logDebug(
+      "GIFT CARD ACTIVATION SUCCESS",
+      `order_id=${orderId} intent_id=${intentRecord.id} gift_card_id=${activationResult.giftCardId}`,
+    );
+  }
 }
 
 function parseLineItemIntentFromAttributes(attributes = {}) {
@@ -998,6 +1230,12 @@ export const action = async ({ request }) => {
         order.displayFulfillmentStatus || "unknown"
       } retries_used=${orderLookup.attemptsUsed} exhausted=${String(orderLookup.exhausted)}`,
     );
+
+    await processGiftCardActivationsForOrder({
+      shop,
+      admin,
+      order,
+    });
 
     const markerFoundAfterFetch = hasMacronPosMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
     const fallbackMarkerFoundAfterFetch = hasMacronPosFallbackMarkerInOrderLineAttributes(order.lineItems?.nodes || []);

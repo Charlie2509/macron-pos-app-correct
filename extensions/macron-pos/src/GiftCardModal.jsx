@@ -2,8 +2,9 @@ import "@shopify/ui-extensions/preact";
 import {render} from 'preact';
 import {useState} from 'preact/hooks';
 
-var ABSOLUTE_ENDPOINT = 'https://macron-pos-app-correct.onrender.com/api/macron-pos/gift-card/activate';
-var RELATIVE_ENDPOINT = '/api/macron-pos/gift-card/activate';
+var RELATIVE_INTENT_ENDPOINT = '/api/macron-pos/gift-card/intent';
+var ABSOLUTE_INTENT_ENDPOINT = 'https://macron-pos-app-correct.onrender.com/api/macron-pos/gift-card/intent';
+var GIFT_CARD_SALE_TITLE = 'Macron Physical Gift Card';
 
 export default async function () {
   render(<GiftCardModal />, document.body);
@@ -48,11 +49,8 @@ function validateCodeInput(value) {
   if (code === '') {
     return {ok: false, error: 'Enter a card code'};
   }
-  if (code.length < 8 || code.length > 20) {
-    return {ok: false, error: 'Code must be between 8 and 20 characters'};
-  }
-  if (!/^[A-Za-z0-9]+$/.test(code)) {
-    return {ok: false, error: 'Code can only contain letters and numbers'};
+  if (!/^\d{13}$/.test(code)) {
+    return {ok: false, error: 'Code must be exactly 13 digits'};
   }
   return {ok: true, code: code};
 }
@@ -65,8 +63,18 @@ function formatAmountForDisplay(amount) {
   return 'GBP ' + amountNumber.toFixed(2);
 }
 
-async function postGiftCardActivation(payload, token) {
-  var endpoints = [RELATIVE_ENDPOINT, ABSOLUTE_ENDPOINT];
+function isCartApiReady() {
+  return (
+    typeof shopify !== 'undefined' &&
+    shopify &&
+    shopify.cart &&
+    typeof shopify.cart.addCustomSale === 'function' &&
+    typeof shopify.cart.addLineItemProperties === 'function'
+  );
+}
+
+async function createIntent(payload, token) {
+  var endpoints = [RELATIVE_INTENT_ENDPOINT, ABSOLUTE_INTENT_ENDPOINT];
   var lastError = '';
 
   for (var i = 0; i < endpoints.length; i += 1) {
@@ -78,6 +86,7 @@ async function postGiftCardActivation(payload, token) {
       if (token !== '') {
         headers.Authorization = 'Bearer ' + token;
       }
+
       var response = await fetch(endpoint, {
         method: 'POST',
         headers: headers,
@@ -94,36 +103,21 @@ async function postGiftCardActivation(payload, token) {
       if (response.ok && json && json.ok === true) {
         return {
           ok: true,
-          giftCardId: toText(json.giftCardId),
-          codeLast4: toText(json.codeLast4),
-          amount: toText(json.amount),
+          intentId: toText(json.intentId),
+          intentToken: toText(json.intentToken),
+          expiresAt: toText(json.expiresAt),
         };
       }
 
       if (json && json.ok === false) {
-        lastError = toText(json.error);
-        if (lastError === '') {
-          lastError = 'Activation failed';
-        }
-        if (i === endpoints.length - 1) {
-          return {
-            ok: false,
-            error: lastError,
-            fieldErrors: json.fieldErrors || {},
-          };
-        }
-        continue;
-      }
-
-      var statusText = response.status ? String(response.status) : 'unknown';
-      lastError = 'Activation failed (' + statusText + ')';
-      if (i === endpoints.length - 1) {
         return {
           ok: false,
-          error: lastError,
-          fieldErrors: {},
+          error: toText(json.error) || 'Intent create failed',
+          fieldErrors: json.fieldErrors || {},
         };
       }
+
+      lastError = 'Intent create failed (' + (response.status ? String(response.status) : 'unknown') + ')';
     } catch (error) {
       lastError = error && error.message ? error.message : String(error);
     }
@@ -131,7 +125,7 @@ async function postGiftCardActivation(payload, token) {
 
   return {
     ok: false,
-    error: lastError === '' ? 'Network request failed' : lastError,
+    error: lastError || 'Network request failed',
     fieldErrors: {},
   };
 }
@@ -161,13 +155,23 @@ function GiftCardModal() {
   var formError = formErrorState[0];
   var setFormError = formErrorState[1];
 
-  var activationQueuedState = useState(null);
-  var activationQueued = activationQueuedState[0];
-  var setActivationQueued = activationQueuedState[1];
+  var preparedSaleState = useState(null);
+  var preparedSale = preparedSaleState[0];
+  var setPreparedSale = preparedSaleState[1];
+
+  var isSubmittingState = useState(false);
+  var isSubmitting = isSubmittingState[0];
+  var setIsSubmitting = isSubmittingState[1];
 
   function closeModal() {
     if (typeof window !== 'undefined' && window && typeof window.close === 'function') {
       window.close();
+    }
+  }
+
+  function toast(message) {
+    if (typeof shopify !== 'undefined' && shopify && shopify.toast && typeof shopify.toast.show === 'function') {
+      shopify.toast.show(message);
     }
   }
 
@@ -203,19 +207,114 @@ function GiftCardModal() {
     };
   }
 
-  function continueToCheckout() {
+  async function continueToCheckout() {
+    if (isSubmitting) {
+      return;
+    }
+
     var validation = validateForm();
     if (!validation.ok) {
       return;
     }
 
+    if (!isCartApiReady()) {
+      setFormError('POS cart API is unavailable. Please update Shopify POS and try again.');
+      return;
+    }
+
     var noteText = trimEdgeWhitespace(noteInput);
-    setActivationQueued({
-      code: validation.code,
-      amount: validation.amount,
-      note: noteText,
-    });
+    var lineUuid = '';
+
+    setIsSubmitting(true);
     setFormError('');
+
+    try {
+      lineUuid = await shopify.cart.addCustomSale({
+        title: GIFT_CARD_SALE_TITLE,
+        quantity: 1,
+        price: validation.amount,
+        taxable: false,
+      });
+
+      if (trimEdgeWhitespace(lineUuid) === '') {
+        setFormError('Gift card sale was not added to cart.');
+        return;
+      }
+
+      var sessionToken = '';
+      if (shopify.session && typeof shopify.session.getSessionToken === 'function') {
+        var maybeToken = await shopify.session.getSessionToken();
+        sessionToken = trimEdgeWhitespace(maybeToken);
+      }
+
+      var intentResult = await createIntent({
+        code: validation.code,
+        amount: validation.amount,
+        note: noteText,
+        currency: 'GBP',
+        lineItemUuid: lineUuid,
+        lineItemTitle: GIFT_CARD_SALE_TITLE,
+      }, sessionToken);
+
+      if (!intentResult.ok) {
+        if (shopify.cart && typeof shopify.cart.removeLineItem === 'function') {
+          await shopify.cart.removeLineItem(lineUuid);
+        }
+        if (intentResult.fieldErrors && intentResult.fieldErrors.code) {
+          setCodeError(intentResult.fieldErrors.code);
+        }
+        if (intentResult.fieldErrors && intentResult.fieldErrors.amount) {
+          setAmountError(intentResult.fieldErrors.amount);
+        }
+        setFormError(intentResult.error || 'Could not prepare gift card sale.');
+        return;
+      }
+
+      var markerProperties = {
+        _msh_gc_sale: 'true',
+        _msh_gc_intent_id: intentResult.intentId,
+        _msh_gc_intent_token: intentResult.intentToken,
+        _msh_gc_code: validation.code,
+        _msh_gc_amount: validation.amount,
+        _msh_gc_currency: 'GBP',
+      };
+      if (noteText !== '') {
+        markerProperties._msh_gc_note = noteText;
+      }
+
+      await shopify.cart.addLineItemProperties(lineUuid, markerProperties);
+
+      if (shopify.cart && typeof shopify.cart.addCartProperties === 'function') {
+        await shopify.cart.addCartProperties({
+          _msh_gc_sale: 'true',
+          _msh_gc_pending_intent_id: intentResult.intentId,
+          _msh_gc_pending_intent_token: intentResult.intentToken,
+          _msh_gc_pending_code: validation.code,
+          _msh_gc_pending_amount: validation.amount,
+        });
+      }
+
+      setPreparedSale({
+        code: validation.code,
+        amount: validation.amount,
+        note: noteText,
+        intentId: intentResult.intentId,
+      });
+
+      toast('Gift card sale added to cart. Complete checkout to activate card.');
+      closeModal();
+    } catch (error) {
+      if (lineUuid !== '' && shopify.cart && typeof shopify.cart.removeLineItem === 'function') {
+        try {
+          await shopify.cart.removeLineItem(lineUuid);
+        } catch (rollbackError) {
+          // noop
+        }
+      }
+      setFormError(error && error.message ? error.message : 'Could not prepare checkout.');
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -225,13 +324,13 @@ function GiftCardModal() {
           <s-section heading="Gift card details">
             <s-stack direction="block" gap="base">
               <s-text appearance="subdued">
-                Scan or type the physical card code, then confirm payment before activation.
+                Scan or type the 13-digit physical card code, then complete checkout to activate it.
               </s-text>
               <s-stack direction="block" gap="small">
                 <s-text emphasis="bold">Card code</s-text>
                 <s-text-field
                   value={codeInput}
-                  placeholder="e.g. MSHGC00123"
+                  placeholder="e.g. 1234567890123"
                   onInput={function (event) {
                     setCodeInput(normalizeCodeInput(event.target.value));
                   }}
@@ -265,15 +364,15 @@ function GiftCardModal() {
 
           <s-section heading="Actions">
             <s-stack direction="block" gap="small">
-              {activationQueued ? (
+              {preparedSale ? (
                 <s-text>
-                  This gift card will be activated after successful payment.
+                  Prepared {preparedSale.code} for {formatAmountForDisplay(preparedSale.amount)}. Finish checkout to activate.
                 </s-text>
               ) : null}
-              <s-button variant="primary" onClick={continueToCheckout}>
-                Continue to checkout
+              <s-button variant="primary" onClick={continueToCheckout} disabled={isSubmitting}>
+                {isSubmitting ? 'Preparing checkout…' : 'Continue to checkout'}
               </s-button>
-              <s-button variant="secondary" onClick={closeModal}>
+              <s-button variant="secondary" onClick={closeModal} disabled={isSubmitting}>
                 Cancel
               </s-button>
             </s-stack>
