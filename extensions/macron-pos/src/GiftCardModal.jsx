@@ -3,7 +3,6 @@ import {render} from 'preact';
 import {useEffect, useRef, useState} from 'preact/hooks';
 
 var RELATIVE_INTENT_ENDPOINT = '/api/macron-pos/gift-card/intent';
-var ABSOLUTE_INTENT_ENDPOINT = 'https://macron-pos-app-correct.onrender.com/api/macron-pos/gift-card/intent';
 var GIFT_CARD_SALE_TITLE = 'Macron Physical Gift Card';
 
 export default async function () {
@@ -74,99 +73,94 @@ function isCartApiReady() {
 }
 
 async function createIntent(payload, token, options) {
-  var endpoints = [RELATIVE_INTENT_ENDPOINT, ABSOLUTE_INTENT_ENDPOINT];
-  var lastError = '';
   var onDebug = options && typeof options.onDebug === 'function' ? options.onDebug : null;
 
-  for (var i = 0; i < endpoints.length; i += 1) {
-    var endpoint = endpoints[i];
-    var isRelativeEndpoint = i === 0;
-    if (onDebug) {
-      onDebug({
-        type: 'attempt',
-        endpoint: endpoint,
-        isRelativeEndpoint: isRelativeEndpoint,
-      });
+  if (onDebug) {
+    onDebug({
+      type: 'attempt',
+      endpoint: RELATIVE_INTENT_ENDPOINT,
+      isRelativeEndpoint: true,
+    });
+  }
+  try {
+    var headers = {
+      'Content-Type': 'application/json',
+    };
+    if (token !== '') {
+      headers.Authorization = 'Bearer ' + token;
     }
+
+    var response = await fetch(RELATIVE_INTENT_ENDPOINT, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(payload),
+    });
+
+    var json = null;
     try {
-      var headers = {
-        'Content-Type': 'application/json',
-      };
-      if (token !== '') {
-        headers.Authorization = 'Bearer ' + token;
-      }
-
-      var response = await fetch(endpoint, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify(payload),
-      });
-
-      var json = null;
-      try {
-        json = await response.json();
-      } catch (parseError) {
-        lastError = 'Intent response parse failed from ' + endpoint + ' (status ' + String(response.status || 'unknown') + ')';
-        if (onDebug) {
-          onDebug({
-            type: 'endpoint_failed',
-            endpoint: endpoint,
-            isRelativeEndpoint: isRelativeEndpoint,
-            errorMessage: lastError,
-          });
-        }
-        continue;
-      }
-
-      if (response.ok && json && json.ok === true) {
-        return {
-          ok: true,
-          intentId: toText(json.intentId),
-          intentToken: toText(json.intentToken),
-          expiresAt: toText(json.expiresAt),
-        };
-      }
-
-      if (json && json.ok === false) {
-        return {
-          ok: false,
-          error: toText(json.error) || ('Intent create failed from ' + endpoint),
-          fieldErrors: json.fieldErrors || {},
-        };
-      }
-
-      if (!response.ok && json) {
-        lastError = toText(json.error) || ('Intent create failed from ' + endpoint + ' (status ' + String(response.status || 'unknown') + ')');
-      } else {
-        lastError = 'Intent create failed from ' + endpoint + ' (status ' + String(response.status || 'unknown') + ')';
-      }
+      json = await response.json();
+    } catch (parseError) {
       if (onDebug) {
         onDebug({
           type: 'endpoint_failed',
-          endpoint: endpoint,
-          isRelativeEndpoint: isRelativeEndpoint,
-          errorMessage: lastError,
+          endpoint: RELATIVE_INTENT_ENDPOINT,
+          isRelativeEndpoint: true,
+          errorMessage: 'Intent response parse failed',
         });
       }
-    } catch (error) {
-      var thrownMessage = error && error.message ? error.message : String(error);
-      lastError = 'Intent fetch failed at ' + endpoint + ': ' + thrownMessage;
-      if (onDebug) {
-        onDebug({
-          type: 'fetch_failed',
-          endpoint: endpoint,
-          isRelativeEndpoint: isRelativeEndpoint,
-          errorMessage: thrownMessage,
-        });
-      }
+      return {
+        ok: false,
+        error: 'Failed to reach app backend',
+        fieldErrors: {},
+      };
     }
-  }
 
-  return {
-    ok: false,
-    error: lastError || 'Network request failed',
-    fieldErrors: {},
-  };
+    if (response.ok && json && json.ok === true) {
+      return {
+        ok: true,
+        intentId: toText(json.intentId),
+        intentToken: toText(json.intentToken),
+        expiresAt: toText(json.expiresAt),
+      };
+    }
+
+    if (json && json.ok === false) {
+      return {
+        ok: false,
+        error: toText(json.error) || 'Failed to reach app backend',
+        fieldErrors: json.fieldErrors || {},
+      };
+    }
+
+    if (onDebug) {
+      onDebug({
+        type: 'endpoint_failed',
+        endpoint: RELATIVE_INTENT_ENDPOINT,
+        isRelativeEndpoint: true,
+        errorMessage: 'Unexpected intent response',
+      });
+    }
+    return {
+      ok: false,
+      error: 'Failed to reach app backend',
+      fieldErrors: {},
+    };
+  } catch (error) {
+    var thrownMessage = error && error.message ? error.message : String(error);
+    if (onDebug) {
+      onDebug({
+        type: 'fetch_failed',
+        endpoint: RELATIVE_INTENT_ENDPOINT,
+        isRelativeEndpoint: true,
+        errorMessage: thrownMessage,
+      });
+    }
+    return {
+      ok: false,
+      error: 'Failed to reach app backend',
+      fieldErrors: {},
+    };
+  }
 }
 
 function GiftCardModal() {
@@ -305,13 +299,13 @@ function GiftCardModal() {
       }
       toast('Custom sale added');
 
-      var sessionToken = '';
-      if (shopify.session && typeof shopify.session.getSessionToken === 'function') {
-        var maybeToken = await shopify.session.getSessionToken();
-        sessionToken = trimEdgeWhitespace(maybeToken);
-      }
-
       try {
+        var sessionToken = '';
+        if (shopify.session && typeof shopify.session.getSessionToken === 'function') {
+          var maybeToken = await shopify.session.getSessionToken();
+          sessionToken = trimEdgeWhitespace(maybeToken);
+        }
+
         intentResult = await createIntent({
           code: validation.code,
           amount: validation.amount,
@@ -329,8 +323,6 @@ function GiftCardModal() {
               toast('Trying local intent endpoint: ' + debugEvent.endpoint);
             } else if ((debugEvent.type === 'fetch_failed' || debugEvent.type === 'endpoint_failed') && debugEvent.isRelativeEndpoint) {
               toast('Local intent endpoint failed: ' + debugEvent.endpoint + ' (' + (debugEvent.errorMessage || 'unknown error') + ')');
-            } else if (debugEvent.type === 'attempt' && !debugEvent.isRelativeEndpoint) {
-              toast('Trying Render intent endpoint: ' + debugEvent.endpoint);
             }
           },
         });
