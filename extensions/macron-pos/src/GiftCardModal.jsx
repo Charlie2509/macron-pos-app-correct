@@ -1,6 +1,6 @@
 import "@shopify/ui-extensions/preact";
 import {render} from 'preact';
-import {useState} from 'preact/hooks';
+import {useEffect, useRef, useState} from 'preact/hooks';
 
 var RELATIVE_INTENT_ENDPOINT = '/api/macron-pos/gift-card/intent';
 var ABSOLUTE_INTENT_ENDPOINT = 'https://macron-pos-app-correct.onrender.com/api/macron-pos/gift-card/intent';
@@ -131,6 +131,8 @@ async function createIntent(payload, token) {
 }
 
 function GiftCardModal() {
+  var codeFieldRef = useRef(null);
+
   var codeState = useState('');
   var codeInput = codeState[0];
   var setCodeInput = codeState[1];
@@ -163,6 +165,12 @@ function GiftCardModal() {
   var isSubmitting = isSubmittingState[0];
   var setIsSubmitting = isSubmittingState[1];
 
+  useEffect(function () {
+    if (!isSubmitting && codeFieldRef.current && typeof codeFieldRef.current.focus === 'function') {
+      codeFieldRef.current.focus();
+    }
+  }, [isSubmitting]);
+
   function closeModal() {
     if (typeof window !== 'undefined' && window && typeof window.close === 'function') {
       window.close();
@@ -173,6 +181,14 @@ function GiftCardModal() {
     if (typeof shopify !== 'undefined' && shopify && shopify.toast && typeof shopify.toast.show === 'function') {
       shopify.toast.show(message);
     }
+  }
+
+  function buildStepErrorMessage(stepMessage, error) {
+    var errorMessage = error && error.message ? trimEdgeWhitespace(error.message) : '';
+    if (errorMessage === '') {
+      return stepMessage;
+    }
+    return stepMessage + ': ' + errorMessage;
   }
 
   function resetErrors() {
@@ -229,17 +245,26 @@ function GiftCardModal() {
     setFormError('');
 
     try {
-      lineUuid = await shopify.cart.addCustomSale({
-        title: GIFT_CARD_SALE_TITLE,
-        quantity: 1,
-        price: validation.amount,
-        taxable: false,
-      });
+      var intentResult = null;
+      var markerProperties = null;
+
+      try {
+        lineUuid = await shopify.cart.addCustomSale({
+          title: GIFT_CARD_SALE_TITLE,
+          quantity: 1,
+          price: validation.amount,
+          taxable: false,
+        });
+      } catch (error) {
+        setFormError(buildStepErrorMessage('Failed to add custom sale to cart', error));
+        return;
+      }
 
       if (trimEdgeWhitespace(lineUuid) === '') {
         setFormError('Gift card sale was not added to cart.');
         return;
       }
+      toast('Custom sale added');
 
       var sessionToken = '';
       if (shopify.session && typeof shopify.session.getSessionToken === 'function') {
@@ -247,14 +272,22 @@ function GiftCardModal() {
         sessionToken = trimEdgeWhitespace(maybeToken);
       }
 
-      var intentResult = await createIntent({
-        code: validation.code,
-        amount: validation.amount,
-        note: noteText,
-        currency: 'GBP',
-        lineItemUuid: lineUuid,
-        lineItemTitle: GIFT_CARD_SALE_TITLE,
-      }, sessionToken);
+      try {
+        intentResult = await createIntent({
+          code: validation.code,
+          amount: validation.amount,
+          note: noteText,
+          currency: 'GBP',
+          lineItemUuid: lineUuid,
+          lineItemTitle: GIFT_CARD_SALE_TITLE,
+        }, sessionToken);
+      } catch (error) {
+        if (shopify.cart && typeof shopify.cart.removeLineItem === 'function') {
+          await shopify.cart.removeLineItem(lineUuid);
+        }
+        setFormError(buildStepErrorMessage('Failed to create gift card intent', error));
+        return;
+      }
 
       if (!intentResult.ok) {
         if (shopify.cart && typeof shopify.cart.removeLineItem === 'function') {
@@ -266,11 +299,12 @@ function GiftCardModal() {
         if (intentResult.fieldErrors && intentResult.fieldErrors.amount) {
           setAmountError(intentResult.fieldErrors.amount);
         }
-        setFormError(intentResult.error || 'Could not prepare gift card sale.');
+        setFormError(buildStepErrorMessage('Failed to create gift card intent', {message: intentResult.error || 'Could not prepare gift card sale.'}));
         return;
       }
+      toast('Intent created');
 
-      var markerProperties = {
+      markerProperties = {
         _msh_gc_sale: 'true',
         _msh_gc_intent_id: intentResult.intentId,
         _msh_gc_intent_token: intentResult.intentToken,
@@ -282,16 +316,34 @@ function GiftCardModal() {
         markerProperties._msh_gc_note = noteText;
       }
 
-      await shopify.cart.addLineItemProperties(lineUuid, markerProperties);
+      try {
+        await shopify.cart.addLineItemProperties(lineUuid, markerProperties);
+      } catch (error) {
+        if (shopify.cart && typeof shopify.cart.removeLineItem === 'function') {
+          await shopify.cart.removeLineItem(lineUuid);
+        }
+        setFormError(buildStepErrorMessage('Failed to attach line item properties', error));
+        return;
+      }
+      toast('Line item properties added');
 
       if (shopify.cart && typeof shopify.cart.addCartProperties === 'function') {
-        await shopify.cart.addCartProperties({
-          _msh_gc_sale: 'true',
-          _msh_gc_pending_intent_id: intentResult.intentId,
-          _msh_gc_pending_intent_token: intentResult.intentToken,
-          _msh_gc_pending_code: validation.code,
-          _msh_gc_pending_amount: validation.amount,
-        });
+        try {
+          await shopify.cart.addCartProperties({
+            _msh_gc_sale: 'true',
+            _msh_gc_pending_intent_id: intentResult.intentId,
+            _msh_gc_pending_intent_token: intentResult.intentToken,
+            _msh_gc_pending_code: validation.code,
+            _msh_gc_pending_amount: validation.amount,
+          });
+        } catch (error) {
+          if (lineUuid !== '' && shopify.cart && typeof shopify.cart.removeLineItem === 'function') {
+            await shopify.cart.removeLineItem(lineUuid);
+          }
+          setFormError(buildStepErrorMessage('Failed to attach cart properties', error));
+          return;
+        }
+        toast('Cart properties added');
       }
 
       setPreparedSale({
@@ -329,8 +381,14 @@ function GiftCardModal() {
               <s-stack direction="block" gap="small">
                 <s-text emphasis="bold">Card code</s-text>
                 <s-text-field
+                  ref={codeFieldRef}
                   value={codeInput}
                   placeholder="e.g. 1234567890123"
+                  inputMode="numeric"
+                  autocomplete="off"
+                  autocorrect="off"
+                  spellcheck="false"
+                  enterKeyHint="next"
                   onInput={function (event) {
                     setCodeInput(normalizeCodeInput(event.target.value));
                   }}
