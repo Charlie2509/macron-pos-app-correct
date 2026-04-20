@@ -52,3 +52,23 @@ model PendingMacronPosIntent {
   consumedAt       DateTime?
   matchedOrderId   String?
 }
+
+model MacronPosGiftCardActivation {
+  id                 String   @id @default(cuid())
+  shop               String
+  orderId            String
+  orderName          String?
+  sourceName         String?
+  code               String
+  amount             Decimal  @db.Decimal(10, 2)
+  currencyCode       String   @default("GBP")
+  status             String   @default("pending")
+  activationAttemptId String?
+  giftCardId         String?
+  errorMessage       String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  activatedAt        DateTime?
+
+  @@unique([shop, orderId, code], name: "shop_order_code")
+}

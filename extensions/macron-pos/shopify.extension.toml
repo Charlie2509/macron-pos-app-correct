@@ -17,3 +17,17 @@ target = "pos.home.tile.render"
 [[extensions.targeting]]
 module = "./src/Modal.jsx"
 target = "pos.home.modal.render"
+
+[[extensions]]
+type = "ui_extension"
+name = "Gift Card Sale"
+handle = "macron-pos-gift-card-sale"
+description = "Macron POS gift card sale flow"
+
+[[extensions.targeting]]
+module = "./src/GiftCardTile.jsx"
+target = "pos.home.tile.render"
+
+[[extensions.targeting]]
+module = "./src/GiftCardModal.jsx"
+target = "pos.home.modal.render"
