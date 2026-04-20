@@ -73,12 +73,21 @@ function isCartApiReady() {
   );
 }
 
-async function createIntent(payload, token) {
+async function createIntent(payload, token, options) {
   var endpoints = [RELATIVE_INTENT_ENDPOINT, ABSOLUTE_INTENT_ENDPOINT];
   var lastError = '';
+  var onDebug = options && typeof options.onDebug === 'function' ? options.onDebug : null;
 
   for (var i = 0; i < endpoints.length; i += 1) {
     var endpoint = endpoints[i];
+    var isRelativeEndpoint = i === 0;
+    if (onDebug) {
+      onDebug({
+        type: 'attempt',
+        endpoint: endpoint,
+        isRelativeEndpoint: isRelativeEndpoint,
+      });
+    }
     try {
       var headers = {
         'Content-Type': 'application/json',
@@ -97,7 +106,16 @@ async function createIntent(payload, token) {
       try {
         json = await response.json();
       } catch (parseError) {
-        json = null;
+        lastError = 'Intent response parse failed from ' + endpoint + ' (status ' + String(response.status || 'unknown') + ')';
+        if (onDebug) {
+          onDebug({
+            type: 'endpoint_failed',
+            endpoint: endpoint,
+            isRelativeEndpoint: isRelativeEndpoint,
+            errorMessage: lastError,
+          });
+        }
+        continue;
       }
 
       if (response.ok && json && json.ok === true) {
@@ -112,14 +130,35 @@ async function createIntent(payload, token) {
       if (json && json.ok === false) {
         return {
           ok: false,
-          error: toText(json.error) || 'Intent create failed',
+          error: toText(json.error) || ('Intent create failed from ' + endpoint),
           fieldErrors: json.fieldErrors || {},
         };
       }
 
-      lastError = 'Intent create failed (' + (response.status ? String(response.status) : 'unknown') + ')';
+      if (!response.ok && json) {
+        lastError = toText(json.error) || ('Intent create failed from ' + endpoint + ' (status ' + String(response.status || 'unknown') + ')');
+      } else {
+        lastError = 'Intent create failed from ' + endpoint + ' (status ' + String(response.status || 'unknown') + ')';
+      }
+      if (onDebug) {
+        onDebug({
+          type: 'endpoint_failed',
+          endpoint: endpoint,
+          isRelativeEndpoint: isRelativeEndpoint,
+          errorMessage: lastError,
+        });
+      }
     } catch (error) {
-      lastError = error && error.message ? error.message : String(error);
+      var thrownMessage = error && error.message ? error.message : String(error);
+      lastError = 'Intent fetch failed at ' + endpoint + ': ' + thrownMessage;
+      if (onDebug) {
+        onDebug({
+          type: 'fetch_failed',
+          endpoint: endpoint,
+          isRelativeEndpoint: isRelativeEndpoint,
+          errorMessage: thrownMessage,
+        });
+      }
     }
   }
 
@@ -280,7 +319,21 @@ function GiftCardModal() {
           currency: 'GBP',
           lineItemUuid: lineUuid,
           lineItemTitle: GIFT_CARD_SALE_TITLE,
-        }, sessionToken);
+        }, sessionToken, {
+          onDebug: function (debugEvent) {
+            if (!debugEvent) {
+              return;
+            }
+
+            if (debugEvent.type === 'attempt' && debugEvent.isRelativeEndpoint) {
+              toast('Trying local intent endpoint: ' + debugEvent.endpoint);
+            } else if ((debugEvent.type === 'fetch_failed' || debugEvent.type === 'endpoint_failed') && debugEvent.isRelativeEndpoint) {
+              toast('Local intent endpoint failed: ' + debugEvent.endpoint + ' (' + (debugEvent.errorMessage || 'unknown error') + ')');
+            } else if (debugEvent.type === 'attempt' && !debugEvent.isRelativeEndpoint) {
+              toast('Trying Render intent endpoint: ' + debugEvent.endpoint);
+            }
+          },
+        });
       } catch (error) {
         if (shopify.cart && typeof shopify.cart.removeLineItem === 'function') {
           await shopify.cart.removeLineItem(lineUuid);
