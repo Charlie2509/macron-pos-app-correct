@@ -161,17 +161,9 @@ function GiftCardModal() {
   var formError = formErrorState[0];
   var setFormError = formErrorState[1];
 
-  var confirmState = useState(false);
-  var confirmingActivation = confirmState[0];
-  var setConfirmingActivation = confirmState[1];
-
-  var submittingState = useState(false);
-  var submitting = submittingState[0];
-  var setSubmitting = submittingState[1];
-
-  var successState = useState(null);
-  var successData = successState[0];
-  var setSuccessData = successState[1];
+  var activationQueuedState = useState(null);
+  var activationQueued = activationQueuedState[0];
+  var setActivationQueued = activationQueuedState[1];
 
   function closeModal() {
     if (typeof window !== 'undefined' && window && typeof window.close === 'function') {
@@ -211,126 +203,19 @@ function GiftCardModal() {
     };
   }
 
-  function beginActivationFlow() {
-    if (submitting) {
-      return;
-    }
+  function continueToCheckout() {
     var validation = validateForm();
     if (!validation.ok) {
       return;
-    }
-    setConfirmingActivation(true);
-  }
-
-  async function confirmActivation() {
-    if (submitting) {
-      return;
-    }
-    var validation = validateForm();
-    if (!validation.ok) {
-      setConfirmingActivation(false);
-      return;
-    }
-
-    setSubmitting(true);
-    setFormError('');
-    setConfirmingActivation(false);
-
-    var shopDomain = '';
-    var currency = 'GBP';
-    if (shopify && shopify.session && shopify.session.currentSession) {
-      if (shopify.session.currentSession.shopDomain) {
-        shopDomain = toText(shopify.session.currentSession.shopDomain);
-      }
-      if (shopify.session.currentSession.currency) {
-        currency = toText(shopify.session.currentSession.currency);
-      }
     }
 
     var noteText = trimEdgeWhitespace(noteInput);
-    if (noteText === '') {
-      noteText = 'Activated via Macron POS gift card tool';
-    }
-
-    var token = '';
-    if (shopify && shopify.session && typeof shopify.session.getSessionToken === 'function') {
-      try {
-        var sessionToken = await shopify.session.getSessionToken();
-        token = sessionToken ? toText(sessionToken) : '';
-      } catch (tokenError) {
-        token = '';
-      }
-    }
-
-    var payload = {
+    setActivationQueued({
       code: validation.code,
       amount: validation.amount,
-      currency: currency,
       note: noteText,
-      shop: shopDomain,
-    };
-
-    var result = await postGiftCardActivation(payload, token);
-
-    if (result.ok) {
-      setSuccessData({
-        code: validation.code,
-        amount: validation.amount,
-        codeLast4: result.codeLast4,
-        giftCardId: result.giftCardId,
-      });
-      setCodeInput('');
-      setAmountInput('');
-      setNoteInput('');
-      resetErrors();
-      setSubmitting(false);
-      return;
-    }
-
-    if (result.fieldErrors && typeof result.fieldErrors === 'object') {
-      if (result.fieldErrors.code) {
-        setCodeError(toText(result.fieldErrors.code));
-      }
-      if (result.fieldErrors.amount) {
-        setAmountError(toText(result.fieldErrors.amount));
-      }
-    }
-
-    setFormError(toText(result.error) || 'Could not activate gift card');
-    setSubmitting(false);
-  }
-
-  function activateAnother() {
-    setSuccessData(null);
-    setConfirmingActivation(false);
-    setSubmitting(false);
-    resetErrors();
-  }
-
-  if (successData) {
-    return (
-      <s-page heading="Activate Gift Card">
-        <s-scroll-box style="height: 100%;">
-          <s-stack direction="block" gap="base">
-            <s-section heading="Gift card activated">
-              <s-stack direction="block" gap="base">
-                <s-text>Code: {successData.code}</s-text>
-                <s-text>Value loaded: {formatAmountForDisplay(successData.amount)}</s-text>
-                <s-text appearance="subdued">Last 4: {successData.codeLast4}</s-text>
-                <s-stack direction="block" gap="small">
-                  <s-button variant="primary" onClick={activateAnother}>
-                    Activate another
-                  </s-button>
-                  <s-button variant="secondary" onClick={closeModal}>
-                    Close
-                  </s-button>
-                </s-stack>
-              </s-stack>
-            </s-section>
-          </s-stack>
-        </s-scroll-box>
-      </s-page>
-    );
+    });
+    setFormError('');
   }
 
   return (
@@ -378,35 +263,17 @@ function GiftCardModal() {
             </s-stack>
           </s-section>
 
-          {confirmingActivation ? (
-            <s-section heading="Confirm payment">
-              <s-stack direction="block" gap="base">
-                <s-text>Have you taken payment for this gift card?</s-text>
-                <s-stack direction="block" gap="small">
-                  <s-button variant="primary" onClick={confirmActivation} disabled={submitting}>
-                    Yes, activate now
-                  </s-button>
-                  <s-button
-                    variant="secondary"
-                    onClick={function () {
-                      setConfirmingActivation(false);
-                    }}
-                    disabled={submitting}
-                  >
-                    No, go back
-                  </s-button>
-                </s-stack>
-              </s-stack>
-            </s-section>
-          ) : null}
-
           <s-section heading="Actions">
             <s-stack direction="block" gap="small">
-              {submitting ? <s-text>Activating gift card...</s-text> : null}
-              <s-button variant="primary" onClick={beginActivationFlow} disabled={submitting}>
-                Activate gift card
+              {activationQueued ? (
+                <s-text>
+                  This gift card will be activated after successful payment.
+                </s-text>
+              ) : null}
+              <s-button variant="primary" onClick={continueToCheckout}>
+                Continue to checkout
               </s-button>
-              <s-button variant="secondary" onClick={closeModal} disabled={submitting}>
+              <s-button variant="secondary" onClick={closeModal}>
                 Cancel
               </s-button>
             </s-stack>
