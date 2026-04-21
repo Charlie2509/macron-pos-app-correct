@@ -79,21 +79,39 @@ For more information on the Shopify Dev MCP please read [the documentation](http
 
 ### Application Storage
 
-This template uses [Prisma](https://www.prisma.io/) to store session data, by default using an [SQLite](https://www.sqlite.org/index.html) database.
-The database is defined as a Prisma schema in `prisma/schema.prisma`.
+This app uses [Prisma](https://www.prisma.io/) to store session data and POS intent state in **PostgreSQL**.
+The datasource is defined in `prisma/schema.prisma` and reads from `DATABASE_URL`.
 
-This use of SQLite works in production if your app runs as a single instance.
-The database that works best for you depends on the data your app needs and how it is queried.
-Here’s a short list of databases providers that provide a free tier to get started:
+Required environment variable:
 
-| Database   | Type             | Hosters                                                                                                                                                                                                                                    |
-| ---------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| MySQL      | SQL              | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-mysql), [Planet Scale](https://planetscale.com/), [Amazon Aurora](https://aws.amazon.com/rds/aurora/), [Google Cloud SQL](https://cloud.google.com/sql/docs/mysql) |
-| PostgreSQL | SQL              | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-postgresql), [Amazon Aurora](https://aws.amazon.com/rds/aurora/), [Google Cloud SQL](https://cloud.google.com/sql/docs/postgres)                                   |
-| Redis      | Key-value        | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-redis), [Amazon MemoryDB](https://aws.amazon.com/memorydb/)                                                                                                        |
-| MongoDB    | NoSQL / Document | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-mongodb), [MongoDB Atlas](https://www.mongodb.com/atlas/database)                                                                                                  |
+```shell
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DB_NAME?schema=public
+```
 
-To use one of these, you can use a different [datasource provider](https://www.prisma.io/docs/reference/api-reference/prisma-schema-reference#datasource) in your `schema.prisma` file, or a different [SessionStorage adapter package](https://github.com/Shopify/shopify-api-js/blob/main/packages/shopify-api/docs/guides/session-storage.md).
+Why PostgreSQL in production:
+
+- Session rows (`Session`) are persisted across deploys so offline session lookup remains stable.
+- Gift card activation state (`PendingGiftCardActivation`) is durable and won't be lost on container restarts.
+- POS intent handoff state (`PendingMacronPosIntent`) is durable for retry-safe flows.
+
+### Render PostgreSQL migration steps
+
+1. Create a managed PostgreSQL instance in Render and copy its **External Database URL**.
+2. In your Render web service environment variables, set `DATABASE_URL` to that PostgreSQL URL.
+3. Deploy with the existing start flow (`npm run docker-start`), which executes Prisma migrations via `npm run setup`.
+4. If you need to run migrations manually, execute:
+
+```shell
+npx prisma migrate deploy
+```
+
+5. Validate tables after deploy:
+
+```shell
+npx prisma studio
+```
+
+The app keeps using `PrismaSessionStorage(prisma)`, so existing session logic remains compatible while persisting to PostgreSQL.
 
 ### Build
 
