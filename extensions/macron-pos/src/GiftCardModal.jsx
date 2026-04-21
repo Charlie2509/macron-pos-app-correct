@@ -3,6 +3,7 @@ import {render} from 'preact';
 import {useEffect, useRef, useState} from 'preact/hooks';
 
 var RELATIVE_INTENT_ENDPOINT = '/api/macron-pos/gift-card/intent';
+var RELATIVE_VALIDATE_ENDPOINT = '/api/macron-pos/gift-card/validate';
 var GIFT_CARD_SALE_TITLE = 'Macron Physical Gift Card';
 
 export default async function () {
@@ -163,6 +164,42 @@ async function createIntent(payload, token, options) {
   }
 }
 
+
+async function validateCodeAvailability(code, token) {
+  try {
+    var headers = {
+      'Content-Type': 'application/json',
+    };
+    if (token !== '') {
+      headers.Authorization = 'Bearer ' + token;
+    }
+
+    var response = await fetch(RELATIVE_VALIDATE_ENDPOINT, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({code: code}),
+    });
+
+    var json = null;
+    try {
+      json = await response.json();
+    } catch (parseError) {
+      return {ok: false, reason: 'invalid_code'};
+    }
+
+    if (json && json.valid === true) {
+      return {ok: true};
+    }
+
+    return {
+      ok: false,
+      reason: json && json.reason ? toText(json.reason) : 'invalid_code',
+    };
+  } catch (error) {
+    return {ok: false, reason: 'invalid_code'};
+  }
+}
+
 function GiftCardModal() {
   var codeFieldRef = useRef(null);
 
@@ -280,6 +317,26 @@ function GiftCardModal() {
     try {
       var intentResult = null;
       var markerProperties = null;
+      var sessionToken = '';
+
+      try {
+        if (shopify.session && typeof shopify.session.getSessionToken === 'function') {
+          var maybeToken = await shopify.session.getSessionToken();
+          sessionToken = trimEdgeWhitespace(maybeToken);
+        }
+      } catch (tokenError) {
+        // noop
+      }
+
+      var precheckResult = await validateCodeAvailability(validation.code, sessionToken);
+      if (!precheckResult.ok) {
+        if (precheckResult.reason === 'duplicate_code' || precheckResult.reason === 'pending_code') {
+          setCodeError('This gift card code is already in use. Scan a different card.');
+        } else {
+          setCodeError('Code must be exactly 13 digits');
+        }
+        return;
+      }
 
       try {
         lineUuid = await shopify.cart.addCustomSale({
@@ -300,12 +357,6 @@ function GiftCardModal() {
       toast('Custom sale added');
 
       try {
-        var sessionToken = '';
-        if (shopify.session && typeof shopify.session.getSessionToken === 'function') {
-          var maybeToken = await shopify.session.getSessionToken();
-          sessionToken = trimEdgeWhitespace(maybeToken);
-        }
-
         intentResult = await createIntent({
           code: validation.code,
           amount: validation.amount,
@@ -421,7 +472,7 @@ function GiftCardModal() {
           <s-section heading="Gift card details">
             <s-stack direction="block" gap="base">
               <s-text appearance="subdued">
-                Scan or type the 13-digit physical card code, then complete checkout to activate it.
+                Scan the card barcode or enter the 13-digit code manually.
               </s-text>
               <s-stack direction="block" gap="small">
                 <s-text emphasis="bold">Card code</s-text>

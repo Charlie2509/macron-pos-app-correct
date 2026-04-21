@@ -596,6 +596,7 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
     }
 
     if (intentRecord.status === "duplicate_code") {
+      logDebug("GIFT CARD SKIP DUPLICATE CODE", `order_id=${orderId} intent_id=${intentRecord.id} action=skip_no_retry`);
       logGiftCardFinalResult("skipped_duplicate_code", `order_id=${orderId} intent_id=${intentRecord.id}`);
       continue;
     }
@@ -630,7 +631,11 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
       if (current?.status === "activated" || current?.giftCardId) {
         logGiftCardFinalResult("skipped_already_processed", `order_id=${orderId} intent_id=${intentRecord.id} status=${current?.status || "unknown"}`);
       } else if (current?.status === "duplicate_code") {
+        logDebug("GIFT CARD SKIP DUPLICATE CODE", `order_id=${orderId} intent_id=${intentRecord.id} action=skip_no_retry`);
         logGiftCardFinalResult("skipped_duplicate_code", `order_id=${orderId} intent_id=${intentRecord.id}`);
+      } else if (current?.status === "processing") {
+        logDebug("GIFT CARD SKIP ALREADY PROCESSING", `order_id=${orderId} intent_id=${intentRecord.id}`);
+        logGiftCardFinalResult("skipped_already_processed", `order_id=${orderId} intent_id=${intentRecord.id} status=processing`);
       }
       continue;
     }
@@ -652,6 +657,10 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
             lastError: activationResult.error || "duplicate_code",
           },
         });
+        logDebug(
+          "GIFT CARD DUPLICATE CODE FINAL",
+          `order_id=${orderId} intent_id=${intentRecord.id} action=mark_duplicate_code_no_retry error=${activationResult.error || "duplicate_code"}`,
+        );
         logGiftCardFinalResult(
           "skipped_duplicate_code",
           `order_id=${orderId} intent_id=${intentRecord.id} error=${activationResult.error || "duplicate_code"}`,
