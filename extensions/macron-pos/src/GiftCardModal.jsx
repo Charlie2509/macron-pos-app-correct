@@ -188,7 +188,7 @@ async function validateCodeAvailability(code, token) {
     }
 
     if (json && json.valid === true) {
-      return {ok: true};
+      return {ok: true, reason: json.reason ? toText(json.reason) : 'valid_clear'};
     }
 
     return {
@@ -240,6 +240,13 @@ function GiftCardModal() {
       codeFieldRef.current.focus();
     }
   }, [isSubmitting]);
+
+  useEffect(function () {
+    console.log('[gift-card-modal] captured_code_state', {
+      sanitizedValue: codeInput,
+      digitCount: codeInput.length,
+    });
+  }, [codeInput]);
 
   function closeModal() {
     if (typeof window !== 'undefined' && window && typeof window.close === 'function') {
@@ -330,10 +337,16 @@ function GiftCardModal() {
 
       var precheckResult = await validateCodeAvailability(validation.code, sessionToken);
       if (!precheckResult.ok) {
-        if (precheckResult.reason === 'duplicate_code' || precheckResult.reason === 'pending_code') {
+        console.log('[gift-card-modal] validation_blocked', {
+          code: validation.code,
+          reason: precheckResult.reason,
+        });
+        if (precheckResult.reason === 'duplicate_shopify_code' || precheckResult.reason === 'duplicate_pending_intent') {
           setCodeError('This gift card code is already in use. Scan a different card.');
-        } else {
+        } else if (precheckResult.reason === 'invalid_length') {
           setCodeError('Code must be exactly 13 digits');
+        } else {
+          setCodeError('Could not validate this card code. Try scanning again.');
         }
         return;
       }
@@ -487,10 +500,19 @@ function GiftCardModal() {
                   maxLength={13}
                   enterKeyHint="next"
                   onInput={function (event) {
-                    setCodeInput(normalizeCodeInput(event.target.value));
+                    var rawValue = toText(event && event.target ? event.target.value : '');
+                    var sanitizedValue = normalizeCodeInput(rawValue);
+                    console.log('[gift-card-modal] code_input_event', {
+                      rawValue: rawValue,
+                      sanitizedValue: sanitizedValue,
+                      rawLength: rawValue.length,
+                      sanitizedLength: sanitizedValue.length,
+                    });
+                    setCodeInput(sanitizedValue);
                   }}
                 />
                 <s-text appearance="subdued">Scan the card barcode or enter the 13-digit code manually</s-text>
+                <s-text appearance="subdued">Captured digits: {String(codeInput.length)}/13</s-text>
                 {codeError !== '' ? <s-text appearance="critical">{codeError}</s-text> : null}
               </s-stack>
               <s-stack direction="block" gap="small">

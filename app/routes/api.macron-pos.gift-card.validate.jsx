@@ -3,9 +3,10 @@ import { authenticate, unauthenticated } from "../shopify.server";
 
 const GIFT_CARD_LOOKUP_QUERY = `#graphql
   query GiftCardLookupByCode($query: String!) {
-    giftCards(first: 1, query: $query) {
+    giftCards(first: 5, query: $query) {
       nodes {
         id
+        lastCharacters
       }
     }
   }
@@ -43,7 +44,7 @@ function sanitizeCode(rawCode) {
 }
 
 async function codeExistsInShopify(admin, code) {
-  const queryValue = `code:${code}`;
+  const queryValue = `code:"${code}"`;
   const response = await admin.graphql(GIFT_CARD_LOOKUP_QUERY, {
     variables: { query: queryValue },
   });
@@ -52,7 +53,18 @@ async function codeExistsInShopify(admin, code) {
     const message = String(body.errors[0]?.message || "gift card lookup failed");
     throw new Error(message);
   }
-  return Boolean(body?.data?.giftCards?.nodes?.length);
+  const nodes = Array.isArray(body?.data?.giftCards?.nodes) ? body.data.giftCards.nodes : [];
+  const lastFour = code.slice(-4);
+  return nodes.some((node) => text(node?.lastCharacters) === lastFour);
+}
+
+function logValidationDecision(shop, code, reason, extras = {}) {
+  console.log("[gift-card-validate] decision", {
+    shop,
+    code,
+    reason,
+    ...extras,
+  });
 }
 
 export const loader = async ({ request }) => {
@@ -86,7 +98,8 @@ export const action = async ({ request }) => {
 
   const code = sanitizeCode(body?.code);
   if (!/^\d{13}$/.test(code)) {
-    return jsonResponse({ valid: false, reason: "invalid_code" }, 200);
+    logValidationDecision("", code, "invalid_length");
+    return jsonResponse({ valid: false, reason: "invalid_length" }, 200);
   }
 
   const shop = extractShopDomain(posContext?.sessionToken?.dest);
@@ -105,8 +118,13 @@ export const action = async ({ request }) => {
   });
 
   if (pendingIntent) {
-    return jsonResponse({ valid: false, reason: "pending_code" }, 200);
+    logValidationDecision(shop, code, "duplicate_pending_intent", {
+      pendingIntentId: pendingIntent.id,
+    });
+    return jsonResponse({ valid: false, reason: "duplicate_pending_intent" }, 200);
   }
+
+  logValidationDecision(shop, code, "same_attempt_allowed");
 
   let adminContext;
   try {
@@ -123,7 +141,8 @@ export const action = async ({ request }) => {
   try {
     const duplicateInShopify = await codeExistsInShopify(admin, code);
     if (duplicateInShopify) {
-      return jsonResponse({ valid: false, reason: "duplicate_code" }, 200);
+      logValidationDecision(shop, code, "duplicate_shopify_code");
+      return jsonResponse({ valid: false, reason: "duplicate_shopify_code" }, 200);
     }
   } catch (error) {
     console.error("[gift-card-validate] Shopify lookup failed", {
@@ -133,5 +152,6 @@ export const action = async ({ request }) => {
     return jsonResponse({ valid: false, reason: "invalid_code" }, 502);
   }
 
-  return jsonResponse({ valid: true }, 200);
+  logValidationDecision(shop, code, "valid_clear");
+  return jsonResponse({ valid: true, reason: "valid_clear" }, 200);
 };
