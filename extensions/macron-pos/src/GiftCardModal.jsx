@@ -21,7 +21,7 @@ function trimEdgeWhitespace(value) {
 }
 
 function normalizeCodeInput(value) {
-  return trimEdgeWhitespace(value);
+  return toText(value).replace(/\D+/g, '').slice(0, 13);
 }
 
 function parseAmountInput(value) {
@@ -433,11 +433,13 @@ function GiftCardModal() {
                   autocomplete="off"
                   autocorrect="off"
                   spellcheck="false"
+                  maxLength={13}
                   enterKeyHint="next"
                   onInput={function (event) {
                     setCodeInput(normalizeCodeInput(event.target.value));
                   }}
                 />
+                <s-text appearance="subdued">Scan the card barcode or enter the 13-digit code manually</s-text>
                 {codeError !== '' ? <s-text appearance="critical">{codeError}</s-text> : null}
               </s-stack>
               <s-stack direction="block" gap="small">

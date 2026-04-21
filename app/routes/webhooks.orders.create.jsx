@@ -470,6 +470,22 @@ function firstGraphQlError(errors) {
   return String(errors[0]?.message || "").trim() || "GraphQL request failed";
 }
 
+function isDuplicateCodeErrorMessage(errorMessage) {
+  const normalized = normalizeStringValue(errorMessage);
+  if (!normalized) return false;
+  return (
+    normalized.includes("duplicate") ||
+    normalized.includes("already exists") ||
+    normalized.includes("already been taken") ||
+    (normalized.includes("gift card") && normalized.includes("code") && normalized.includes("exists"))
+  );
+}
+
+function logGiftCardFinalResult(result, details = "") {
+  const message = details ? `result=${result} ${details}` : `result=${result}`;
+  logDebug("GIFT CARD FINAL RESULT", message);
+}
+
 function buildGiftCardNote(baseNote, orderName, orderId, intentId) {
   const parts = [];
   const normalizedBase = String(baseNote || "").trim();
@@ -495,8 +511,9 @@ async function attemptGiftCardActivation({ admin, intentRecord, orderId, orderNa
 
   if (body?.errors?.length > 0) {
     const gqlError = firstGraphQlError(body.errors);
-    logDebugError("GIFT CARD CREATE GRAPHQL ERROR", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id} error=${gqlError}`);
-    return { ok: false, error: gqlError };
+    const duplicateCode = isDuplicateCodeErrorMessage(gqlError);
+    logDebugError("GIFT CARD CREATE GRAPHQL ERROR", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id} duplicate_code=${String(duplicateCode)} error=${gqlError}`);
+    return { ok: false, error: gqlError, duplicateCode };
   }
 
   const createPayload = body?.data?.giftCardCreate;
@@ -506,8 +523,9 @@ async function attemptGiftCardActivation({ admin, intentRecord, orderId, orderNa
   }
   if (Array.isArray(createPayload.userErrors) && createPayload.userErrors.length > 0) {
     const userError = String(createPayload.userErrors[0]?.message || "Gift card create user error");
-    logDebugError("GIFT CARD CREATE USER ERROR", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id} error=${userError}`);
-    return { ok: false, error: userError };
+    const duplicateCode = isDuplicateCodeErrorMessage(userError);
+    logDebugError("GIFT CARD CREATE USER ERROR", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id} duplicate_code=${String(duplicateCode)} error=${userError}`);
+    return { ok: false, error: userError, duplicateCode };
   }
   if (!createPayload.giftCard?.id) {
     logDebugError("GIFT CARD CREATE MISSING ID", `shop=${shop || "unknown"} order_id=${orderId} intent_id=${intentRecord.id}`);
@@ -534,15 +552,16 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
 
   for (const candidate of candidates) {
     let intentRecord = null;
-    if (candidate.intentId) {
+    const hasDirectIntentId = Boolean(candidate.intentId);
+
+    if (hasDirectIntentId) {
       intentRecord = await db.pendingGiftCardActivation.findFirst({
         where: {
           id: candidate.intentId,
           shop,
         },
       });
-    }
-    if (!intentRecord && candidate.intentToken) {
+    } else if (candidate.intentToken) {
       intentRecord = await db.pendingGiftCardActivation.findFirst({
         where: {
           shop,
@@ -550,7 +569,8 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
         },
       });
     }
-    if (!intentRecord && candidate.code && candidate.amount) {
+
+    if (!intentRecord && !hasDirectIntentId && candidate.code && candidate.amount) {
       intentRecord = await db.pendingGiftCardActivation.findFirst({
         where: {
           shop,
@@ -565,11 +585,18 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
 
     if (!intentRecord) {
       logDebugError("GIFT CARD INTENT MISSING", `order_id=${orderId} candidate=${JSON.stringify(candidate)}`);
+      logGiftCardFinalResult("skipped_missing_intent", `order_id=${orderId} intent_id=${candidate.intentId || "none"}`);
       continue;
     }
 
-    if (intentRecord.status === "activated" && intentRecord.giftCardId) {
+    if (intentRecord.status === "activated" || Boolean(intentRecord.giftCardId)) {
       logDebug("GIFT CARD SKIP ALREADY ACTIVATED", `order_id=${orderId} intent_id=${intentRecord.id}`);
+      logGiftCardFinalResult("skipped_already_processed", `order_id=${orderId} intent_id=${intentRecord.id} status=${intentRecord.status}`);
+      continue;
+    }
+
+    if (intentRecord.status === "duplicate_code") {
+      logGiftCardFinalResult("skipped_duplicate_code", `order_id=${orderId} intent_id=${intentRecord.id}`);
       continue;
     }
 
@@ -578,6 +605,7 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
         "GIFT CARD ORDER CONFLICT",
         `intent_id=${intentRecord.id} existing_order=${intentRecord.orderId} incoming_order=${orderId}`,
       );
+      logGiftCardFinalResult("skipped_already_processed", `order_id=${orderId} intent_id=${intentRecord.id} conflict_order=${intentRecord.orderId}`);
       continue;
     }
 
@@ -585,7 +613,7 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
       where: {
         id: intentRecord.id,
         shop,
-        status: { in: ["pending", "failed", "processing"] },
+        status: { in: ["pending", "failed"] },
       },
       data: {
         status: "processing",
@@ -596,6 +624,14 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
       },
     });
     if (claimResult.count === 0) {
+      const current = await db.pendingGiftCardActivation.findFirst({
+        where: { id: intentRecord.id, shop },
+      });
+      if (current?.status === "activated" || current?.giftCardId) {
+        logGiftCardFinalResult("skipped_already_processed", `order_id=${orderId} intent_id=${intentRecord.id} status=${current?.status || "unknown"}`);
+      } else if (current?.status === "duplicate_code") {
+        logGiftCardFinalResult("skipped_duplicate_code", `order_id=${orderId} intent_id=${intentRecord.id}`);
+      }
       continue;
     }
 
@@ -608,6 +644,21 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
     });
 
     if (!activationResult.ok) {
+      if (activationResult.duplicateCode) {
+        await db.pendingGiftCardActivation.update({
+          where: { id: intentRecord.id },
+          data: {
+            status: "duplicate_code",
+            lastError: activationResult.error || "duplicate_code",
+          },
+        });
+        logGiftCardFinalResult(
+          "skipped_duplicate_code",
+          `order_id=${orderId} intent_id=${intentRecord.id} error=${activationResult.error || "duplicate_code"}`,
+        );
+        continue;
+      }
+
       await db.pendingGiftCardActivation.update({
         where: { id: intentRecord.id },
         data: {
@@ -619,6 +670,7 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
         "GIFT CARD ACTIVATION FAILED",
         `order_id=${orderId} intent_id=${intentRecord.id} error=${activationResult.error || "unknown"}`,
       );
+      logGiftCardFinalResult("error_shopify_create", `order_id=${orderId} intent_id=${intentRecord.id}`);
       continue;
     }
 
@@ -627,7 +679,7 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
       data: {
         status: "activated",
         activatedAt: new Date(),
-        giftCardId: activationResult.giftCardId,
+        giftCardId: intentRecord.giftCardId || activationResult.giftCardId,
         lastError: null,
       },
     });
@@ -635,6 +687,7 @@ async function processGiftCardActivationsForOrder({ shop, admin, order }) {
       "GIFT CARD ACTIVATION SUCCESS",
       `order_id=${orderId} intent_id=${intentRecord.id} gift_card_id=${activationResult.giftCardId}`,
     );
+    logGiftCardFinalResult("success_created", `order_id=${orderId} intent_id=${intentRecord.id} gift_card_id=${activationResult.giftCardId}`);
   }
 }
 
