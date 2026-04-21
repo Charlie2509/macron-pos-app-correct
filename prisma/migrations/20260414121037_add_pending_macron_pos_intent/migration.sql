@@ -13,8 +13,8 @@ CREATE TABLE "PendingMacronPosIntent" (
     "isBundle" BOOLEAN NOT NULL DEFAULT false,
     "bundleSummary" TEXT,
     "fingerprint" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "expiresAt" DATETIME NOT NULL,
-    "consumedAt" DATETIME,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "consumedAt" TIMESTAMP(3),
     "matchedOrderId" TEXT
 );
