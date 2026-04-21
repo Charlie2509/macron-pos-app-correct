@@ -15,10 +15,10 @@ CREATE TABLE "PendingGiftCardActivation" (
     "giftCardId" TEXT,
     "lastError" TEXT,
     "activationAttempts" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "expiresAt" DATETIME NOT NULL,
-    "activatedAt" DATETIME
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "activatedAt" TIMESTAMP(3)
 );
 
 -- CreateIndex
