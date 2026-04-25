@@ -359,6 +359,7 @@ function buildMshLineItemIntentProperties(options) {
   var properties = {
     _msh_source: baseIntent._msh_source,
     _msh_fulfilment_mode: baseIntent._msh_fulfilment_mode,
+    _msh_fulfillment_mode: baseIntent._msh_fulfilment_mode,
     _msh_take_now: baseIntent._msh_take_now,
     _msh_intent_product_title: productTitle,
     _msh_intent_variant_title: variantTitle,
@@ -369,7 +370,12 @@ function buildMshLineItemIntentProperties(options) {
     _msh_intent_created_at: nowIso,
     _msh_intent_source: 'macron_pos',
     _msh_intent_fulfilment_mode: baseIntent._msh_fulfilment_mode,
+    _msh_intent_fulfillment_mode: baseIntent._msh_fulfilment_mode,
     _msh_intent_take_now: baseIntent._msh_take_now,
+    _msh_fallback_source: baseIntent._msh_source,
+    _msh_fallback_fulfilment_mode: baseIntent._msh_fulfilment_mode,
+    _msh_fallback_fulfillment_mode: baseIntent._msh_fulfilment_mode,
+    _msh_fallback_take_now: baseIntent._msh_take_now,
   };
   properties._msh_intent_bundle_summary = bundleSummary;
   return properties;
@@ -420,6 +426,7 @@ function buildMshOrderFallbackProperties(rawProperties, bundleAttachConfig) {
   }
   if (mode !== '') {
     orderFallback._msh_order_fulfilment_mode = mode;
+    orderFallback._msh_order_fulfillment_mode = mode;
   }
   if (takeNow !== '') {
     orderFallback._msh_order_take_now = takeNow;
@@ -2888,6 +2895,15 @@ function Modal() {
       setLastIntentRequestAttempted(false);
       setLastIntentRequestStatus('skipped_direct_fetch');
       setLastIntentRequestError('');
+      console.log('[MSH POS DEBUG] INTENT RECORD CREATE STATUS', {
+        status: 'skipped_direct_fetch',
+        reason: 'line_item_properties_are_authoritative',
+        mode: pendingIntentMode,
+        takeNow: pendingIntentTakeNow,
+        productTitle: product && product.title ? String(product.title) : '',
+        variantTitle: variant && variant.title ? String(variant.title) : '',
+        quantity: String(mainLineQuantity),
+      });
       console.log('PENDING_INTENT_CREATE REQUEST SKIPPED', 'reason=skipped_direct_fetch', 'intent_source=line_item_properties');
 
       console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);

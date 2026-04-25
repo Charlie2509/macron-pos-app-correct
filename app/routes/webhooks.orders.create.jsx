@@ -319,6 +319,15 @@ function normalizeTakeNow(rawTakeNow) {
   return null;
 }
 
+function parsePositiveIntegerOrNull(value) {
+  const raw = String(value == null ? "" : value).trim();
+  if (!raw) return null;
+  if (!/^\d+$/.test(raw)) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
 function parseNumericId(value) {
   if (value == null) return "";
   const raw = String(value).trim();
@@ -376,10 +385,7 @@ function isGiftCardLikeLine({ attributes = {}, title = "", sku = "" } = {}) {
 }
 
 function isPosTakeTodayFallbackDetected(fallback = {}) {
-  return (
-    normalizeSource(fallback?.source) === "macron_pos" &&
-    (normalizeMode(fallback?.mode) === "take_today" || fallback?.takeNow === true)
-  );
+  return normalizeSource(fallback?.source) === "macron_pos" && normalizeMode(fallback?.mode) === "take_today";
 }
 
 function summarizeAttributes(attributes = {}) {
@@ -1303,6 +1309,32 @@ async function queryOrderWithRetry(admin, orderGid, options = {}) {
   };
 }
 
+function buildOrderFulfillmentSnapshot(order) {
+  const fulfillmentOrders = (order?.fulfillmentOrders?.nodes || []).map((fulfillmentOrder) => ({
+    id: String(fulfillmentOrder?.id || ""),
+    status: String(fulfillmentOrder?.status || ""),
+    lineItems: (fulfillmentOrder?.lineItems?.nodes || []).map((line) => ({
+      id: String(line?.id || ""),
+      lineItemId: String(line?.lineItem?.id || ""),
+      title: String(line?.lineItem?.title || ""),
+      remainingQuantity: Number(line?.remainingQuantity || 0),
+      totalQuantity: Number(line?.totalQuantity || 0),
+    })),
+  }));
+  const remainingByLine = {};
+  for (const fulfillmentOrder of fulfillmentOrders) {
+    for (const line of fulfillmentOrder.lineItems || []) {
+      const key = line.lineItemId || line.id;
+      remainingByLine[key] = Number(line.remainingQuantity || 0);
+    }
+  }
+  return {
+    displayFulfillmentStatus: String(order?.displayFulfillmentStatus || ""),
+    fulfillmentOrders,
+    remainingByLine,
+  };
+}
+
 export const action = async ({ request }) => {
   try {
     const { payload, topic, shop, admin: webhookAdmin } = await authenticate.webhook(request);
@@ -1501,7 +1533,7 @@ export const action = async ({ request }) => {
     const resolvedOrderFallback = orderFallbackAfterFetch.markerFound ? orderFallbackAfterFetch : payloadOrderFallback;
     const resolvedDurableNoteFallback = fetchedOrderDurableNote.markerFound ? fetchedOrderDurableNote : payloadDurableNote;
     const resolvedIntentFallback = resolvedOrderFallback.markerFound ? resolvedOrderFallback : resolvedDurableNoteFallback;
-    const posOrderFallbackDetected = isPosTakeTodayFallbackDetected(resolvedOrderFallback);
+    const posOrderFallbackDetected = isPosTakeTodayFallbackDetected(resolvedIntentFallback);
     const giftCardIntentDetected = hasGiftCardIntentForOrder(order?.lineItems?.nodes || [], fetchedOrderAttributes);
 
     const shouldTryPendingIntent =
@@ -1608,6 +1640,8 @@ export const action = async ({ request }) => {
     const eligibleOrderLineGids = new Set();
     const eligibleOrderLineNumericIds = new Set();
     const eligibleOrderLines = [];
+    const selectedLineQuantityOverridesByOrderLineGid = new Map();
+    const selectedLineQuantityOverridesByOrderLineNumericId = new Map();
     const lineDecisions = [];
     const simplifiedOrderLines = [];
 
@@ -1698,15 +1732,38 @@ export const action = async ({ request }) => {
           : "line_level";
       const orderLineGid = String(orderLine?.id || "");
       const orderLineNumericId = parseNumericId(orderLineGid);
+      const parsedIntentQuantity = parsePositiveIntegerOrNull(lineItemIntent.quantity);
+      const lineQuantity = Number(orderLine?.quantity || 0);
       const parsedBundleComponents = parseBundleComponentsFromAttributes(
         attributes,
         intentAuthoritativeMode,
         intentAuthoritativeTakeNow,
       );
       const isBundleParent = Array.isArray(parsedBundleComponents) && parsedBundleComponents.length > 0;
+      const splitTakeNowRequested =
+        intentAuthoritativeSource === "macron_pos" &&
+        intentAuthoritativeMode === "split" &&
+        intentAuthoritativeTakeNow === true;
+      const splitIntentQuantityValid = splitTakeNowRequested && parsedIntentQuantity !== null;
+      const splitSelectedQuantity =
+        splitIntentQuantityValid && lineQuantity > 0 ? Math.min(parsedIntentQuantity, lineQuantity) : 0;
+      if (splitTakeNowRequested && !splitIntentQuantityValid) {
+        logDebugError(
+          "SPLIT INTENT QUANTITY INVALID",
+          `order_id=${order.id} order_line_id=${orderLineGid || "missing"} title=${orderLine?.title || ""} raw_quantity=${String(
+            lineItemIntent.quantity || "",
+          )} action=skip_line`,
+        );
+      }
       const fallbackEligibleProductLine =
-        posOrderFallbackDetected && !feeOrSystem && !giftCardLikeLine && !isBundleParent;
-      const effectiveEligible = recoveredEligible || fallbackEligibleProductLine;
+        posOrderFallbackDetected &&
+        !feeOrSystem &&
+        !giftCardLikeLine &&
+        !isBundleParent &&
+        intentAuthoritativeMode !== "split" &&
+        intentAuthoritativeMode !== "order_in";
+      const effectiveEligible =
+        (recoveredEligible && (!splitTakeNowRequested || splitSelectedQuantity > 0)) || fallbackEligibleProductLine;
       const selectionReason = effectiveEligible
         ? recoveredEligible
           ? `line_eligible_${intentRecoverySource}`
@@ -1717,6 +1774,8 @@ export const action = async ({ request }) => {
             ? "skipped_gift_card_line"
             : isBundleParent
               ? "skipped_bundle_parent_placeholder"
+              : splitTakeNowRequested && !splitIntentQuantityValid
+                ? "skipped_split_missing_or_invalid_intent_quantity"
               : "not_take_today_eligible";
 
       if (feeOrSystem) feeSystemCount += 1;
@@ -1754,8 +1813,11 @@ export const action = async ({ request }) => {
         isBundleParent,
         bundleComponents: parsedBundleComponents || [],
         eligible: effectiveEligible,
+        selectedQuantity: splitTakeNowRequested ? splitSelectedQuantity : lineQuantity,
         reason: selectionReason,
         intentRecoverySource,
+        splitIntentQuantityRaw: lineItemIntent.quantity,
+        splitIntentQuantityParsed: parsedIntentQuantity,
         attributes: summarizeAttributes(attributes),
       };
 
@@ -1776,6 +1838,7 @@ export const action = async ({ request }) => {
           giftCardLikeLine,
           isBundleParent,
           eligible: effectiveEligible,
+          selectedQuantity: splitTakeNowRequested ? splitSelectedQuantity : lineQuantity,
           reason: selectionReason,
           intentRecoverySource,
         },
@@ -1812,10 +1875,14 @@ export const action = async ({ request }) => {
           orderLineGid,
           orderLineNumericId,
           title: orderLine?.title || "",
-          quantity: Number(orderLine?.quantity || 0),
+          quantity: lineQuantity,
+          selectedQuantity: splitTakeNowRequested ? splitSelectedQuantity : lineQuantity,
           mode: effectiveMode,
           takeNow: effectiveTakeNow,
         });
+        const selectedQuantityForLine = splitTakeNowRequested ? splitSelectedQuantity : lineQuantity;
+        if (orderLineGid) selectedLineQuantityOverridesByOrderLineGid.set(orderLineGid, selectedQuantityForLine);
+        if (orderLineNumericId) selectedLineQuantityOverridesByOrderLineNumericId.set(orderLineNumericId, selectedQuantityForLine);
       }
     }
 
@@ -1957,6 +2024,15 @@ export const action = async ({ request }) => {
         );
         const matched = matchedByGid || matchedByNumericId;
         const validFoLineId = foLineId.startsWith("gid://shopify/FulfillmentOrderLineItem/");
+        const selectedQuantityOverride = matchedByGid
+          ? selectedLineQuantityOverridesByOrderLineGid.get(orderLineGid)
+          : matchedByNumericId
+            ? selectedLineQuantityOverridesByOrderLineNumericId.get(orderLineNumericId)
+            : undefined;
+        const requestedQuantity = Number.isFinite(Number(selectedQuantityOverride))
+          ? Number(selectedQuantityOverride)
+          : quantity;
+        const mutationQuantity = Math.max(0, Math.min(quantity, requestedQuantity));
 
         const foDecision = {
           fulfillmentOrderId: fulfillmentOrder.id,
@@ -1972,23 +2048,31 @@ export const action = async ({ request }) => {
           validFulfillmentOrderLineId: validFoLineId,
           hasLineMshSource,
           hasLineTakeNow,
+          selectedQuantityOverride:
+            selectedQuantityOverride == null ? null : Number(selectedQuantityOverride),
+          selectedMutationQuantity: mutationQuantity,
           selectedForMutation: false,
           reasonSelected: "",
           reasonSkipped: "",
         };
 
-        if (matched && quantity > 0 && validFoLineId) {
+        if (matched && quantity > 0 && validFoLineId && mutationQuantity > 0) {
           selectedLineItems.push({
             id: foLineItem.id,
-            quantity,
+            quantity: mutationQuantity,
           });
           foDecision.selectedForMutation = true;
-          foDecision.reasonSelected = "matched_eligible_order_line";
+          foDecision.reasonSelected =
+            selectedQuantityOverride == null
+              ? "matched_eligible_order_line_default_quantity"
+              : "matched_eligible_order_line_quantity_override";
           selectedFoLineCount += 1;
         } else if (!matched) {
           foDecision.reasonSkipped = "not_in_selected_order_lines";
         } else if (quantity <= 0) {
           foDecision.reasonSkipped = "remaining_quantity_zero";
+        } else if (mutationQuantity <= 0) {
+          foDecision.reasonSkipped = "selected_quantity_zero_or_invalid";
         } else if (!validFoLineId) {
           foDecision.reasonSkipped = "invalid_fulfillment_order_line_id";
         }
@@ -2007,6 +2091,7 @@ export const action = async ({ request }) => {
             gid: matchedByGid,
             numericId: matchedByNumericId,
           },
+          selectedMutationQuantity: mutationQuantity,
           selectedForMutation: foDecision.selectedForMutation,
         });
       }
@@ -2101,6 +2186,41 @@ export const action = async ({ request }) => {
         result?.fulfillment?.status || "unknown"
       }`,
     );
+
+    const preMutationSnapshot = buildOrderFulfillmentSnapshot(order);
+    const postFulfillmentLookup = await queryOrderWithRetry(admin, orderGid, { attempts: 4, baseDelayMs: 400 });
+    const postFulfillmentOrder = postFulfillmentLookup.order;
+    const postMutationSnapshot = buildOrderFulfillmentSnapshot(postFulfillmentOrder || {});
+    const createdFulfillment = {
+      id: String(result?.fulfillment?.id || ""),
+      status: String(result?.fulfillment?.status || ""),
+    };
+    logDebug(
+      "POST-FULFILLMENT VERIFY",
+      `order_id=${order.id} fetch_attempts=${postFulfillmentLookup.attemptsUsed} exhausted=${String(
+        postFulfillmentLookup.exhausted,
+      )} displayFulfillmentStatus=${postMutationSnapshot.displayFulfillmentStatus || "unknown"} fulfillment_orders=${JSON.stringify(
+        postMutationSnapshot.fulfillmentOrders,
+      )} created_fulfillment=${JSON.stringify(createdFulfillment)}`,
+    );
+    const remainingChanged = Object.keys(preMutationSnapshot.remainingByLine).some((lineId) => {
+      const before = Number(preMutationSnapshot.remainingByLine[lineId] ?? 0);
+      const after = Number(postMutationSnapshot.remainingByLine[lineId] ?? before);
+      return after < before;
+    });
+    const statusChanged =
+      normalizeStringValue(preMutationSnapshot.displayFulfillmentStatus) !==
+      normalizeStringValue(postMutationSnapshot.displayFulfillmentStatus);
+    if (!remainingChanged && !statusChanged) {
+      logDebugError(
+        "FULFILLMENT MUTATION DID NOT UPDATE ORDER STATE",
+        `order_id=${order.id} pre_status=${preMutationSnapshot.displayFulfillmentStatus || "unknown"} post_status=${
+          postMutationSnapshot.displayFulfillmentStatus || "unknown"
+        } pre_remaining=${JSON.stringify(preMutationSnapshot.remainingByLine)} post_remaining=${JSON.stringify(
+          postMutationSnapshot.remainingByLine,
+        )}`,
+      );
+    }
 
     return new Response();
   } catch (error) {
