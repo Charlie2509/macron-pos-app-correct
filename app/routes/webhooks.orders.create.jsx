@@ -362,6 +362,26 @@ function evaluateLineEligibility({ attributes = {}, title = "", sku = "" } = {})
   };
 }
 
+function isGiftCardLikeLine({ attributes = {}, title = "", sku = "" } = {}) {
+  if (isGiftCardSaleMarker(attributes[GIFT_CARD_MARKER_KEY])) return true;
+
+  const normalizedTitle = normalizeStringValue(title);
+  const normalizedSku = normalizeStringValue(sku);
+  return (
+    normalizedTitle.includes("gift card") ||
+    normalizedTitle.includes("giftcard") ||
+    normalizedSku.includes("gift card") ||
+    normalizedSku.includes("giftcard")
+  );
+}
+
+function isPosTakeTodayFallbackDetected(fallback = {}) {
+  return (
+    normalizeSource(fallback?.source) === "macron_pos" &&
+    (normalizeMode(fallback?.mode) === "take_today" || fallback?.takeNow === true)
+  );
+}
+
 function summarizeAttributes(attributes = {}) {
   return Object.fromEntries(
     Object.entries(attributes).filter(([key]) =>
@@ -463,6 +483,14 @@ function extractGiftCardCandidatesFromOrder(orderLineNodes = [], orderAttributes
   }
 
   return candidates;
+}
+
+function hasGiftCardIntentForOrder(orderLineNodes = [], orderAttributes = {}) {
+  if (isGiftCardSaleMarker(orderAttributes[GIFT_CARD_MARKER_KEY])) return true;
+  return (orderLineNodes || []).some((line) => {
+    const attributes = attributeMap(line?.customAttributes);
+    return isGiftCardSaleMarker(attributes[GIFT_CARD_MARKER_KEY]);
+  });
 }
 
 function firstGraphQlError(errors) {
@@ -777,12 +805,17 @@ function findMacronLineItemIntent(orderLineNodes = []) {
 }
 
 function parseOrderLevelFallbackMarker(attributes = {}) {
-  const source = normalizeSource(attributes._msh_order_source);
+  const source = normalizeSource(attributes._msh_order_source || attributes._msh_fallback_source);
   const mode = normalizeMode(
-    attributes._msh_order_fulfillment_mode || attributes._msh_order_fulfilment_mode,
+    attributes._msh_order_fulfillment_mode ||
+      attributes._msh_order_fulfilment_mode ||
+      attributes._msh_fallback_fulfillment_mode ||
+      attributes._msh_fallback_fulfilment_mode,
   );
-  const takeNow = normalizeTakeNow(attributes._msh_order_take_now);
-  const bundleSummary = String(attributes._msh_order_bundle_summary || "").trim();
+  const takeNow = normalizeTakeNow(attributes._msh_order_take_now || attributes._msh_fallback_take_now);
+  const bundleSummary = String(
+    attributes._msh_order_bundle_summary || attributes._msh_fallback_bundle_summary || "",
+  ).trim();
   return {
     source,
     mode,
@@ -1468,6 +1501,8 @@ export const action = async ({ request }) => {
     const resolvedOrderFallback = orderFallbackAfterFetch.markerFound ? orderFallbackAfterFetch : payloadOrderFallback;
     const resolvedDurableNoteFallback = fetchedOrderDurableNote.markerFound ? fetchedOrderDurableNote : payloadDurableNote;
     const resolvedIntentFallback = resolvedOrderFallback.markerFound ? resolvedOrderFallback : resolvedDurableNoteFallback;
+    const posOrderFallbackDetected = isPosTakeTodayFallbackDetected(resolvedOrderFallback);
+    const giftCardIntentDetected = hasGiftCardIntentForOrder(order?.lineItems?.nodes || [], fetchedOrderAttributes);
 
     const shouldTryPendingIntent =
       !recognizedByLineItemIntent &&
@@ -1561,6 +1596,10 @@ export const action = async ({ request }) => {
         resolvedDurableNoteFallback.takeNow === null ? "null" : String(resolvedDurableNoteFallback.takeNow)
       } bundle_summary_present=${String(Boolean(resolvedDurableNoteFallback.bundleSummary))}`,
     );
+    logDebug(
+      "GIFT CARD / POS FALLBACK FLAGS",
+      `order_id=${order.id} giftCardIntentDetected=${String(giftCardIntentDetected)} posOrderFallbackDetected=${String(posOrderFallbackDetected)}`,
+    );
 
 
     const foNodes = order.fulfillmentOrders?.nodes || [];
@@ -1615,6 +1654,11 @@ export const action = async ({ request }) => {
           title: orderLine?.title || "",
           sku: orderLine?.sku || "",
         });
+      const giftCardLikeLine = isGiftCardLikeLine({
+        attributes,
+        title: orderLine?.title || "",
+        sku: orderLine?.sku || "",
+      });
       const lineItemIntent = parseLineItemIntentFromAttributes(attributes);
       const lineIntentMode = lineItemIntent.found ? lineItemIntent.mode : "";
       const lineIntentTakeNow = lineItemIntent.found ? lineItemIntent.takeNow : null;
@@ -1660,7 +1704,20 @@ export const action = async ({ request }) => {
         intentAuthoritativeTakeNow,
       );
       const isBundleParent = Array.isArray(parsedBundleComponents) && parsedBundleComponents.length > 0;
-      const effectiveEligible = recoveredEligible;
+      const fallbackEligibleProductLine =
+        posOrderFallbackDetected && !feeOrSystem && !giftCardLikeLine && !isBundleParent;
+      const effectiveEligible = recoveredEligible || fallbackEligibleProductLine;
+      const selectionReason = effectiveEligible
+        ? recoveredEligible
+          ? `line_eligible_${intentRecoverySource}`
+          : "order_level_pos_fallback_take_today"
+        : feeOrSystem
+          ? `skipped_${feeOrSystemReason}`
+          : giftCardLikeLine
+            ? "skipped_gift_card_line"
+            : isBundleParent
+              ? "skipped_bundle_parent_placeholder"
+              : "not_take_today_eligible";
 
       if (feeOrSystem) feeSystemCount += 1;
       if (intentAuthoritativeMode === "order_in") orderInCount += 1;
@@ -1693,9 +1750,11 @@ export const action = async ({ request }) => {
         parsedTakeNow: intentAuthoritativeTakeNow,
         feeOrSystem,
         feeOrSystemReason,
+        giftCardLikeLine,
         isBundleParent,
         bundleComponents: parsedBundleComponents || [],
         eligible: effectiveEligible,
+        reason: selectionReason,
         intentRecoverySource,
         attributes: summarizeAttributes(attributes),
       };
@@ -1714,8 +1773,10 @@ export const action = async ({ request }) => {
           takeNow: intentAuthoritativeTakeNow,
           feeOrSystem,
           feeOrSystemReason,
+          giftCardLikeLine,
           isBundleParent,
           eligible: effectiveEligible,
+          reason: selectionReason,
           intentRecoverySource,
         },
       });
@@ -1730,6 +1791,7 @@ export const action = async ({ request }) => {
         mode: effectiveMode,
         takeNow: effectiveTakeNow,
         feeOrSystem,
+        giftCardLikeLine,
         isBundleParent,
         attributes,
       });
@@ -1885,6 +1947,9 @@ export const action = async ({ request }) => {
         const orderLineNumericId = parseNumericId(orderLineGid);
         const foLineId = String(foLineItem.id || "");
         const quantity = Number(foLineItem.remainingQuantity || 0);
+        const linkedAttributes = attributeMap(linkedOrderLine?.customAttributes);
+        const hasLineMshSource = normalizeSource(linkedAttributes._msh_source) === expectedMarkerValue;
+        const hasLineTakeNow = normalizeTakeNow(linkedAttributes._msh_take_now) === true;
 
         const matchedByGid = Boolean(orderLineGid && eligibleOrderLineGids.has(orderLineGid));
         const matchedByNumericId = Boolean(
@@ -1905,7 +1970,11 @@ export const action = async ({ request }) => {
           matchedByNumericId,
           matchedEligibleOrderLine: matched,
           validFulfillmentOrderLineId: validFoLineId,
+          hasLineMshSource,
+          hasLineTakeNow,
           selectedForMutation: false,
+          reasonSelected: "",
+          reasonSkipped: "",
         };
 
         if (matched && quantity > 0 && validFoLineId) {
@@ -1914,7 +1983,14 @@ export const action = async ({ request }) => {
             quantity,
           });
           foDecision.selectedForMutation = true;
+          foDecision.reasonSelected = "matched_eligible_order_line";
           selectedFoLineCount += 1;
+        } else if (!matched) {
+          foDecision.reasonSkipped = "not_in_selected_order_lines";
+        } else if (quantity <= 0) {
+          foDecision.reasonSkipped = "remaining_quantity_zero";
+        } else if (!validFoLineId) {
+          foDecision.reasonSkipped = "invalid_fulfillment_order_line_id";
         }
 
         foLineDecisions.push(foDecision);
