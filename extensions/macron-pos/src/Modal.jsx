@@ -2546,6 +2546,77 @@ function Modal() {
     return 0;
   }
 
+  function linePropertiesToObject(line) {
+    if (!line) {
+      return {};
+    }
+    if (line.properties && typeof line.properties === 'object' && !Array.isArray(line.properties)) {
+      return sanitizeLineItemProperties(line.properties);
+    }
+    if (Array.isArray(line.properties)) {
+      var mapped = {};
+      for (var i = 0; i < line.properties.length; i += 1) {
+        var entry = line.properties[i];
+        if (!entry) continue;
+        var key = toStr(entry.name || entry.key);
+        var value = toStr(entry.value);
+        if (key !== '' && value !== '') {
+          mapped[key] = value;
+        }
+      }
+      return sanitizeLineItemProperties(mapped);
+    }
+    if (Array.isArray(line.customAttributes)) {
+      var customMapped = {};
+      for (var c = 0; c < line.customAttributes.length; c += 1) {
+        var attr = line.customAttributes[c];
+        if (!attr) continue;
+        var attrKey = toStr(attr.key || attr.name);
+        var attrValue = toStr(attr.value);
+        if (attrKey !== '' && attrValue !== '') {
+          customMapped[attrKey] = attrValue;
+        }
+      }
+      return sanitizeLineItemProperties(customMapped);
+    }
+    return {};
+  }
+
+  async function createPendingMacronPosIntent(payload) {
+    if (typeof fetch === 'undefined') {
+      return {ok: false, error: 'fetch_unavailable'};
+    }
+    try {
+      var response = await fetch('/api/macron-pos/intent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      var json = null;
+      try {
+        json = await response.json();
+      } catch (parseErr) {
+        return {ok: false, status: response.status, error: 'invalid_json_response'};
+      }
+      if (!response.ok || !json || json.ok !== true) {
+        return {
+          ok: false,
+          status: response.status,
+          error: json && json.error ? String(json.error) : 'pending_intent_failed',
+        };
+      }
+      return {
+        ok: true,
+        intentId: toStr(json.intentId),
+        expiresAt: toStr(json.expiresAt),
+      };
+    } catch (requestErr) {
+      return {ok: false, error: requestErr && requestErr.message ? requestErr.message : String(requestErr)};
+    }
+  }
+
   async function fetchPersonalisationFeeVariant(feeAmount) {
     var targetProductHandle = 'personalisation-fee';
     var targetProductTitle = 'Personalisation fee (system)';
@@ -2940,19 +3011,52 @@ function Modal() {
       setLastPingAttempted(false);
       setLastPingStatus('skipped_direct_fetch');
       setLastPingError('');
-      setLastIntentRequestAttempted(false);
-      setLastIntentRequestStatus('skipped_direct_fetch');
-      setLastIntentRequestError('');
-      console.log('[MSH POS DEBUG] INTENT RECORD CREATE STATUS', {
-        status: 'skipped_direct_fetch',
-        reason: 'line_item_properties_are_authoritative',
-        mode: pendingIntentMode,
-        takeNow: pendingIntentTakeNow,
-        productTitle: product && product.title ? String(product.title) : '',
-        variantTitle: variant && variant.title ? String(variant.title) : '',
-        quantity: String(mainLineQuantity),
-      });
-      console.log('PENDING_INTENT_CREATE REQUEST SKIPPED', 'reason=skipped_direct_fetch', 'intent_source=line_item_properties');
+      var pendingIntentResult = {ok: false, status: 'not_attempted'};
+      if (isNormalProductFlow) {
+        var pendingIntentPayload = {
+          source: 'macron_pos',
+          fulfillmentMode: pendingIntentMode,
+          takeNow: pendingIntentTakeNow,
+          productTitle: product && product.title ? String(product.title) : 'Unknown product',
+          variantTitle: variant && variant.title ? String(variant.title) : 'Unknown variant',
+          normalizedVariantId: String(normalized.value),
+          quantity: String(mainLineQuantity),
+          hasFee: feeRequired,
+          isBundle: false,
+          bundleSummary: '',
+          createdAtClient: new Date().toISOString(),
+        };
+        setLastIntentRequestAttempted(true);
+        setLastIntentRequestStatus('attempting');
+        setLastIntentRequestError('');
+        console.log('[MSH-POS-PRODUCT-DEBUG] NORMAL PRODUCT INTENT CREATE REQUEST', pendingIntentPayload);
+        pendingIntentResult = await createPendingMacronPosIntent(pendingIntentPayload);
+        if (pendingIntentResult.ok) {
+          setLastIntentRequestStatus('success');
+          console.log('[MSH-POS-PRODUCT-DEBUG] PENDING INTENT CREATE RESULT', {
+            ok: true,
+            intentId: pendingIntentResult.intentId,
+            expiresAt: pendingIntentResult.expiresAt,
+          });
+        } else {
+          setLastIntentRequestStatus('failed');
+          setLastIntentRequestError(pendingIntentResult.error ? String(pendingIntentResult.error) : 'pending_intent_failed');
+          console.error('[MSH-POS-PRODUCT-DEBUG] PENDING INTENT CREATE RESULT', pendingIntentResult);
+        }
+      } else {
+        setLastIntentRequestAttempted(false);
+        setLastIntentRequestStatus('skipped_direct_fetch');
+        setLastIntentRequestError('');
+        console.log('[MSH POS DEBUG] INTENT RECORD CREATE STATUS', {
+          status: 'skipped_direct_fetch',
+          reason: 'line_item_properties_are_authoritative',
+          mode: pendingIntentMode,
+          takeNow: pendingIntentTakeNow,
+          productTitle: product && product.title ? String(product.title) : '',
+          variantTitle: variant && variant.title ? String(variant.title) : '',
+          quantity: String(mainLineQuantity),
+        });
+      }
 
       console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
       console.log('[MSH Marker] line_item_properties payload=', mainLineProperties);
@@ -2968,6 +3072,14 @@ function Modal() {
         mainUuid = await shopify.cart.addLineItem(normalized.value, mainLineQuantity);
         setLastMainLineAddStatus('success');
         console.log('[MSH POS DEBUG] MAIN LINE ADDED', { uuid: mainUuid ? String(mainUuid) : '', variantId: String(normalized.value), quantity: String(mainLineQuantity) });
+        if (isNormalProductFlow) {
+          console.log('[MSH-POS-PRODUCT-DEBUG] CART LINE ADD RESULT', {
+            ok: true,
+            lineUuid: mainUuid ? String(mainUuid) : '',
+            variantId: String(normalized.value),
+            quantity: String(mainLineQuantity),
+          });
+        }
       } catch (mainAddErr) {
         setLastMainLineAddStatus('failed');
         console.error('[BundleAdd] main addLineItem error object=', mainAddErr);
@@ -2983,41 +3095,66 @@ function Modal() {
       }
 
       setLastPropertiesAttachAttempted(true);
+      var linePropertyAttachOk = false;
       if (shopify.cart && typeof shopify.cart.addLineItemProperties === 'function') {
         console.log('[MSH POS DEBUG] LINE ITEM PROPERTIES OUTBOUND', mainLineProperties);
         try {
           await shopify.cart.addLineItemProperties(mainUuid, mainLineProperties);
+          linePropertyAttachOk = true;
           setLastPropertiesAttachStatus('success');
           console.log('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH SUCCESS', { uuid: String(mainUuid) });
           if (isNormalProductFlow) {
-            console.log('[MSH-POS-PRODUCT-DEBUG] CART LINE ADD RESULT', {
+            var attachedLine = findCartLineByUuid(mainUuid);
+            var attachedProps = linePropertiesToObject(attachedLine);
+            var attachedMissingKeys = findMissingNormalProductMetadataKeys(attachedProps);
+            console.log('[MSH-POS-PRODUCT-DEBUG] LINE PROPERTIES ATTACH RESULT', {
               ok: true,
               lineUuid: String(mainUuid),
-              metadataKeyCount: Object.keys(mainLineProperties).length,
+              attachedPropertyCount: Object.keys(attachedProps).length,
+              missingRequiredKeysOnSnapshot: attachedMissingKeys,
             });
           }
         } catch (mainPropsErr) {
           setLastPropertiesAttachStatus('failed');
           console.error('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH FAILURE', mainPropsErr && mainPropsErr.message ? mainPropsErr.message : String(mainPropsErr));
           if (isNormalProductFlow) {
-            console.error('[MSH-POS-PRODUCT-DEBUG] CART LINE ADD RESULT', {
+            console.error('[MSH-POS-PRODUCT-DEBUG] LINE PROPERTIES ATTACH RESULT', {
               ok: false,
               reason: 'attach_properties_failed',
               message: mainPropsErr && mainPropsErr.message ? mainPropsErr.message : String(mainPropsErr),
             });
           }
-          throw mainPropsErr;
+          if (!pendingIntentResult.ok) {
+            await rollbackAddedLines('normal product metadata persistence failed (attach + pending intent)');
+            toast('Macron POS metadata failed — item not added safely.');
+            setLastCartActionStatus('failed');
+            setLastCartErrorMessage('normal product metadata persistence failed');
+            return false;
+          }
         }
       } else {
         setLastPropertiesAttachStatus('failed');
         console.error('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH FAILURE', 'Cart API missing addLineItemProperties');
         if (isNormalProductFlow) {
-          console.error('[MSH-POS-PRODUCT-DEBUG] CART LINE ADD RESULT', {
+          console.error('[MSH-POS-PRODUCT-DEBUG] LINE PROPERTIES ATTACH RESULT', {
             ok: false,
             reason: 'missing_addLineItemProperties_api',
           });
         }
-        throw new Error('Cart API missing addLineItemProperties for main line');
+        if (isNormalProductFlow && !pendingIntentResult.ok) {
+          await rollbackAddedLines('normal product metadata persistence failed (missing addLineItemProperties + pending intent)');
+          toast('Macron POS metadata failed — item not added safely.');
+          setLastCartActionStatus('failed');
+          setLastCartErrorMessage('missing addLineItemProperties and pending intent creation failed');
+          return false;
+        }
+      }
+      if (isNormalProductFlow && !linePropertyAttachOk && pendingIntentResult.ok) {
+        console.warn('[MSH-POS-PRODUCT-DEBUG] LINE PROPERTIES ATTACH RESULT', {
+          ok: false,
+          reason: 'line_property_attach_unavailable_or_failed_using_pending_intent',
+          pendingIntentId: pendingIntentResult.intentId || '',
+        });
       }
       if (fallbackMarkerKeyCount > 0) {
         if (shopify.cart && typeof shopify.cart.addLineItemProperties === 'function') {
