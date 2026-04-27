@@ -381,6 +381,38 @@ function buildMshLineItemIntentProperties(options) {
   return properties;
 }
 
+var REQUIRED_NORMAL_PRODUCT_METADATA_KEYS = [
+  '_msh_source',
+  '_msh_fulfilment_mode',
+  '_msh_fulfillment_mode',
+  '_msh_take_now',
+  '_msh_intent_product_title',
+  '_msh_intent_variant_title',
+  '_msh_intent_variant_id',
+  '_msh_intent_quantity',
+  '_msh_intent_source',
+  '_msh_intent_fulfilment_mode',
+  '_msh_intent_fulfillment_mode',
+  '_msh_intent_take_now',
+  '_msh_intent_created_at',
+  '_msh_fallback_source',
+  '_msh_fallback_fulfilment_mode',
+  '_msh_fallback_fulfillment_mode',
+  '_msh_fallback_take_now',
+];
+
+function findMissingNormalProductMetadataKeys(rawProperties) {
+  var properties = sanitizeLineItemProperties(rawProperties);
+  var missing = [];
+  for (var i = 0; i < REQUIRED_NORMAL_PRODUCT_METADATA_KEYS.length; i += 1) {
+    var key = REQUIRED_NORMAL_PRODUCT_METADATA_KEYS[i];
+    if (toStr(properties[key]) === '') {
+      missing.push(key);
+    }
+  }
+  return missing;
+}
+
 function defaultBundleComponentFulfilment(mode) {
   if (mode === 'order_in') {
     return 'order_later';
@@ -2867,8 +2899,8 @@ function Modal() {
       var explicitLineItemIntentProps = buildMshLineItemIntentProperties({
         mode: pendingIntentMode,
         takeNowInSplit: derivedSplitTakeNow,
-        productTitle: product && product.title ? String(product.title) : '',
-        variantTitle: variant && variant.title ? String(variant.title) : '',
+        productTitle: product && product.title ? String(product.title) : 'Unknown product',
+        variantTitle: variant && variant.title ? String(variant.title) : 'Unknown variant',
         normalizedVariantId: String(normalized.value),
         quantity: String(mainLineQuantity),
         hasFee: feeRequired,
@@ -2881,6 +2913,22 @@ function Modal() {
         propertiesObject[explicitKey] = explicitLineItemIntentProps[explicitKey];
       }
       var mainLineProperties = sanitizeLineItemProperties(propertiesObject);
+      var isNormalProductFlow = !(bundleAttachConfig && bundleAttachConfig.enabled);
+      if (isNormalProductFlow) {
+        var missingNormalMetadata = findMissingNormalProductMetadataKeys(mainLineProperties);
+        if (missingNormalMetadata.length > 0) {
+          console.error('[MSH-POS-PRODUCT-DEBUG] CART LINE ADD RESULT', {
+            ok: false,
+            reason: 'missing_required_metadata',
+            missingKeys: missingNormalMetadata,
+          });
+          toast('Macron POS product metadata missing — item not added.');
+          setLastCartActionStatus('failed');
+          setLastCartErrorMessage('Missing required Macron POS metadata: ' + missingNormalMetadata.join(', '));
+          return false;
+        }
+        console.log('[MSH-POS-PRODUCT-DEBUG] CART LINE PAYLOAD', mainLineProperties);
+      }
       setLastLineItemProperties(mainLineProperties);
       var fallbackMarkerProperties = buildMshFallbackMarkerProperties(mainLineProperties);
       var orderFallbackProperties = buildMshOrderFallbackProperties(mainLineProperties, bundleAttachConfig);
@@ -2941,14 +2989,34 @@ function Modal() {
           await shopify.cart.addLineItemProperties(mainUuid, mainLineProperties);
           setLastPropertiesAttachStatus('success');
           console.log('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH SUCCESS', { uuid: String(mainUuid) });
+          if (isNormalProductFlow) {
+            console.log('[MSH-POS-PRODUCT-DEBUG] CART LINE ADD RESULT', {
+              ok: true,
+              lineUuid: String(mainUuid),
+              metadataKeyCount: Object.keys(mainLineProperties).length,
+            });
+          }
         } catch (mainPropsErr) {
           setLastPropertiesAttachStatus('failed');
           console.error('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH FAILURE', mainPropsErr && mainPropsErr.message ? mainPropsErr.message : String(mainPropsErr));
+          if (isNormalProductFlow) {
+            console.error('[MSH-POS-PRODUCT-DEBUG] CART LINE ADD RESULT', {
+              ok: false,
+              reason: 'attach_properties_failed',
+              message: mainPropsErr && mainPropsErr.message ? mainPropsErr.message : String(mainPropsErr),
+            });
+          }
           throw mainPropsErr;
         }
       } else {
         setLastPropertiesAttachStatus('failed');
         console.error('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH FAILURE', 'Cart API missing addLineItemProperties');
+        if (isNormalProductFlow) {
+          console.error('[MSH-POS-PRODUCT-DEBUG] CART LINE ADD RESULT', {
+            ok: false,
+            reason: 'missing_addLineItemProperties_api',
+          });
+        }
         throw new Error('Cart API missing addLineItemProperties for main line');
       }
       if (fallbackMarkerKeyCount > 0) {
