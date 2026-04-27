@@ -1746,22 +1746,17 @@ export const action = async ({ request }) => {
       const splitLineTakeNow = intentAuthoritativeTakeNow === true;
       const splitOrderFallbackMode = resolvedIntentFallback.mode;
       const splitOrderFallbackTakeNow = resolvedIntentFallback.takeNow;
-      const splitFallbackTakeNow =
-        splitOrderFallbackMode === "split" && splitOrderFallbackTakeNow === true;
-      const splitTakeNowSatisfied = splitLineTakeNow || splitFallbackTakeNow;
       const splitIntentQuantityValid = splitTakeNowRequested && parsedIntentQuantity !== null;
       const splitSelectedQuantity =
         splitIntentQuantityValid && lineQuantity > 0 ? Math.min(parsedIntentQuantity, lineQuantity) : 0;
-      const splitEligible = splitTakeNowRequested && splitTakeNowSatisfied && splitIntentQuantityValid && splitSelectedQuantity > 0;
+      const splitEligible = splitTakeNowRequested && splitIntentQuantityValid && splitSelectedQuantity > 0;
       const splitReason = !splitTakeNowRequested
         ? "not_split_mode"
-        : !splitTakeNowSatisfied
-          ? "split_take_now_not_satisfied"
-          : !splitIntentQuantityValid
-            ? "split_missing_or_invalid_intent_quantity"
-            : splitSelectedQuantity <= 0
-              ? "split_selected_quantity_zero"
-              : "split_selected";
+        : !splitIntentQuantityValid
+          ? "split_missing_or_invalid_intent_quantity"
+          : splitSelectedQuantity <= 0
+            ? "split_selected_quantity_zero"
+            : "split_selected";
       if (splitTakeNowRequested) {
         logDebug(
           "SPLIT LINE ELIGIBILITY DECISION",
