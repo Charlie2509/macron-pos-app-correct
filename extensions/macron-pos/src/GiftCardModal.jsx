@@ -330,8 +330,15 @@ function GiftCardModal() {
 
       var precheckResult = await validateCodeAvailability(validation.code, sessionToken);
       if (!precheckResult.ok) {
-        if (precheckResult.reason === 'duplicate_code' || precheckResult.reason === 'pending_code') {
+        if (
+          precheckResult.reason === 'duplicate_code' ||
+          precheckResult.reason === 'pending_code' ||
+          precheckResult.reason === 'duplicate_pending_intent' ||
+          precheckResult.reason === 'duplicate_shopify_code'
+        ) {
           setCodeError('This gift card code is already in use. Scan a different card.');
+        } else if (precheckResult.reason === 'invalid_length') {
+          setCodeError('Code must be exactly 13 digits');
         } else {
           setCodeError('Code must be exactly 13 digits');
         }
