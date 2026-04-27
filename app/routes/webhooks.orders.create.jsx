@@ -1742,11 +1742,36 @@ export const action = async ({ request }) => {
       const isBundleParent = Array.isArray(parsedBundleComponents) && parsedBundleComponents.length > 0;
       const splitTakeNowRequested =
         intentAuthoritativeSource === "macron_pos" &&
-        intentAuthoritativeMode === "split" &&
-        intentAuthoritativeTakeNow === true;
+        intentAuthoritativeMode === "split";
+      const splitLineTakeNow = intentAuthoritativeTakeNow === true;
+      const splitOrderFallbackMode = resolvedIntentFallback.mode;
+      const splitOrderFallbackTakeNow = resolvedIntentFallback.takeNow;
+      const splitFallbackTakeNow =
+        splitOrderFallbackMode === "split" && splitOrderFallbackTakeNow === true;
+      const splitTakeNowSatisfied = splitLineTakeNow || splitFallbackTakeNow;
       const splitIntentQuantityValid = splitTakeNowRequested && parsedIntentQuantity !== null;
       const splitSelectedQuantity =
         splitIntentQuantityValid && lineQuantity > 0 ? Math.min(parsedIntentQuantity, lineQuantity) : 0;
+      const splitEligible = splitTakeNowRequested && splitTakeNowSatisfied && splitIntentQuantityValid && splitSelectedQuantity > 0;
+      const splitReason = !splitTakeNowRequested
+        ? "not_split_mode"
+        : !splitTakeNowSatisfied
+          ? "split_take_now_not_satisfied"
+          : !splitIntentQuantityValid
+            ? "split_missing_or_invalid_intent_quantity"
+            : splitSelectedQuantity <= 0
+              ? "split_selected_quantity_zero"
+              : "split_selected";
+      if (splitTakeNowRequested) {
+        logDebug(
+          "SPLIT LINE ELIGIBILITY DECISION",
+          `order_id=${order.id} order_line_id=${orderLineGid || "missing"} mode=${intentAuthoritativeMode || "missing"} lineTakeNow=${String(
+            splitLineTakeNow,
+          )} orderFallbackMode=${splitOrderFallbackMode || "missing"} orderFallbackTakeNow=${
+            splitOrderFallbackTakeNow === null ? "null" : String(splitOrderFallbackTakeNow)
+          } intentQuantity=${lineItemIntent.quantity || "missing"} selectedMutationQuantity=${splitSelectedQuantity} reason=${splitReason}`,
+        );
+      }
       if (splitTakeNowRequested && !splitIntentQuantityValid) {
         logDebugError(
           "SPLIT INTENT QUANTITY INVALID",
@@ -1762,10 +1787,11 @@ export const action = async ({ request }) => {
         !isBundleParent &&
         intentAuthoritativeMode !== "split" &&
         intentAuthoritativeMode !== "order_in";
+      const recoveredEligibleForSelection = splitTakeNowRequested ? splitEligible : recoveredEligible;
       const effectiveEligible =
-        (recoveredEligible && (!splitTakeNowRequested || splitSelectedQuantity > 0)) || fallbackEligibleProductLine;
+        recoveredEligibleForSelection || fallbackEligibleProductLine;
       const selectionReason = effectiveEligible
-        ? recoveredEligible
+        ? recoveredEligibleForSelection
           ? `line_eligible_${intentRecoverySource}`
           : "order_level_pos_fallback_take_today"
         : feeOrSystem

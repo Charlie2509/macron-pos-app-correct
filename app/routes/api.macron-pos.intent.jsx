@@ -248,3 +248,18 @@ export const action = async ({ request }) => {
 
   return respondJson({ ok: true, intentId: createdIntent.id, expiresAt: createdIntent.expiresAt.toISOString() }, 200);
 };
+
+export const loader = async ({ request }) => {
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  };
+
+  if (request.method === "OPTIONS") {
+    logDebug("OPTIONS intent route handled", "status=204");
+    return new Response(null, { status: 204, headers });
+  }
+
+  return new Response("Not Found", { status: 404, headers });
+};
