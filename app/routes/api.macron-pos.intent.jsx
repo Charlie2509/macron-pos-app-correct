@@ -2,7 +2,10 @@ import db from "../db.server";
 import { sessionStorage } from "../shopify.server";
 
 const DEBUG_MARKER = "[MSH-PENDING-INTENT]";
-const INTENT_TTL_MS = 1000 * 60 * 10;
+// 60 min -- generous window so slow checkouts (size swap, payment retry,
+// chatty customer) don't drop out of the matching window. Webhook
+// PENDING_INTENT_MATCH_WINDOW_MS is bumped to match.
+const INTENT_TTL_MS = 1000 * 60 * 60;
 
 function logDebug(stage, details = "") {
   if (details) {

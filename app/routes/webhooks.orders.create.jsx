@@ -75,7 +75,9 @@ const FULFILLMENT_CREATE_MUTATION = `#graphql
 `;
 
 const DEBUG_MARKER = "[MSH-FULFILL-DEBUG]";
-const PENDING_INTENT_MATCH_WINDOW_MS = 1000 * 60 * 10;
+// Must match INTENT_TTL_MS in api.macron-pos.intent.jsx (60 min) -- otherwise
+// intents that the route accepts can fall outside the webhook's match window.
+const PENDING_INTENT_MATCH_WINDOW_MS = 1000 * 60 * 60;
 const GIFT_CARD_MARKER_KEY = "_msh_gc_sale";
 const GIFT_CARD_MARKER_VALUE = "true";
 const GIFT_CARD_PROCESSING_TTL_MS = 1000 * 60 * 30;

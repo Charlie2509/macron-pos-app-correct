@@ -4,6 +4,37 @@ import {useEffect, useState} from 'preact/hooks';
 
 // File with live data debug instrumentation, bundle plumbing, personalisation meta debug, and navigation/cart flows.
 
+// ---------------- Macron POS backend (Render) ----------------
+// MUST be absolute. POS UI extensions do not resolve relative URLs to the app
+// host reliably -- relative URLs can be silently dropped after the OPTIONS
+// preflight, which is exactly the failure mode that caused take_today orders
+// to never auto-fulfil. Always use this constant for backend POSTs.
+var MACRON_POS_BACKEND_URL = 'https://macron-pos-app-correct.onrender.com';
+var MACRON_POS_INTENT_ENDPOINT = MACRON_POS_BACKEND_URL + '/api/macron-pos/intent';
+
+function safeReadShopDomain() {
+  try {
+    if (typeof shopify === 'undefined' || !shopify) return '';
+    if (shopify.session) {
+      if (shopify.session.currentSession && shopify.session.currentSession.shopDomain) {
+        return String(shopify.session.currentSession.shopDomain);
+      }
+      if (shopify.session.shopDomain) {
+        return String(shopify.session.shopDomain);
+      }
+    }
+    if (shopify.config && shopify.config.shop && shopify.config.shop.domain) {
+      return String(shopify.config.shop.domain);
+    }
+    if (shopify.config && shopify.config.shopDomain) {
+      return String(shopify.config.shopDomain);
+    }
+  } catch (err) {
+    // ignore -- best-effort discovery
+  }
+  return '';
+}
+
 // ---------------- Mock helpers ----------------
 function mockVariants(prefix) {
   return [
@@ -2584,37 +2615,100 @@ function Modal() {
 
   async function createPendingMacronPosIntent(payload) {
     if (typeof fetch === 'undefined') {
+      console.error('[MSH-POS-INTENT][ERROR] pending intent failed | reason=fetch_unavailable');
       return {ok: false, error: 'fetch_unavailable'};
     }
+
+    // Always send shop when we can discover it; backend will fall back to
+    // single-known-shop if missing, but explicit is safer in multi-store envs.
+    var enrichedPayload = {};
+    var srcKeys = Object.keys(payload || {});
+    for (var k = 0; k < srcKeys.length; k += 1) {
+      enrichedPayload[srcKeys[k]] = payload[srcKeys[k]];
+    }
+    if (!enrichedPayload.shop) {
+      var discoveredShop = safeReadShopDomain();
+      if (discoveredShop) {
+        enrichedPayload.shop = discoveredShop;
+      }
+    }
+    if (!enrichedPayload.source) {
+      enrichedPayload.source = 'macron_pos';
+    }
+
+    var endpoint = MACRON_POS_INTENT_ENDPOINT;
+    console.log('[MSH-POS-INTENT] saving pending intent', {
+      endpoint: endpoint,
+      shop: enrichedPayload.shop || '(unset, backend will fallback)',
+      fulfillmentMode: enrichedPayload.fulfillmentMode || '',
+      takeNow: enrichedPayload.takeNow || '',
+      productTitle: enrichedPayload.productTitle || '',
+      variantTitle: enrichedPayload.variantTitle || '',
+      normalizedVariantId: enrichedPayload.normalizedVariantId || '',
+      quantity: enrichedPayload.quantity || '',
+      hasFee: enrichedPayload.hasFee || false,
+      isBundle: enrichedPayload.isBundle || false,
+      bundleSummaryPresent: Boolean(enrichedPayload.bundleSummary),
+    });
+
+    var response;
     try {
-      var response = await fetch('/api/macron-pos/intent', {
+      response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(enrichedPayload),
       });
-      var json = null;
-      try {
-        json = await response.json();
-      } catch (parseErr) {
-        return {ok: false, status: response.status, error: 'invalid_json_response'};
-      }
-      if (!response.ok || !json || json.ok !== true) {
-        return {
-          ok: false,
-          status: response.status,
-          error: json && json.error ? String(json.error) : 'pending_intent_failed',
-        };
-      }
-      return {
-        ok: true,
-        intentId: toStr(json.intentId),
-        expiresAt: toStr(json.expiresAt),
-      };
     } catch (requestErr) {
-      return {ok: false, error: requestErr && requestErr.message ? requestErr.message : String(requestErr)};
+      var networkMessage = requestErr && requestErr.message ? requestErr.message : String(requestErr);
+      console.error('[MSH-POS-INTENT][ERROR] pending intent failed | network_error', {
+        endpoint: endpoint,
+        message: networkMessage,
+      });
+      return {ok: false, error: 'network_error: ' + networkMessage};
     }
+
+    var status = response && typeof response.status === 'number' ? response.status : 0;
+    var json = null;
+    try {
+      json = await response.json();
+    } catch (parseErr) {
+      console.error('[MSH-POS-INTENT][ERROR] pending intent failed | invalid_json_response', {
+        endpoint: endpoint,
+        status: status,
+        message: parseErr && parseErr.message ? parseErr.message : String(parseErr),
+      });
+      return {ok: false, status: status, error: 'invalid_json_response'};
+    }
+
+    if (!response.ok || !json || json.ok !== true) {
+      var errCode = json && json.error ? String(json.error) : 'pending_intent_failed';
+      console.error('[MSH-POS-INTENT][ERROR] pending intent failed', {
+        endpoint: endpoint,
+        status: status,
+        error: errCode,
+        body: json,
+      });
+      return {
+        ok: false,
+        status: status,
+        error: errCode,
+      };
+    }
+
+    console.log('[MSH-POS-INTENT] saved pending intent', {
+      endpoint: endpoint,
+      status: status,
+      intentId: toStr(json.intentId),
+      expiresAt: toStr(json.expiresAt),
+    });
+    return {
+      ok: true,
+      intentId: toStr(json.intentId),
+      expiresAt: toStr(json.expiresAt),
+    };
   }
 
   async function fetchPersonalisationFeeVariant(feeAmount) {
@@ -3011,51 +3105,56 @@ function Modal() {
       setLastPingAttempted(false);
       setLastPingStatus('skipped_direct_fetch');
       setLastPingError('');
+      // Pending intent is now created for BOTH normal product and bundle
+      // flows. The line-item-properties path is unreliable (real orders have
+      // shown raw_properties=[] on the webhook side), so the pending intent
+      // is the durable fallback that lets the webhook auto-fulfil take_today
+      // orders even when properties get stripped at the POS API layer.
       var pendingIntentResult = {ok: false, status: 'not_attempted'};
-      if (isNormalProductFlow) {
-        var pendingIntentPayload = {
-          source: 'macron_pos',
-          fulfillmentMode: pendingIntentMode,
-          takeNow: pendingIntentTakeNow,
-          productTitle: product && product.title ? String(product.title) : 'Unknown product',
-          variantTitle: variant && variant.title ? String(variant.title) : 'Unknown variant',
-          normalizedVariantId: String(normalized.value),
-          quantity: String(mainLineQuantity),
-          hasFee: feeRequired,
-          isBundle: false,
-          bundleSummary: '',
-          createdAtClient: new Date().toISOString(),
-        };
-        setLastIntentRequestAttempted(true);
-        setLastIntentRequestStatus('attempting');
-        setLastIntentRequestError('');
-        console.log('[MSH-POS-PRODUCT-DEBUG] NORMAL PRODUCT INTENT CREATE REQUEST', pendingIntentPayload);
-        pendingIntentResult = await createPendingMacronPosIntent(pendingIntentPayload);
-        if (pendingIntentResult.ok) {
-          setLastIntentRequestStatus('success');
-          console.log('[MSH-POS-PRODUCT-DEBUG] PENDING INTENT CREATE RESULT', {
-            ok: true,
-            intentId: pendingIntentResult.intentId,
-            expiresAt: pendingIntentResult.expiresAt,
-          });
-        } else {
-          setLastIntentRequestStatus('failed');
-          setLastIntentRequestError(pendingIntentResult.error ? String(pendingIntentResult.error) : 'pending_intent_failed');
-          console.error('[MSH-POS-PRODUCT-DEBUG] PENDING INTENT CREATE RESULT', pendingIntentResult);
-        }
-      } else {
-        setLastIntentRequestAttempted(false);
-        setLastIntentRequestStatus('skipped_direct_fetch');
-        setLastIntentRequestError('');
-        console.log('[MSH POS DEBUG] INTENT RECORD CREATE STATUS', {
-          status: 'skipped_direct_fetch',
-          reason: 'line_item_properties_are_authoritative',
-          mode: pendingIntentMode,
-          takeNow: pendingIntentTakeNow,
-          productTitle: product && product.title ? String(product.title) : '',
-          variantTitle: variant && variant.title ? String(variant.title) : '',
-          quantity: String(mainLineQuantity),
+      var pendingIntentIsBundleFlow = !isNormalProductFlow;
+      var pendingIntentPayload = {
+        source: 'macron_pos',
+        fulfillmentMode: pendingIntentMode,
+        takeNow: pendingIntentTakeNow,
+        productTitle: product && product.title ? String(product.title) : 'Unknown product',
+        variantTitle: variant && variant.title ? String(variant.title) : 'Unknown variant',
+        normalizedVariantId: String(normalized.value),
+        quantity: String(mainLineQuantity),
+        hasFee: feeRequired,
+        isBundle: pendingIntentIsBundleFlow,
+        bundleSummary: pendingIntentIsBundleFlow ? (pendingIntentBundleSummary || '') : '',
+        createdAtClient: new Date().toISOString(),
+      };
+      setLastIntentRequestAttempted(true);
+      setLastIntentRequestStatus('attempting');
+      setLastIntentRequestError('');
+      console.log(
+        pendingIntentIsBundleFlow
+          ? '[MSH-POS-PRODUCT-DEBUG] BUNDLE INTENT CREATE REQUEST'
+          : '[MSH-POS-PRODUCT-DEBUG] NORMAL PRODUCT INTENT CREATE REQUEST',
+        pendingIntentPayload,
+      );
+      pendingIntentResult = await createPendingMacronPosIntent(pendingIntentPayload);
+      if (pendingIntentResult.ok) {
+        setLastIntentRequestStatus('success');
+        console.log('[MSH-POS-PRODUCT-DEBUG] PENDING INTENT CREATE RESULT', {
+          ok: true,
+          isBundle: pendingIntentIsBundleFlow,
+          intentId: pendingIntentResult.intentId,
+          expiresAt: pendingIntentResult.expiresAt,
         });
+      } else {
+        setLastIntentRequestStatus('failed');
+        setLastIntentRequestError(pendingIntentResult.error ? String(pendingIntentResult.error) : 'pending_intent_failed');
+        console.error('[MSH-POS-PRODUCT-DEBUG] PENDING INTENT CREATE RESULT', pendingIntentResult);
+
+        // Hard-fail visibly for take_today orders. Silent failure on the
+        // intent save is exactly the bug that caused unfulfilled orders --
+        // the POS extension MUST surface it instead of swallowing.
+        var isTakeTodayIntent = pendingIntentMode === 'take_today' || pendingIntentTakeNow === 'true';
+        if (isTakeTodayIntent) {
+          toast('Macron POS: take-today intent could not be saved. Auto-fulfilment may fail.');
+        }
       }
 
       console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
