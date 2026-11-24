@@ -1,41 +1,28 @@
-# MSH paid till handover
+# Automatic handover for the MSH till
 
-The pilot lets Shopify record which merchandise was handed over after a POS sale is paid in full. It uses two store-wide Shopify Flow workflows. Staff choose Take today or Order in in the MSH till as usual. The gift-card service and sales already in progress still need Render.
+The MSH till records what leaves the shop at checkout. Shopify Flow checks the paid order and the exact lines routed to the selling location. A confirmed Take today line is fulfilled. Order in stays open. A kit sold as one unit stays open while any of its numbered components are owed. The Admin order block records later collections and closes the kit after the final piece. A separately charged personalisation fee on a new item follows its verified garment or kit.
 
-The pilot covers plain, unpersonalised single products and new kits whose numbered component choices have been verified on the MSH sales tile. Add each unit separately when it has a different handover. A kit sold as one Shopify line stays open if any component is owed. Its component record tells staff what the customer took. The existing MSH service continues to handle physical gift cards, separate personalisation fees and legacy sales.
+## Set up the two workflows
 
-## Before enabling the pilot
+Use the [one-iPad rollout guide](../../rollout/START-HERE.md) for the order of installation, release and old-service retirement. On the shop PC, open `setup.cmd` in this directory to review the MSH Flow pair. It finds the connected store’s installed tasks, checks for existing workflows and asks before activating drafts. The matching app version needs the order update permission for later collections.
 
-1. Deploy the matching Render changes first. The order webhook and reconciliation service must recognise Flow-owned lines before any till can create one. Release the app configuration with both `orders/create` and `orders/paid` subscriptions. The paid event covers merchandise on sales paid later. Keep the existing Render database and gift-card service.
-2. Set up the two workflows on **Macron Sports Hub Hastings**. On a Windows PC, open this directory from an extracted copy of the repository and run `setup.cmd`. On a computer with Node.js 22.12 or newer, the same installer can run with `npm exec --yes --package=@shopify/cli@5.0.1 -- node setup.mjs` from this directory. The installer checks the store domain, finds existing workflows, offers to save missing drafts, then asks before activation.
-3. In Shopify Admin, open **Apps → Flow**. Check that **MSH POS - Take today after payment** and **MSH POS - Take today after order routing** are active. The first checks the order after a 10-second wait. The second covers orders Shopify makes ready for fulfilment after that check.
-4. Release the matching pilot POS extension. In **Apps → Macron POS → Paid till handover**, select **Enable Flow pilot** once, then reopen the sales tile on both iPads. A new installation defaults to off. For mixed sales, keep Shopify POS's whole-cart **Mark as fulfilled** switch off. Check this on both tills before the pilot.
+If a workflow with the same name has different saved steps, open the existing workflow in the MSH Flow editor. Review the differences before changing it. Use the current Run code files below on the same workflow and preserve access to its version history. Keep only one active payment workflow and one active routing workflow for the new till.
 
-## Kit components and later collection
-
-The till saves each named garment and its chosen size against the kit sold. For a split handover, record the pieces the customer actually takes. For example, a shirt and shorts can be taken today while the socks are still owed. Shopify sells this as one unit. The kit line stays unfulfilled until the last piece has been handed over. Other complete lines on the same order can be fulfilled separately.
-
-Release **MSH kit handover** with the app. Approve its `write_orders` permission for recording collections, then add and pin the block on a Shopify Admin order details page. The block reads the numbered kit pieces already stored by the MSH till, including earlier orders with compatible properties. Staff can see **Taken at sale**, **Still owed** and **Collected later**. Missing or conflicting information is flagged for a manual check.
-
-When the customer returns, select just the pieces being handed over and choose **Record collection**. Each kit on the order has its own record. Once its last piece is collected, the block completes that kit's remaining fulfilment at the selling location. If Shopify cannot complete it, the collection remains saved and the block offers a retry after refresh. On edited, refunded or merged orders use the displayed details to review the handover manually.
-
-For the MSH invoice and packing list, apply the [Order Printer update instructions](../../printing/README.md) to copies of the shop's current templates. Preview the same mixed order in both documents before replacing a live template. The documents use the numbered pieces on the order and match later collections by kit line and position.
-
-## Shopify Flow editor setup
-
-If Shopify limits workflow API access, you can build or review each workflow directly in Flow. Search for the two names before creating any drafts.
-
-| Workflow | Trigger | Before Run code | Run code input |
+| Name | Trigger | Before Run code | Run code input file |
 | --- | --- | --- | --- |
-| MSH POS - Take today after payment | Order paid | Wait 10 seconds | Contents of `input.graphql` |
-| MSH POS - Take today after order routing | Fulfillment order ready to fulfill | Connect directly | Contents of `input-routed.graphql` |
+| MSH POS - Take today after payment | Order paid | Wait 10 seconds | input.graphql |
+| MSH POS - Take today after order routing | Fulfillment order ready to fulfill | Directly to Run code | input-routed.graphql |
 
-In **Run code**, paste `plan.mjs` into **Code** and `output.graphql` into **Output**. Add a condition where **Run code → ready** equals **True**. Connect only the True branch to **Send Admin API request**. Choose the mutation `fulfillmentCreate` and set the whole **Mutation inputs** field to `{{ runCode.mutationInput }}`. This specifies the individual fulfilment line IDs and quantities. Turn on each reviewed workflow.
+For manual setup, use the contents of `plan.mjs` for **Code** and `output.graphql` for **Output**. Add the condition **Run code → ready equals True**. Connect the True branch to **Send Admin API request**, choose **fulfillmentCreate**, and set the entire **Mutation inputs** field to `{{ runCode.mutationInput }}`. Activate both checked workflows before the first new sale.
 
-## Check the handover
+## At the counter
 
-Use an authorised pilot transaction on each physical till. On each separate order, mark one eligible physical line Take today and another Order in, take payment for both, and check that Admin shows **Paid · Partially fulfilled**. Check the item names and quantities in each fulfilment. A repeated workflow run after a successful handover should leave the Order in line open. Test a mixed kit on its own, a whole kit taken today, a kit with a separate fee, and a physical gift card. Record a mixed kit's remaining pieces in two visits and check the paperwork and native status after each.
+Check the whole-cart **Mark as fulfilled** option is off for mixed handovers on the MSH iPad. For a kit, choose a size and handover for each garment. The summary lists the pieces physically taken and those owed. A customer can pay for the whole kit in one transaction. Two identical garments use separate component positions.
 
-Repeat on both tills simultaneously with two units of the **same size and SKU** on each sale. Add one as Take today and one as Order in. Check the quantities on the till before payment and again in Admin afterwards. Each paid order should have one fulfilled unit and one outstanding unit. If the till warns that Shopify has combined the lines, inspect the cart before taking payment. If the paid order shows a merged line or an incorrect split, pause this part of the pilot and review that order manually.
+In Shopify Admin, add and pin **MSH kit handover** on the order. At a later collection select just the garments being handed to the customer and choose **Record collection**. Previously collected items stay recorded. If the last collection saves but native fulfilment is delayed, refresh and use **Complete kit fulfilment**. An edited order, a merged line, a refund or ambiguous evidence needs a staff check.
 
-To stop creating new Flow-owned lines, select **Turn off Flow pilot** in Macron POS and reopen both sales tiles. Keep both workflows and the Render exclusions in place for existing marked orders through payment and routing. If a paid marked sale remains open, use the order number in Flow's recent runs to inspect the decision and the order's remaining quantities before recording any manual handover.
+For an ordinary personalised Order in item, select the garment and its identified printing fee together in Shopify's native fulfilment controls at collection. Use [MSH Order Printer](../../printing/README.md) to see individual kit pieces on invoices and packing lists.
+
+## One-iPad acceptance check
+
+Use one controlled paid sale with an item taken today and a kit partly owed. Confirm the correct line and quantities in Admin. Collect the outstanding garments on two visits and check the kit and its linked printing fee after each. Preview both MSH printouts. Separately check the native physical gift card with a shop-approved transaction before retiring the old service.

@@ -1,34 +1,20 @@
 // This file is also used as the Shopify Flow Run code action (ES2020, no imports).
 const ownerKey = '_msh_handover_owner';
-const ownerVersion = 'flow_v1';
+export const NATIVE_HANDOVER_OWNER = 'flow_v2';
+const roleKey = '_msh_handover_role';
+const pairKey = '_msh_handover_pair';
+// Shopify exposes the cart UUID as an opaque string. Its identity is scoped to this order.
+export function validHandoverPair(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 255 && !/\s/.test(value) &&
+    [...value].every(char => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127);
+}
 
 function stop(reason) {
   return {ready: false, mutationInput: '', reason};
 }
 
-export function hasHandoverOwner(attributes) {
-  return Array.isArray(attributes) && attributes.some(a => (a?.key || a?.name) === ownerKey);
-}
-
-// With a pilot marker somewhere in the cart, an ordinary line missing its
-// owner could be a stripped pilot line. Only unmistakable legacy specialty
-// merchandise can then be handled by the old service.
-export function isLegacySpecialty(attributes) {
-  if (!Array.isArray(attributes)) return false;
-  // A new kit might have lost its line owner while the cart marker survived.
-  // A legacy kit can be positively identified by its old printed bullet format.
-  if (attributes.some(a => a?.key === '_msh_bundle_component_count')) return false;
-  if (attributes.some(a => a?.key === 'Bundle' || (a?.key === '_msh_intent_is_bundle' && a.value === 'true'))) {
-    return attributes.some(a => ['Bundle Take Now Summary','Bundle Order Later Summary'].includes(a?.key)
-      && typeof a.value === 'string' && a.value.startsWith('- '));
-  }
-  return attributes.some(a => (a?.key === '_msh_intent_has_fee' && a.value === 'true') ||
-    (['Personalisation Summary','Personalization Summary'].includes(a?.key) && Boolean(a.value)));
-}
-
-// A flat MSH kit is one Shopify unit. Counted records are written by the new
-// till. Older kits can still be read by legacy recovery but cannot be reserved.
-export function flatBundleHandover(attributes, requireNew = false) {
+// Shopify can fulfil one flat kit only when all its numbered pieces were taken.
+function flatBundleHandover(attributes) {
   const names = new Map(), choices = new Map(), fields = new Map();
   let isKit = false, invalid = false;
   for (const attr of attributes || []) {
@@ -50,24 +36,20 @@ export function flatBundleHandover(attributes, requireNew = false) {
     fields.set(key, attr.value);
   }
   if (!isKit) return null;
-  const counted = fields.has('_msh_bundle_component_count');
-  if (invalid || (requireNew && !counted) || typeof fields.get('Bundle') !== 'string' || !fields.get('Bundle').trim() ||
-      !names.size || names.size !== choices.size || (counted && fields.get('_msh_bundle_component_count') !== String(names.size))) return 'invalid';
+  if (invalid || typeof fields.get('Bundle') !== 'string' || !fields.get('Bundle').trim() || !names.size ||
+      names.size !== choices.size || fields.get('_msh_bundle_component_count') !== String(names.size)) return 'invalid';
 
   const taken = [], owed = [];
   for (let i = 1; i <= names.size; i++) {
     const name = names.get(i), raw = choices.get(i);
     if (typeof name !== 'string' || !name.trim() || typeof raw !== 'string') return 'invalid';
-    const choice = counted ? raw : raw.toLowerCase().replace(/ /g, '_');
-    if (counted && (!fields.has('Item ' + i) || !fields.has('Bundle Component ' + i + ' Fulfilment') ||
-        !/^.+ — .+$/.test(name))) return 'invalid';
-    if (choice === 'take_now') taken.push(i + '. Taken today · ' + name);
-    else if (choice === 'order_later') owed.push(i + '. Owed for collection · ' + name);
+    if (!fields.has('Item ' + i) || !fields.has('Bundle Component ' + i + ' Fulfilment') || !/^.+ — .+$/.test(name)) return 'invalid';
+    if (raw === 'take_now') taken.push(i + '. Taken today · ' + name);
+    else if (raw === 'order_later') owed.push(i + '. Owed for collection · ' + name);
     else return 'invalid';
   }
   for (const [key, group] of [['Bundle Take Now Summary', taken], ['Bundle Order Later Summary', owed]]) {
-    if (counted && (fields.get(key) || '') !== group.join('\n')) return 'invalid';
-    if (!counted && !group.length && fields.get(key)) return 'invalid';
+    if ((fields.get(key) || '') !== group.join('\n')) return 'invalid';
   }
   return taken.length === names.size ? 'take' : !taken.length ? 'owe' : 'mixed';
 }
@@ -75,7 +57,7 @@ export function flatBundleHandover(attributes, requireNew = false) {
 // Imported directly by POS and used here by Flow. Both sides reserve the
 // same parent only when its editable stock choice agrees with every kit slot.
 export function verifiedKitHandover(attributes, title) {
-  const outcome = flatBundleHandover(attributes, true);
+  const outcome = flatBundleHandover(attributes);
   if (!['take','owe','mixed'].includes(outcome)) return null;
   const fields = new Map(attributes.map(a => [a.key, a.value]));
   if (fields.get('Bundle') !== title || fields.get('_msh_source') !== 'macron_pos') return null;
@@ -97,20 +79,29 @@ function allEqual(attrs, keys, expected) {
   return keys.every(key => attrs.get(key) === expected);
 }
 
-// Legacy recovery and Flow both require affirmative line-level evidence.
-// Free-text order notes, the last product added and title guesses are never allocation.
-function readChoice(line, owner) {
-  const attrs = new Map();
-  for (const a of line.customAttributes) {
-    if (typeof a?.key !== 'string' || attrs.has(a.key)) return null;
-    attrs.set(a.key, a.value);
+function attributesOf(line) {
+  if (!Array.isArray(line?.customAttributes)) return null;
+  const fields = new Map();
+  for (const attr of line.customAttributes) {
+    if (typeof attr?.key !== 'string' || fields.has(attr.key)) return null;
+    fields.set(attr.key, attr.value);
   }
-  if (owner === 'flow' && attrs.get(ownerKey) !== ownerVersion) return null;
+  return fields;
+}
+
+// Order-level notes and titles alone cannot identify a handed-over unit.
+function readChoice(line, attrs) {
+  if (!attrs) return null;
+  const version = attrs.get(ownerKey);
+  if (version !== 'flow_v1' && version !== NATIVE_HANDOVER_OWNER) return null;
   const variant = numericId(line.variant?.id, 'ProductVariant');
   if (!variant || attrs.get('_msh_intent_variant_id') !== variant ||
       attrs.get('_msh_intent_quantity') !== String(line.quantity)) return null;
   const bundle = attrs.get('_msh_intent_is_bundle');
   const hasFee = attrs.get('_msh_intent_has_fee');
+  if (version === NATIVE_HANDOVER_OWNER && (line.quantity !== 1 || line.currentQuantity !== 1 ||
+      attrs.get('_msh_intent_product_title') !== line.title || attrs.get(roleKey) !== (bundle === 'true' ? 'kit' : 'merchandise'))) return null;
+  if (version === 'flow_v1' && (attrs.has(roleKey) || attrs.has(pairKey))) return null;
   if (line.lineItemGroup !== null || line.isGiftCard !== false || line.requiresShipping !== true ||
       attrs.has('Fee For Product') || attrs.has('_MSH_PersoFee') || attrs.has('_msh_gc_sale') ||
       /gift\s*card|personali[sz]ation[ -]fee|persofee/i.test([line.title, line.sku].join(' ')) ||
@@ -124,21 +115,69 @@ function readChoice(line, owner) {
   if (!allEqual(attrs, ['_msh_fulfillment_mode', '_msh_intent_fulfilment_mode', '_msh_intent_fulfillment_mode',
     '_msh_fallback_fulfilment_mode', '_msh_fallback_fulfillment_mode'], mode) ||
       !allEqual(attrs, ['_msh_intent_take_now','_msh_fallback_take_now'], take)) return null;
-  if (owner === 'flow' && bundle === 'true') {
+  if (bundle === 'true') {
     if (line.quantity !== 1 || attrs.get('_msh_intent_product_title') !== line.title) return null;
     return verifiedKitHandover(line.customAttributes, line.title);
   }
-  if (owner === 'flow' && (hasFee !== 'false' || isLegacySpecialty(line.customAttributes))) return null;
-  const kit = flatBundleHandover(line.customAttributes);
-  if ((bundle === 'true') !== (kit !== null) || kit === 'invalid') return null;
-  if (kit !== null) {
-    if (mode === 'split') return kit === 'take' ? 'take' : 'owe';
-    if (take === 'true' && kit !== 'take') return null;
-  }
+  if (version === 'flow_v1' && (hasFee !== 'false' || attrs.get('Personalisation Summary') || attrs.get('Personalization Summary'))) return null;
+  if ([...attrs.keys()].some(key => /^(?:Bundle(?: |$)|Item \d|_msh_bundle_component_count$)/i.test(key))) return null;
   return take === 'true' ? 'take' : 'owe';
 }
 
-function planHandover(order, owner) {
+function indexServicePairs(lines) {
+  const pairs = new Map();
+  for (const line of lines) {
+    if (!Array.isArray(line?.customAttributes)) continue;
+    const field = line.customAttributes.find(attr => attr?.key === pairKey);
+    if (!field) continue;
+    if (!pairs.has(field.value)) pairs.set(field.value, []);
+    pairs.get(field.value).push(line);
+  }
+  return pairs;
+}
+
+// Both the paid-sale workflow and the final kit collection use the original
+// cart UUID, reciprocal Shopify variant IDs and the independently priced fee.
+export function resolveServiceFee(lines, parent) {
+  const invalid = {valid:false, fee:null};
+  const none = {valid:true, fee:null};
+  const main = attributesOf(parent);
+  if (!main || !Array.isArray(lines)) return invalid;
+  if (main.get(ownerKey) !== NATIVE_HANDOVER_OWNER) {
+    return main.has(roleKey) || main.has(pairKey) || (main.has(ownerKey) && main.get(ownerKey) !== 'flow_v1') ? invalid : none;
+  }
+  if (!numericId(parent.id, 'LineItem') || !readChoice(parent, main)) return invalid;
+  return feeForValidatedParent(indexServicePairs(lines), parent, main);
+}
+
+function feeForValidatedParent(pairs, parent, main) {
+  const invalid = {valid:false, fee:null};
+  const none = {valid:true, fee:null};
+  if (main.get('_msh_intent_has_fee') === 'false') {
+    return main.has(pairKey) || main.has('Linked Fee Variant Id') || main.has('Personalisation Fee') ? invalid : none;
+  }
+  const pair = main.get(pairKey);
+  const price = main.get('Personalisation Fee');
+  if (!validHandoverPair(pair) || !/^£(?:0|[1-9]\d*)\.\d{2}$/.test(price) || price === '£0.00') return invalid;
+  const members = pairs.get(pair) || [];
+  if (members.length !== 2 || !members.some(member => member.id === parent.id)) return invalid;
+  const fee = members.find(member => member.id !== parent.id);
+  const attrs = attributesOf(fee);
+  if (!attrs || !numericId(fee.id, 'LineItem') || attrs.get(ownerKey) !== NATIVE_HANDOVER_OWNER ||
+      attrs.get(roleKey) !== 'service_fee' || attrs.get('_msh_source') !== 'macron_pos' ||
+      attrs.has('_msh_gc_sale') || attrs.has('_msh_intent_is_bundle') || attrs.has('Bundle') ||
+      fee.title !== 'Personalisation fee (system)' || fee.isGiftCard !== false || fee.lineItemGroup !== null ||
+      typeof fee.requiresShipping !== 'boolean' || fee.quantity !== 1 || fee.currentQuantity !== 1 ||
+      ![0,1].includes(fee.unfulfilledQuantity) || attrs.get('Fee For Product') !== parent.title ||
+      attrs.get('Personalisation Fee') !== price) return invalid;
+  const feeId = numericId(fee.variant?.id, 'ProductVariant');
+  const parentId = numericId(parent.variant?.id, 'ProductVariant');
+  return feeId && feeId !== parentId && main.get('Linked Fee Variant Id') === feeId &&
+    attrs.get('Linked Product Variant Id') === parentId ? {valid:true, fee} : invalid;
+}
+
+export default function main(input) {
+  const order = input?.order || input?.fulfillmentOrder?.order;
   if (!numericId(order?.id, 'Order') || order.sourceName !== 'pos' || order.displayFinancialStatus !== 'PAID') {
     return stop('Requires a fully paid Shopify POS order.');
   }
@@ -149,11 +188,12 @@ function planHandover(order, owner) {
     return stop('Order lines or retail location unavailable.');
   }
 
-  const pilotCart = owner === 'legacy' && (order.customAttributes?.some(a => a.key === '_msh_handover_pilot_seen') ||
-    order.lineItems.some(line => hasHandoverOwner(line?.customAttributes)));
   let total = 0;
   const quantities = new Map();
   const take = new Set();
+  const pairs = indexServicePairs(order.lineItems);
+  const fees = new Set();
+  const pairedFees = new Set();
   for (const line of order.lineItems) {
     if (!numericId(line?.id, 'LineItem') || quantities.has(line.id) || !Number.isSafeInteger(line.quantity) ||
         line.quantity <= 0 || line.quantity !== line.currentQuantity ||
@@ -161,12 +201,28 @@ function planHandover(order, owner) {
         line.unfulfilledQuantity > line.quantity || !Array.isArray(line.customAttributes)) return stop('Incomplete order line.');
     total += line.quantity;
     quantities.set(line.id, line.unfulfilledQuantity);
-    const reserved = hasHandoverOwner(line.customAttributes);
-    if ((owner === 'flow') !== reserved || (pilotCart && !isLegacySpecialty(line.customAttributes))) continue;
-    const choice = readChoice(line, owner);
-    if (reserved && !choice) return stop('Pilot line instructions need review.');
+    if (!line.customAttributes.some(a => a?.key === ownerKey || a?.key === roleKey || a?.key === pairKey)) continue;
+    const attrs = attributesOf(line);
+    if (!attrs) return stop('Conflicting line ownership.');
+    const current = attrs.get(ownerKey) === NATIVE_HANDOVER_OWNER;
+    if (!current && (attrs.has(roleKey) || attrs.has(pairKey))) return stop('Incomplete line ownership.');
+    if (current && attrs.get(roleKey) === 'service_fee') {
+      fees.add(line.id);
+      continue;
+    }
+    const choice = readChoice(line, attrs);
+    if (!choice) return stop('Marked line instructions need review.');
     if (choice === 'take' && line.unfulfilledQuantity > 0) take.add(line.id);
+    if (current) {
+      const match = feeForValidatedParent(pairs, line, attrs);
+      if (!match.valid || (match.fee && pairedFees.has(match.fee.id))) return stop('Personalisation fee link needs review.');
+      if (match.fee) {
+        pairedFees.add(match.fee.id);
+        if (choice === 'take' && match.fee.unfulfilledQuantity > 0) take.add(match.fee.id);
+      }
+    }
   }
+  if (fees.size !== pairedFees.size || [...fees].some(id => !pairedFees.has(id))) return stop('Unpaired service fee.');
   if (total !== order.subtotalLineItemsQuantity) return stop('Incomplete order line list.');
   if (!take.size) return stop('No eligible outstanding Take today lines.');
 
@@ -198,19 +254,4 @@ function planHandover(order, owner) {
   const mutationInput = JSON.stringify({fulfillment: {notifyCustomer: false, lineItemsByFulfillmentOrder: groups}});
   if (mutationInput.length > 40000) return stop('Large order needs review.');
   return {ready: true, mutationInput, reason: 'Verified Take today quantities.'};
-}
-
-export default function main(input) {
-  return planHandover(input?.order || input?.fulfillmentOrder?.order, 'flow');
-}
-
-// The recovery endpoint uses the same exact-line planner, restricted to old unreserved rows.
-export function planLegacyReconciliation(order) {
-  if (order?.lineItems?.pageInfo?.hasNextPage !== false || order?.fulfillmentOrders?.pageInfo?.hasNextPage !== false ||
-      !Array.isArray(order.lineItems.nodes) || !Array.isArray(order.fulfillmentOrders.nodes) ||
-      order.fulfillmentOrders.nodes.some(fo => fo?.lineItems?.pageInfo?.hasNextPage !== false || !Array.isArray(fo.lineItems.nodes))) {
-    return stop('Incomplete order or routing page.');
-  }
-  return planHandover({...order, lineItems: order.lineItems.nodes,
-    fulfillmentOrders: order.fulfillmentOrders.nodes.map(fo => ({...fo, lineItems: fo.lineItems.nodes}))}, 'legacy');
 }

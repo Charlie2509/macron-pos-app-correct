@@ -1,3 +1,5 @@
+import {resolveServiceFee} from '../flow/msh-handover/plan.mjs';
+
 const positiveId = /^[1-9]\d*$/;
 const itemField = /^Item (\d+)$/i;
 const choiceField = /^Bundle Component (\d+) Fulfill?ment$/i;
@@ -157,21 +159,57 @@ function completeConnection(connection) {
 
 // The caller first saves every actual handover, then calls this planner only
 // for a complete kit. A failed native fulfilment can be retried independently.
-export function exactKitFulfillment(order, line) {
-  if (!safeKitOrder(order) || !readKitLine(line, {version: 1, lines: {}})?.canRecord ||
-      !completeConnection(order.fulfillmentOrders)) return null;
-  let group = null;
+export function exactKitFulfillment(order, line, lines = [line], ledger = null) {
+  if (!safeKitOrder(order) || !completeConnection(order.fulfillmentOrders)) return null;
+  const kit = readKitLine(line, ledger || {version: 1, lines: {}});
+  if (!kit || kit.problem || (ledger && !kit.complete)) return null;
+  const pair = resolveServiceFee(lines, line);
+  if (!pair.valid) return null;
+  const targets = new Map();
+  for (const target of pair.fee ? [line, pair.fee] : [line]) {
+    if (!numericId(target.id, 'LineItem') || ![0, 1].includes(target.unfulfilledQuantity) ||
+        targets.has(target.id)) return null;
+    targets.set(target.id, target.unfulfilledQuantity);
+  }
+
+  const groups = [];
+  const routeIds = new Set();
+  const routeItemIds = new Set();
   for (const route of order.fulfillmentOrders.nodes) {
-    if (!numericId(route?.id, 'FulfillmentOrder') || !completeConnection(route.lineItems)) return null;
+    if (!numericId(route?.id, 'FulfillmentOrder') || routeIds.has(route.id) || !completeConnection(route.lineItems)) return null;
+    routeIds.add(route.id);
+    const pending = [];
     for (const item of route.lineItems.nodes) {
-      if (!numericId(item?.lineItem?.id, 'LineItem') || !Number.isSafeInteger(item.remainingQuantity) || item.remainingQuantity < 0) return null;
-      if (item.lineItem.id !== line.id || item.remainingQuantity === 0) continue;
-      if (group || item.remainingQuantity !== 1 || !numericId(item.id, 'FulfillmentOrderLineItem') ||
+      const id = item?.lineItem?.id;
+      if (!numericId(id, 'LineItem') || !numericId(item.id, 'FulfillmentOrderLineItem') || routeItemIds.has(item.id) ||
+          !Number.isSafeInteger(item.remainingQuantity) || item.remainingQuantity < 0) return null;
+      routeItemIds.add(item.id);
+      if (!targets.has(id) || !item.remainingQuantity) continue;
+      if (targets.get(id) !== 1 || item.remainingQuantity !== 1 ||
           route.assignedLocation?.location?.id !== order.retailLocation.id || route.deliveryMethod?.methodType !== 'RETAIL' ||
           !['OPEN', 'IN_PROGRESS'].includes(route.status) || !Array.isArray(route.supportedActions) ||
           !route.supportedActions.some(action => action?.action === 'CREATE_FULFILLMENT')) return null;
-      group = {fulfillmentOrderId: route.id, fulfillmentOrderLineItems: [{id: item.id, quantity: 1}]};
+      targets.set(id, 0);
+      pending.push({id: item.id, quantity: 1});
     }
+    if (pending.length) groups.push({fulfillmentOrderId: route.id, fulfillmentOrderLineItems: pending});
   }
-  return group && {fulfillment: {notifyCustomer: false, lineItemsByFulfillmentOrder: [group]}};
+  if (!groups.length || [...targets.values()].some(quantity => quantity !== 0)) return null;
+  return {fulfillment: {notifyCustomer: false, lineItemsByFulfillmentOrder: groups}};
+}
+
+// Ordinary Order in garments use Shopify's normal partial fulfilment screen.
+// Show guidance only where both outstanding lines are verifiably paired.
+export function orderedGarmentFees(order, lines) {
+  if (!safeKitOrder(order)) return [];
+  const pending = [];
+  for (const line of lines) {
+    const attrs = new Map((line.customAttributes || []).map(field => [field.key, field.value]));
+    if (attrs.get('_msh_handover_owner') !== 'flow_v2' || attrs.get('_msh_intent_is_bundle') !== 'false' ||
+        attrs.get('_msh_intent_has_fee') !== 'true' || attrs.get('_msh_take_now') !== 'false' ||
+        !['order_in', 'split'].includes(attrs.get('_msh_fulfilment_mode')) || line.unfulfilledQuantity !== 1) continue;
+    const pair = resolveServiceFee(lines, line);
+    if (pair.valid && pair.fee?.unfulfilledQuantity === 1) pending.push({line, fee: pair.fee, link: attrs.get('_msh_handover_pair')});
+  }
+  return pending;
 }

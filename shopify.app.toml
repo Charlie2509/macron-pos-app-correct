@@ -1,63 +1,16 @@
-# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
-
 client_id = "d8042c43f44b53d95f006ebc6b3221cf"
 name = "Macron POS"
-application_url = "https://macron-pos-app-correct.onrender.com"
+application_url = "https://shopify.dev/apps/default-app-home"
 embedded = true
-
-[build]
-automatically_update_urls_on_dev = true
-
-[webhooks]
-api_version = "2026-04"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/create", "orders/paid" ]
-  uri = "/webhooks/orders/create"
-
-[access_scopes]
-scopes = "write_products,read_orders,write_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,write_gift_cards"
-optional_scopes = []
-use_legacy_install_flow = false
-
-[auth]
-redirect_urls = [
-  "https://macron-pos-app-correct.onrender.com/auth/callback",
-  "https://macron-pos-app-correct.onrender.com/auth/shopify/callback",
-  "https://macron-pos-app-correct.onrender.com/api/auth/callback"
-]
 
 [pos]
 embedded = true
 
-[product.metafields.app.demo_info]
-type = "single_line_text_field"
-name = "Demo Source Info"
-description = "Tracks products created by the Shopify app template for development"
+[access_scopes]
+scopes = "read_products,read_locations,write_orders,write_merchant_managed_fulfillment_orders"
 
-  [product.metafields.app.demo_info.access]
-  admin = "merchant_read_write"
+[auth]
+redirect_urls = []
 
-[metaobjects.app.example]
-name = "Example"
-description = "An example metaobject definition created by this template"
-
-  [metaobjects.app.example.access]
-  admin = "merchant_read_write"
-
-[metaobjects.app.example.fields.title]
-name = "Title"
-type = "single_line_text_field"
-required = true
-
-[metaobjects.app.example.fields.description]
-name = "Description"
-type = "multi_line_text_field"
+[webhooks]
+api_version = "2026-04"

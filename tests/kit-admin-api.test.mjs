@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {finishCollectedKit, loadKitOrder, recordKitPieces} from '../extensions/macron-pos/src/kit-handover-api.js';
 import {buildBundleComponents} from '../extensions/macron-pos/src/bundle-components.js';
-import {readKitLine} from '../app/kit-collections.js';
+import {addCollections, exactKitFulfillment, orderedGarmentFees, readKitLine} from '../app/kit-collections.js';
 
 const gid = (resource, id) => 'gid://shopify/' + resource + '/' + id;
 const orderId = gid('Order', 71);
@@ -183,4 +183,106 @@ test('current till output can collect repeated garment names independently by ki
   await finishCollectedKit(query, orderId, kitId);
   assert.equal(state.lines[0].unfulfilledQuantity, 0);
   assert.equal(state.lines[1].unfulfilledQuantity, 1);
+});
+
+const feeId = gid('LineItem', 103);
+const feeRowId = gid('FulfillmentOrderLineItem', 803);
+const pairId = 'c2efbfc6-0e4a-4a81-a20e-458861ebe994';
+
+function addNativeFee(state, {garment = false} = {}) {
+  const line = state.lines[0], mode = garment ? 'order_in' : 'split';
+  const pieces = garment ? {} : {
+    Bundle: 'Training kit', _msh_bundle_component_count: '3',
+    'Item 1': 'Tee — M', 'Bundle Component 1 Fulfilment': 'take_now',
+    'Item 2': 'Shorts — S', 'Bundle Component 2 Fulfilment': 'order_later',
+    'Item 3': 'Socks — L', 'Bundle Component 3 Fulfilment': 'order_later',
+    'Bundle Take Now Summary': '1. Taken today · Tee — M',
+    'Bundle Order Later Summary': '2. Owed for collection · Shorts — S\n3. Owed for collection · Socks — L',
+  };
+  Object.assign(line, {title: garment ? 'Training shirt' : 'Training kit', sku: 'MSH-TRAINING', isGiftCard:false,
+    requiresShipping:true, variant:{id:gid('ProductVariant',7)}, lineItemGroup:null});
+  line.customAttributes = attributes({...pieces, _msh_source:'macron_pos', _msh_fallback_source:'macron_pos', _msh_intent_source:'macron_pos',
+    _msh_fulfilment_mode:mode, _msh_fulfillment_mode:mode, _msh_intent_fulfilment_mode:mode,
+    _msh_intent_fulfillment_mode:mode, _msh_fallback_fulfilment_mode:mode, _msh_fallback_fulfillment_mode:mode,
+    _msh_take_now:'false', _msh_intent_take_now:'false', _msh_fallback_take_now:'false', _msh_intent_quantity:'1',
+    _msh_intent_variant_id:'7', _msh_intent_product_title:line.title, _msh_intent_is_bundle:String(!garment),
+    _msh_intent_has_fee:'true', _msh_handover_owner:'flow_v2', _msh_handover_role:garment ? 'merchandise' : 'kit',
+    _msh_handover_pair:pairId, 'Linked Fee Variant Id':'12', 'Personalisation Fee':'£7.50'});
+  state.lines.push({id:feeId, title:'Personalisation fee (system)', sku:'MSH-FEE', quantity:1,
+    currentQuantity:1, unfulfilledQuantity:1, isGiftCard:false, requiresShipping:true, variant:{id:gid('ProductVariant',12)},
+    lineItemGroup:null, customAttributes:attributes({_msh_source:'macron_pos', _msh_handover_owner:'flow_v2',
+      _msh_handover_role:'service_fee', _msh_handover_pair:pairId, 'Linked Product Variant Id':'7',
+      'Fee For Product':line.title, 'Personalisation Fee':'£7.50'})});
+  state.route.lineItems.nodes.push({id:feeRowId, remainingQuantity:1, lineItem:{id:feeId}});
+}
+
+test('a v2 kit fee stays open through partial collection and completes with the exact kit', async () => {
+  const {state,query} = fakeAdmin();
+  addNativeFee(state);
+  assert.equal(await save(query,await view(query),[2]), false);
+  await assert.rejects(finishCollectedKit(query,orderId,kitId));
+  assert.equal(state.attempted.length, 0);
+  assert.equal(await save(query,await view(query),[3]), true);
+  await finishCollectedKit(query,orderId,kitId);
+  assert.deepEqual(state.fulfils[0].fulfillment.lineItemsByFulfillmentOrder, [{fulfillmentOrderId:routeId,
+    fulfillmentOrderLineItems:[{id:kitRouteLine,quantity:1},{id:feeRowId,quantity:1}]}]);
+  assert.equal(state.lines[1].unfulfilledQuantity,1);
+  await finishCollectedKit(query,orderId,kitId);
+  assert.equal(state.fulfils.length,1);
+});
+
+test('final collection requires a valid fee pair and exact remaining route; a retry can finish one remaining line', async () => {
+  const {state,query} = fakeAdmin();
+  addNativeFee(state);
+  assert.equal(await save(query,await view(query),[2,3]),true);
+  const feeLine = state.lines[2];
+  const link = feeLine.customAttributes.find(a => a.key === '_msh_handover_pair');
+  link.value = '00112233-0011-4433-aa11-223344556677';
+  await assert.rejects(finishCollectedKit(query,orderId,kitId));
+  assert.equal(state.attempted.length,0);
+  link.value = pairId;
+  state.route.lineItems.nodes[2].remainingQuantity = 0;
+  await assert.rejects(finishCollectedKit(query,orderId,kitId));
+  assert.equal(state.attempted.length,0);
+  state.route.lineItems.nodes[2].remainingQuantity = 1;
+  state.lines[0].unfulfilledQuantity = state.route.lineItems.nodes[0].remainingQuantity = 0;
+  await finishCollectedKit(query,orderId,kitId);
+  assert.deepEqual(state.fulfils[0].fulfillment.lineItemsByFulfillmentOrder[0].fulfillmentOrderLineItems,[{id:feeRowId,quantity:1}]);
+});
+
+test('ordinary garment collection uses Shopify’s native partial fulfilment for verified outstanding pairs', () => {
+  const {state} = fakeAdmin();
+  addNativeFee(state,{garment:true});
+  assert.deepEqual(orderedGarmentFees(state.order,state.lines).map(({line,fee}) => [line.id,fee.id]),[[kitId,feeId]]);
+  state.order.displayFinancialStatus = 'PENDING';
+  assert.deepEqual(orderedGarmentFees(state.order,state.lines),[]);
+  state.order.displayFinancialStatus = 'PAID';
+  state.lines[2].customAttributes = state.lines[2].customAttributes.filter(attr => attr.key !== '_msh_handover_owner');
+  assert.deepEqual(orderedGarmentFees(state.order,state.lines),[]);
+});
+
+test('native fee routes can differ; an old fee with the same SKU stays open', async () => {
+  const {state,query} = fakeAdmin();
+  addNativeFee(state);
+  const parent = state.lines[0];
+  const feeRoute = structuredClone(state.route);
+  feeRoute.id = gid('FulfillmentOrder',81);
+  feeRoute.lineItems = rows([state.route.lineItems.nodes.pop()]);
+  const ledger = addCollections({version:1,lines:{}},parent,[2,3]);
+  const routed = {...state.order, fulfillmentOrders: rows([state.route,feeRoute])};
+  const expected = exactKitFulfillment(routed, parent, state.lines, ledger).fulfillment.lineItemsByFulfillmentOrder;
+  assert.deepEqual(expected.map(group => [group.fulfillmentOrderId, group.fulfillmentOrderLineItems[0].id]),
+    [[routeId,kitRouteLine],[feeRoute.id,feeRowId]]);
+  feeRoute.deliveryMethod.methodType = 'SHIPPING';
+  assert.equal(exactKitFulfillment(routed, parent, state.lines, ledger), null);
+  state.route.lineItems.nodes.push(feeRoute.lineItems.nodes[0]);
+  for (const line of [parent, state.lines[2]]) {
+    line.customAttributes = line.customAttributes.filter(attr => !['_msh_handover_pair','_msh_handover_role'].includes(attr.key));
+    const owner = line.customAttributes.find(attr => attr.key === '_msh_handover_owner');
+    owner.value = 'flow_v1';
+  }
+  assert.equal(await save(query,await view(query),[2,3]),true);
+  await finishCollectedKit(query,orderId,kitId);
+  assert.equal(state.lines[0].unfulfilledQuantity,0);
+  assert.equal(state.lines[2].unfulfilledQuantity,1);
 });

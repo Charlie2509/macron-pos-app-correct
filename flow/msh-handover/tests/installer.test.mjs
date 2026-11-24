@@ -214,3 +214,23 @@ test('CLI 5 structured errors take priority over progress messages on stderr',()
   assert(isAccessError(message));
   assert.equal(cliFailure({stdout:'',stderr:'Connection lost'}),'Connection lost');
 });
+
+test('shop-PC preparation verifies drafts and never activates or replaces an active version', async () => {
+  const s = storeStub();
+  const prompts = [];
+  const prepare = () => install({api:s.api, source, draftOnly:true, log:()=>{}, confirm:async question=>{
+    prompts.push(question);
+    return true;
+  }});
+  assert.match(await prepare(), /verified workflow drafts/i);
+  assert.deepEqual(prompts, ['Save the drafts?']);
+  assert([...s.saved.values()].every(w => !w.activeVersion));
+  const first = s.saved.get('1');
+  first.activeVersion = first.version;
+  const old = structuredClone(first);
+  const count = s.calls.length;
+  assert.match(await prepare(), /verified workflow drafts/i);
+  assert(!s.calls.slice(count).some(call => call.op.startsWith('mutation')));
+  assert.deepEqual(s.saved.get('1'), old);
+  assert(!s.calls.some(call => call.op === queries.activate));
+});

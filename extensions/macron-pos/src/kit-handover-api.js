@@ -1,4 +1,5 @@
 import {addCollections, exactKitFulfillment, parseLedger, readKitLine, safeKitOrder} from '../../../app/kit-collections.js';
+import {resolveServiceFee} from '../../../flow/msh-handover/plan.mjs';
 import {pilotShop} from './handover-config.js';
 
 const snapshotQuery = `query MshKitOrder($id: ID!, $after: String) {
@@ -8,7 +9,8 @@ const snapshotQuery = `query MshKitOrder($id: ID!, $after: String) {
     ledger: metafield(namespace: "macron_pos", key: "kit_collections_v1") { type value compareDigest }
     lineItems(first: 60, after: $after) {
       pageInfo { hasNextPage endCursor }
-      nodes { id title quantity currentQuantity unfulfilledQuantity customAttributes { key value } }
+      nodes { id title name sku quantity currentQuantity unfulfilledQuantity isGiftCard requiresShipping
+        variant { id } lineItemGroup { id } customAttributes { key value } }
     }
   }
 }`;
@@ -85,9 +87,11 @@ export async function finishCollectedKit(query, id, lineId) {
   if (!safeKitOrder(current.order) || !kit?.complete || !kit.components.some(item => item.status === 'collected')) {
     throw new Error('The component record is not ready to complete this kit.');
   }
-  if (line.unfulfilledQuantity === 0) return;
+  const pair = resolveServiceFee(current.lines, line);
+  if (!pair.valid) throw new Error('Collection saved. Check the kit and its personalisation fee in Shopify before completing fulfilment.');
+  if (line.unfulfilledQuantity === 0 && !pair.fee?.unfulfilledQuantity) return;
   const data = await request(query, routesQuery, {id});
-  const variables = data.order?.id === id && exactKitFulfillment(data.order, line);
+  const variables = data.order?.id === id && exactKitFulfillment(data.order, line, current.lines, current.ledger);
   if (!variables) throw new Error('Collection saved. Shopify fulfilment is pending. Check this kit’s location and remaining quantity.');
   const result = (await request(query, finishQuery, variables)).fulfillmentCreate;
   if (result?.userErrors?.length || !result?.fulfillment?.id) throw new Error('Collection saved. Refresh to check Shopify fulfilment before retrying.');

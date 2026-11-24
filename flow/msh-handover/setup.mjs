@@ -13,6 +13,7 @@ const flowAdmin = 'https://admin.shopify.com/store/y5y3p1-hw/apps/flow';
 
 function cliPath() {
   const candidates = [join(directory,'node_modules','@shopify','cli'),join(directory,'..','node_modules','@shopify','cli'),
+    join(directory,'..','..','node_modules','@shopify','cli'),
     ...(process.env.PATH ?? '').split(delimiter).map(bin => join(bin,'..','@shopify','cli'))];
   for (const candidate of candidates) {
     try {
@@ -69,7 +70,7 @@ async function readCurrent(api, def, expectedId) {
   return verifyWorkflow(data.automationWorkflow,def);
 }
 
-export async function install({ api, confirm, log, source }) {
+export async function install({ api, confirm, log, source, draftOnly = false }) {
   const existing = await listWorkflows(api);
   const expectedIds = new Map();
   log('Workflow status on ' + store + ':');
@@ -117,6 +118,7 @@ export async function install({ api, confirm, log, source }) {
   }
   const inactive = ready.filter(({actual})=>actual.activeVersion !== actual.version);
   if (!inactive.length) return 'Both workflows are active and match this installer.';
+  if (draftOnly) return 'Verified workflow drafts. Turn on the two MSH workflows in Shopify Flow during cutover.';
   log('Ready for activation on ' + store + ':\n' + inactive.map(r=>'  ' + r.def.name).join('\n') +
       '\nFuture eligible paid MSH POS sales will mark Take today quantities as fulfilled in Shopify. Order in stays outstanding.');
   if (!await confirm('Turn on the listed workflows?')) return 'Drafts are available for review in Shopify Flow.';
@@ -164,7 +166,7 @@ async function main() {
     });
     const [input,output,script] = await Promise.all(['input.graphql','output.graphql','plan.mjs'].map(f=>readFile(join(directory,f),'utf8')));
     rl = createInterface({ input:process.stdin, output:process.stdout });
-    const result = await install({ api,source:{input,output,script}, log:console.log,
+    const result = await install({ api,source:{input,output,script}, draftOnly:process.argv.includes('--draft-only'), log:console.log,
       confirm: async question => /^y(?:es)?$/i.test((await rl.question(question + ' [y/N] ')).trim()) });
     console.log(result + '\n' + flowAdmin);
   } finally { rl?.close(); await rm(scratch,{ recursive:true,force:true }); }

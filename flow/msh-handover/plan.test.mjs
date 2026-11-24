@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import main, {hasHandoverOwner, planLegacyReconciliation} from './plan.mjs';
+import main, {resolveServiceFee, NATIVE_HANDOVER_OWNER} from './plan.mjs';
 import {MSH_PILOT_SHOP, isNativeHandoverProduct, isNativeHandoverBundle} from '../../extensions/macron-pos/src/flow-pilot.js';
 
 import {buildBundleComponents} from '../../extensions/macron-pos/src/bundle-components.js';
@@ -28,8 +28,6 @@ function basket(lines=[shirt(1,'split','true'),shirt(2,'split','false')]) {
       assignedLocation:{location:loc},deliveryMethod:{methodType:'RETAIL'},
       lineItems:lines.map((l,i)=>({id:gid('FulfillmentOrderLineItem',i+1),lineItem:{id:l.id},remainingQuantity:l.unfulfilledQuantity}))}]};
 }
-const page = nodes => ({nodes, pageInfo:{hasNextPage:false}});
-const admin = order => ({...order,lineItems:page(order.lineItems),fulfillmentOrders:page(order.fulfillmentOrders.map(r=>({...r,lineItems:page(r.lineItems)})))});
 function targets(result) {
   if (!result.ready) {assert.equal(result.mutationInput,'');return [];}
   const args=JSON.parse(result.mutationInput).fulfillment;
@@ -43,28 +41,23 @@ test('paid and routing events select only the take unit, even for identical vari
   o.lineItems[0].unfulfilledQuantity=0; o.fulfillmentOrders[0].lineItems[0].remainingQuantity=0;
   assert.deepEqual(targets(main({order:o})),[]);assert.equal(o.lineItems[1].unfulfilledQuantity,1);
 });
-test('the two engines select disjoint line IDs in mixed baskets. Native, fee, gift and bundle lines stay open in recovery',()=>{
+test('native flow leaves unmarked manual merchandise, legacy fees, gifts and old kits alone',()=>{
   const plain=shirt(7,'take_today','true'); plain.customAttributes=[];
   const fee=shirt(3,'take_today','true',false); fee.customAttributes.push({key:'Fee For Product',value:'shirt'});
   const gift=shirt(4,'take_today','true',false); gift.isGiftCard=true;
   const bundle=shirt(5,'take_today','true',false);bundle.customAttributes.push({key:'Item 1',value:'Shirt'});
   const o=basket([shirt(1,'take_today','true'),shirt(2,'order_in','false'),fee,gift,bundle,shirt(6,'take_today','true',false),plain]);
   assert.deepEqual(targets(main({order:o})),[['1',1]]);
-  assert.deepEqual(targets(planLegacyReconciliation(admin(o))),[]);
   o.lineItems[5].customAttributes.push({key:'Personalisation Summary',value:'Initials applied'});
-  assert.deepEqual(targets(planLegacyReconciliation(admin(o))),[['6',1]]);
   o.lineItems[5].customAttributes.find(a=>a.key==='_msh_take_now').value='false';
-  assert.deepEqual(targets(planLegacyReconciliation(admin(o))),[]);
+  checkBothEvents(o,[['1',1]]);
 });
-test('older explicit take and owe orders are exclusively Render; newer invalid owners remain reserved',()=>{
+test('unmarked historical take and owe records stay untouched and an unrecognised owner blocks action',()=>{
   const old=basket([shirt(1,'split','false',false),shirt(2,'take_today','true',false)]);
   assert.deepEqual(targets(main({order:old})),[]);
-  assert.deepEqual(targets(planLegacyReconciliation(admin(old))),[['2',1]]);
   const o=basket();
   o.lineItems[0].customAttributes.find(a=>a.key==='_msh_handover_owner').value='unknown';
   assert.deepEqual(targets(main({order:o})),[]);
-  assert.deepEqual(targets(planLegacyReconciliation(admin(o))),[]);
-  assert.equal(hasHandoverOwner([{name:'_msh_handover_owner',value:'unknown'}]),true);
 });
 test('honours full payment and exact location, route, ownership, quantities and unedited order',()=>{
   const mutations=[
@@ -72,17 +65,16 @@ test('honours full payment and exact location, route, ownership, quantities and 
     o=>o.edited=true,o=>o.refunds=[{id:'r'}],o=>o.returnStatus='IN_PROGRESS',o=>o.sourceName='web',
     o=>o.fulfillmentOrders=[],o=>o.fulfillmentOrders[0].status='ON_HOLD',o=>o.fulfillmentOrders[0].deliveryMethod.methodType='SHIPPING',
     o=>o.fulfillmentOrders[0].supportedActions=[],o=>o.fulfillmentOrders[0].assignedLocation.location={id:gid('Location',8)},
-    o=>o.lineItems[0].currentQuantity=2,o=>o.fulfillmentOrders[0].lineItems.pop(),o=>o.lineItems.pop(),o=>o.subtotalLineItemsQuantity=3,
+    o=>o.lineItems[0].currentQuantity=2,o=>o.lineItems[0].customAttributes={},o=>o.fulfillmentOrders[0].lineItems.pop(),
+    o=>o.lineItems.pop(),o=>o.subtotalLineItemsQuantity=3,
     o=>o.lineItems[0].customAttributes[0].value='other',o=>o.lineItems[0].customAttributes.push(o.lineItems[0].customAttributes[0]),
     o=>o.lineItems[0].lineItemGroup={id:'legacy'},o=>o.lineItems[0].requiresShipping=false,o=>o.lineItems[0].isGiftCard=true,
     o=>o.lineItems[0].variant.id=gid('ProductVariant',11),o=>o.lineItems[0].sku='PERSOFEE',
     o=>o.lineItems[0].customAttributes.find(a=>a.key==='_msh_intent_take_now').value='false',
     o=>o.fulfillmentOrders[0].lineItems.push(o.fulfillmentOrders[0].lineItems[0])];
   for(const mutate of mutations){const o=basket();mutate(o);assert.deepEqual(targets(main({order:o})),[],String(mutate));}
-  const snapshot=admin(basket());snapshot.fulfillmentOrders.nodes[0].lineItems.pageInfo.hasNextPage=true;
-  assert.deepEqual(targets(planLegacyReconciliation(snapshot)),[]);
 });
-test('pilot scope excludes gift cards, digital, bundle and personalisation products',()=>{
+test('the native till accepts physical personalised merchandise and rejects ambiguous system fields',()=>{
   const product={title:'Shirt',isGiftCard:false,bundleMeta:{isBundle:false},personalisationMeta:{}};
   const variant={sku:'shirt',requiresShipping:true};
   const props={_msh_source:'macron_pos',_msh_fulfilment_mode:'take_today',_msh_take_now:'true'};
@@ -90,9 +82,14 @@ test('pilot scope excludes gift cards, digital, bundle and personalisation produ
   assert.equal(eligible(),true);
   assert.equal(eligible('unknown'),false);assert.equal(eligible(undefined,{...product,isGiftCard:true}),false);
   assert.equal(eligible(undefined,product,{...variant,requiresShipping:false}),false);
-  assert.equal(eligible(undefined,{...product,personalisationMeta:{enablePersonalisation:true}}),false);
+  assert.equal(eligible(undefined,{...product,personalisationMeta:{enablePersonalisation:true}}),true);
   assert.equal(eligible(undefined,product,variant,true),false);assert.equal(eligible(undefined,product,variant,false,true),false);
-  assert.equal(eligible(undefined,product,variant,false,false,{...props,Initials:'GG'}),false);
+  assert.equal(eligible(undefined,product,variant,false,false,{...props,Initials:'GG'}),true);
+  assert.equal(eligible(undefined,product,variant,false,true,{...props,Initials:'GG','Personalisation Fee':'£2.50'}),true);
+  for (const extra of [{_msh_gc_sale:'true'},{'Linked Fee Variant Id':'1'},{'Item 1':'Tee'},{'Fee For Product':'A'}, {Bundle:'X'},
+    {'Personalisation Fee':'£2.50'},{_msh_fulfilment_mode:'take_today',_msh_take_now:'false'}]) {
+    assert.equal(eligible(undefined,product,variant,false,false,{...props,...extra}),false);
+  }
 });
 test('simultaneous sales from two tills with the same SKU never cross order or fulfilment IDs',async()=>{
   const orders=Array.from({length:200},(_,i)=>{
@@ -107,24 +104,6 @@ test('simultaneous sales from two tills with the same SKU never cross order or f
     assert.equal(JSON.parse(p.mutationInput).fulfillment.lineItemsByFulfillmentOrder[0].fulfillmentOrderId,
       order.fulfillmentOrders[0].id);
   }));
-});
-
-test('recovery respects cart-level reservation even if all pilot line stamps were stripped',()=>{
-  const l=shirt(1,'take_today','true',false);
-  const o=basket([l]);o.customAttributes=[{key:'_msh_handover_pilot_seen',value:'flow_v1'}];
-  assert.deepEqual(targets(planLegacyReconciliation(admin(o))),[]);
-  l.customAttributes.push({key:'Personalisation Summary',value:'captured'});
-  assert.deepEqual(targets(planLegacyReconciliation(admin(o))),[['1',1]]);
-});
-test('recovery fulfils an all-taken flat split kit; mixed kit and incomplete kit stay open',()=>{
-  const l=shirt(1,'split','false',false);
-  l.customAttributes.find(a=>a.key==='_msh_intent_is_bundle').value='true';
-  l.customAttributes.push({key:'Bundle',value:'Training kit'},{key:'Item 1',value:'Tee'},{key:'Item 2',value:'Socks'},
-    {key:'Bundle Component 1 Fulfilment',value:'Take now'},{key:'Bundle Component 2 Fulfilment',value:'Take now'});
-  const o=basket([l]);assert.deepEqual(targets(planLegacyReconciliation(admin(o))),[['1',1]]);
-  l.customAttributes.at(-1).value='Order later';
-  assert.deepEqual(targets(planLegacyReconciliation(admin(o))),[]);
-  l.customAttributes.pop();assert.deepEqual(targets(planLegacyReconciliation(admin(o))),[]);
 });
 
 const kitTitle = 'Matchday kit';
@@ -170,7 +149,6 @@ test('paid and routed events target the exact fully taken kit, leaving its fee a
   }
   assert.equal(isNativeHandoverBundle(MSH_PILOT_SHOP,{...parentProduct,title:fee.title},parentVariant,writeAttrs(fee)),false);
   checkBothEvents(order,[['1',1]]);
-  assert.deepEqual(targets(planLegacyReconciliation(admin(order))),[]);
   order.lineItems[0].unfulfilledQuantity = 0;
   checkBothEvents(order,[]);
   order.fulfillmentOrders[0].lineItems[0].remainingQuantity = 0;
@@ -231,16 +209,95 @@ test('new kits must have positive parent merchandise and per-slot evidence to be
   assert.equal(eligible(undefined,undefined,{...attrs,'_msh_bundle_component_count':'7'}),false);
 });
 
-test('a new kit that lost its owner stays open in a pilot cart, while a legacy kit in an older order still recovers', () => {
+test('unmarked kits never enter native fulfilment, even if their complete component records survive', () => {
   const stripped = recordedKit(1,['take_now','take_now'],'take_today',true);
-  stripped.customAttributes = stripped.customAttributes.filter(a=>a.key!=='_msh_handover_owner');
-  const order = basket([stripped]);
-  order.customAttributes = [{key:'_msh_handover_pilot_seen',value:'flow_v1'}];
+  stripped.customAttributes = stripped.customAttributes.filter(a => a.key !== '_msh_handover_owner');
+  checkBothEvents(basket([stripped]), []);
+});
+
+function nativeParent(line, role = 'merchandise') {
+  setAttr(line, '_msh_handover_owner', NATIVE_HANDOVER_OWNER);
+  setAttr(line, '_msh_handover_role', role);
+  setAttr(line, '_msh_intent_product_title', line.title);
+  setAttr(line, 'Initials', 'JM');
+  setAttr(line, 'Personalisation Summary', 'Initials: JM');
+  return line;
+}
+
+function attachTestFee(parent, feeId) {
+  const pair = 'ad5a9fec-e417-4d42-9dd7-' + parent.id.split('/').at(-1).padStart(12,'0');
+  setAttr(parent, '_msh_handover_pair', pair);
+  setAttr(parent, '_msh_intent_has_fee', 'true');
+  setAttr(parent, 'Personalisation Fee', '£2.50');
+  setAttr(parent, 'Linked Fee Variant Id', '111');
+  const fee = {...parent, id:gid('LineItem',feeId), title:'Personalisation fee (system)', sku:'', variant:{id:gid('ProductVariant',111)}};
+  const fields = {
+    _msh_source:'macron_pos',_msh_handover_owner:NATIVE_HANDOVER_OWNER,_msh_handover_role:'service_fee',_msh_handover_pair:pair,
+    'Fee For Product':parent.title, 'Linked Product Variant Id':'7','Personalisation Fee':'£2.50'
+  };
+  fee.customAttributes = Object.entries(fields).map(([key,value]) => ({key,value}));
+  return fee;
+}
+
+test('native paid and routed flows fulfil only the exact taken garment and its fee among equal variants and prices', () => {
+  const taken=nativeParent(shirt(21,'split','true'));
+  const owed=nativeParent(shirt(22,'split','false'));
+  const feeTaken=attachTestFee(taken,31), feeOwed=attachTestFee(owed,32);
+  const freeInitials=nativeParent(shirt(23,'take_today','true'));
+  const unrelated=shirt(24,'take_today','true',false);
+  const order=basket([owed,feeTaken,freeInitials,unrelated,taken,feeOwed]);
+  checkBothEvents(order,[['2',1], ['3',1], ['5',1]]);
+  assert.equal(resolveServiceFee(order.lineItems,taken).fee.id, feeTaken.id);
+  assert.equal(resolveServiceFee(order.lineItems,owed).fee.id, feeOwed.id);
+  assert.deepEqual(resolveServiceFee(order.lineItems,freeInitials),{valid:true,fee:null});
+  assert.deepEqual(resolveServiceFee(order.lineItems,unrelated),{valid:true,fee:null});
+  feeTaken.requiresShipping=false;
+  checkBothEvents(order,[['2',1], ['3',1], ['5',1]]);
+  feeTaken.unfulfilledQuantity=0;
+  order.fulfillmentOrders[0].lineItems.splice(1,1);
+  checkBothEvents(order,[['3',1], ['5',1]]);
+  order.displayFinancialStatus='PARTIALLY_PAID';
   checkBothEvents(order,[]);
-  assert.deepEqual(targets(planLegacyReconciliation(admin(order))),[]);
-  stripped.customAttributes = stripped.customAttributes.filter(a=>a.key!=='_msh_bundle_component_count');
-  assert.deepEqual(targets(planLegacyReconciliation(admin(order))),[]);
-  order.customAttributes=[];
-  setAttr(stripped,'Bundle Take Now Summary','- Match shorts — Youth / S\n- Match shorts — Adult / L');
-  assert.deepEqual(targets(planLegacyReconciliation(admin(order))),[['1',1]]);
+});
+
+test('an owed or mixed kit and its fee stay open together through repeated paid or routing events', () => {
+  const mixed=nativeParent(recordedKit(1,['take_now','order_later']),'kit');
+  const complete=nativeParent(recordedKit(2,['take_now','take_now']),'kit');
+  const feeOpen=attachTestFee(mixed,5), feeReady=attachTestFee(complete,6);
+  const order=basket([mixed,complete,feeOpen,feeReady]);
+  checkBothEvents(order,[['2',1],['4',1]]);
+  assert.equal(resolveServiceFee(order.lineItems,mixed).fee.id,feeOpen.id);
+  for(const index of [1,3]) {
+    order.lineItems[index].unfulfilledQuantity=0;
+    order.fulfillmentOrders[0].lineItems[index].remainingQuantity=0;
+  }
+  checkBothEvents(order,[]);
+});
+
+test('missing, conflicting, duplicated or unverified native fee records cannot fulfil any merchandise', () => {
+  const changes = [
+    (parent,fee,rows)=>rows.pop(), (parent,fee,rows)=>rows.shift(),
+    (parent,fee,rows)=>rows.push({...fee,id:gid('LineItem',99)}),
+    (parent,fee,rows)=>rows.push({...parent,id:gid('LineItem',99)}),
+    (parent,fee)=>setAttr(parent,'_msh_handover_pair','bad'), (parent,fee)=>setAttr(fee,'_msh_handover_pair','bad'),
+    (parent,fee)=>setAttr(parent,'Linked Fee Variant Id','112'),(parent,fee)=>setAttr(fee,'Linked Product Variant Id','8'),
+    (parent,fee)=>setAttr(fee,'Personalisation Fee','£20.00'),(parent,fee)=>setAttr(parent,'Personalisation Fee','£0.00'),
+    (parent,fee)=>setAttr(fee,'Fee For Product','Other shirt'),(parent,fee)=>fee.title='Gift card',
+    (parent,fee)=>fee.isGiftCard=true,(parent,fee)=>fee.currentQuantity=fee.quantity=2,
+    (parent,fee)=>setAttr(fee,'_msh_handover_owner','unknown'), (parent,fee)=>setAttr(parent,'_msh_handover_role','kit'),
+    (parent,fee)=>setAttr(parent,'_msh_intent_has_fee','false'), (parent,fee)=>setAttr(fee,'_msh_source','external'),
+    (parent,fee)=>setAttr(fee,'_msh_handover_role','other'), (parent,fee)=>fee.lineItemGroup={id:gid('LineItemGroup',1)},
+    (parent,fee)=>fee.customAttributes.push(fee.customAttributes[0]),(parent,fee)=>setAttr(fee,'_msh_gc_sale','true'),
+    (parent,fee)=>parent.customAttributes=parent.customAttributes.filter(a=>a.key!=='_msh_handover_owner'),
+    (parent,fee)=>fee.customAttributes=fee.customAttributes.filter(a=>a.key!=='_msh_handover_role'),
+    (parent,fee)=>fee.customAttributes=fee.customAttributes.filter(a=>a.key!=='_msh_handover_owner'),
+    (parent,fee)=>setAttr(parent,'_msh_handover_owner','flow_v1'), (parent,fee)=>fee.variant={id:gid('ProductVariant',7)},
+  ];
+  for(const edit of changes) {
+    const parent=nativeParent(shirt(1,'take_today','true')), fee=attachTestFee(parent,2), rows=[parent,fee];
+    edit(parent,fee,rows);
+    assert.equal(resolveServiceFee(rows,parent).valid,false,String(edit));
+    const independent=nativeParent(shirt(43,'take_today','true'));
+    checkBothEvents(basket([...rows,independent]),[]);
+  }
 });

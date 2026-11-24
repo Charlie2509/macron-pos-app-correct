@@ -1,7 +1,8 @@
 import '@shopify/ui-extensions/preact';
 import {render} from 'preact';
 import {useEffect, useRef, useState} from 'preact/hooks';
-import {readKitLine, safeKitOrder} from '../../../app/kit-collections.js';
+import {resolveServiceFee} from '../../../flow/msh-handover/plan.mjs';
+import {orderedGarmentFees, readKitLine, safeKitOrder} from '../../../app/kit-collections.js';
 import {finishCollectedKit, loadKitOrder, recordKitPieces} from './kit-handover-api.js';
 
 export default async () => {
@@ -52,8 +53,9 @@ function KitHandover() {
   }, [id]);
 
   const kits = (snapshot?.lines || []).map(line => ({line, kit: readKitLine(line, snapshot.ledger)})).filter(row => row.kit);
-  if (snapshot && (snapshot.order.sourceName !== 'pos' || (!kits.length && !message))) return null;
-  return <s-admin-block heading="MSH kit handover">
+  const garments = snapshot ? orderedGarmentFees(snapshot.order, snapshot.lines) : [];
+  if (snapshot && (snapshot.order.sourceName !== 'pos' || (!kits.length && !garments.length && !message))) return null;
+  return <s-admin-block heading={garments.length ? 'MSH handover' : 'MSH kit handover'}>
     <s-stack gap="base">
       {message && <s-text>{message}</s-text>}
       {busy && <s-text>Checking the order…</s-text>}
@@ -62,7 +64,9 @@ function KitHandover() {
         const editable = safeKitOrder(snapshot.order) && kit.canRecord;
         const selected = checked[line.id] || [];
         const owes = kit.components.filter(piece => piece.status === 'owed').length;
-        const finishPending = editable && kit.complete && line.unfulfilledQuantity === 1 && kit.components.some(piece => piece.status === 'collected');
+        const collected = safeKitOrder(snapshot.order) && kit.complete && kit.components.some(piece => piece.status === 'collected');
+        const pair = collected && resolveServiceFee(snapshot.lines, line);
+        const finishPending = pair?.valid && (line.unfulfilledQuantity === 1 || pair.fee?.unfulfilledQuantity === 1);
         const sameTitle = kits.filter(row => row.line.title === line.title);
         const heading = sameTitle.length > 1 ? line.title + ' · Kit ' + (sameTitle.findIndex(row => row.line.id === line.id) + 1) + ' of ' + sameTitle.length : line.title;
         return <s-section key={line.id} heading={heading}>
@@ -93,8 +97,9 @@ function KitHandover() {
                 }
               })}>Record collection</s-button>
             </>}
+            {collected && !pair.valid && <s-text>All pieces collected. Check the kit and its personalisation fee in Shopify before completing fulfilment.</s-text>}
             {finishPending && <>
-              <s-text>All pieces collected. The kit is still open in Shopify.</s-text>
+              <s-text>All pieces collected. Shopify fulfilment is still open.</s-text>
               <s-button disabled={busy} onClick={() => run(async () => {
                 await finishCollectedKit(query, id, line.id);
                 setMessage('Shopify fulfilment confirmed.');
@@ -103,6 +108,12 @@ function KitHandover() {
           </s-stack>
         </s-section>;
       })}
+      {garments.length > 0 && <s-section heading="Personalised garments to collect">
+        <s-stack gap="small">
+          <s-text>When a garment is handed over, use Shopify’s fulfilment section on this order. Select one garment and its linked personalisation fee. Leave the quantities of other outstanding items at zero.</s-text>
+          {garments.map(({line, fee, link}) => <s-text key={line.id}>{line.name || line.title} · {fee.name || fee.title}{garments.length > 1 ? ' · Pair ' + link : ''}</s-text>)}
+        </s-stack>
+      </s-section>}
       {!busy && <s-button onClick={() => run(async () => {})}>Refresh handover</s-button>}
     </s-stack>
   </s-admin-block>;

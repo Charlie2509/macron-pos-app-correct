@@ -1,26 +1,15 @@
 import "@shopify/ui-extensions/preact";
-import {isNativeHandoverBundle, isNativeHandoverProduct} from "./flow-pilot.js";
+import {NATIVE_HANDOVER_OWNER, isNativeHandoverBundle, isNativeHandoverProduct} from "./flow-pilot.js";
 import {verifiedKitHandover} from "../../../flow/msh-handover/plan.mjs";
-import {useNativeHandoverSetting} from "./handover-setting.js";
 import {render} from 'preact';
 import {CatalogueGrid, OptionButtons, RangeSearch, catalogueLabel, matchesSaleSearch} from './SaleControls';
 import {useEffect, useRef, useState} from 'preact/hooks';
 import {allVariantEdges, createRangeLoader, nextCatalogueCursor, readCatalogue} from './catalogue.js';
 import {buildBundleComponents, prepareBundleComponents} from './bundle-components.js';
-import {confirmCartState, hasProperties, writeOrderMarkers} from './cart-properties.js';
-import {feeProductHandle, feeProductTitle, findFeeVariant} from './fee-variant.js';
+import {addHandoverToCart} from './cart-properties.js';
+import {findFeeVariant} from './fee-variant.js';
 
 const pendingCartAdds = new WeakSet();
-
-// File with live data debug instrumentation, bundle plumbing, personalisation meta debug, and navigation/cart flows.
-
-// ---------------- Macron POS backend (Render) ----------------
-// MUST be absolute. POS UI extensions do not resolve relative URLs to the app
-// host reliably -- relative URLs can be silently dropped after the OPTIONS
-// preflight, which is exactly the failure mode that caused take_today orders
-// to never auto-fulfil. Always use this constant for backend POSTs.
-var MACRON_POS_BACKEND_URL = 'https://macron-pos-app-correct.onrender.com';
-var MACRON_POS_INTENT_ENDPOINT = MACRON_POS_BACKEND_URL + '/api/macron-pos/intent';
 
 function safeReadShopDomain() {
   try {
@@ -174,38 +163,6 @@ function buildMshLineItemIntentProperties(options) {
   return properties;
 }
 
-var REQUIRED_NORMAL_PRODUCT_METADATA_KEYS = [
-  '_msh_source',
-  '_msh_fulfilment_mode',
-  '_msh_fulfillment_mode',
-  '_msh_take_now',
-  '_msh_intent_product_title',
-  '_msh_intent_variant_title',
-  '_msh_intent_variant_id',
-  '_msh_intent_quantity',
-  '_msh_intent_source',
-  '_msh_intent_fulfilment_mode',
-  '_msh_intent_fulfillment_mode',
-  '_msh_intent_take_now',
-  '_msh_intent_created_at',
-  '_msh_fallback_source',
-  '_msh_fallback_fulfilment_mode',
-  '_msh_fallback_fulfillment_mode',
-  '_msh_fallback_take_now',
-];
-
-function findMissingNormalProductMetadataKeys(rawProperties) {
-  var properties = sanitizeLineItemProperties(rawProperties);
-  var missing = [];
-  for (var i = 0; i < REQUIRED_NORMAL_PRODUCT_METADATA_KEYS.length; i += 1) {
-    var key = REQUIRED_NORMAL_PRODUCT_METADATA_KEYS[i];
-    if (toStr(properties[key]) === '') {
-      missing.push(key);
-    }
-  }
-  return missing;
-}
-
 function defaultBundleComponentFulfilment(mode) {
   if (mode === 'order_in') {
     return 'order_later';
@@ -215,132 +172,6 @@ function defaultBundleComponentFulfilment(mode) {
 
 function buildBundleMshIntentProperties(mode) {
   return buildMshIntentProperties(mode, false);
-}
-
-function buildMshFallbackMarkerProperties(rawProperties) {
-  var properties = sanitizeLineItemProperties(rawProperties);
-  var source = toStr(properties._msh_source);
-  var mode = toStr(properties._msh_fulfilment_mode || properties._msh_fulfillment_mode);
-  var takeNow = toStr(properties._msh_take_now);
-  var fallback = {};
-  if (source !== '') {
-    fallback._msh_fallback_source = source;
-  }
-  if (mode !== '') {
-    fallback._msh_fallback_fulfilment_mode = mode;
-  }
-  if (takeNow !== '') {
-    fallback._msh_fallback_take_now = takeNow;
-  }
-  var bundleSummary = toStr(properties['Bundle Take Now Summary'] || properties['Bundle Order Later Summary'] || properties['Bundle Summary']);
-  if (bundleSummary !== '') {
-    fallback._msh_fallback_bundle_summary = bundleSummary;
-  }
-  return fallback;
-}
-
-function buildMshOrderFallbackProperties(rawProperties, bundleAttachConfig) {
-  var properties = sanitizeLineItemProperties(rawProperties);
-  var source = toStr(properties._msh_source);
-  var mode = toStr(properties._msh_fulfilment_mode || properties._msh_fulfillment_mode);
-  var takeNow = toStr(properties._msh_take_now);
-  var orderFallback = {};
-  if (properties._msh_handover_owner === 'flow_v1') orderFallback._msh_handover_pilot_seen = 'flow_v1';
-
-  if (source !== '') {
-    orderFallback._msh_order_source = source;
-  }
-  if (mode !== '') {
-    orderFallback._msh_order_fulfilment_mode = mode;
-    orderFallback._msh_order_fulfillment_mode = mode;
-  }
-  if (takeNow !== '') {
-    orderFallback._msh_order_take_now = takeNow;
-  }
-
-  var bundleSummary = '';
-  if (bundleAttachConfig && bundleAttachConfig.enabled && bundleAttachConfig.readableProperties) {
-    var readableProps = sanitizeLineItemProperties(bundleAttachConfig.readableProperties);
-    bundleSummary = toStr(readableProps['Bundle Take Now Summary'] || readableProps['Bundle Summary'] || readableProps['Bundle Order Later Summary']);
-  }
-  if (bundleSummary === '') {
-    bundleSummary = toStr(properties['Bundle Take Now Summary'] || properties['Bundle Summary'] || properties['Bundle Order Later Summary']);
-  }
-  if (bundleSummary !== '') {
-    orderFallback._msh_order_bundle_summary = bundleSummary;
-  }
-
-  return orderFallback;
-}
-
-function sanitizeDurableTokenValue(value) {
-  var text = toStr(value);
-  if (text === '') {
-    return '';
-  }
-  var compact = text.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
-  compact = compact.replace(/[;[\]]+/g, '');
-  if (compact.length > 80) {
-    compact = compact.slice(0, 80);
-  }
-  return compact;
-}
-
-function buildMshDurableNoteToken(rawProperties, bundleAttachConfig) {
-  var properties = sanitizeLineItemProperties(rawProperties);
-  var source = sanitizeDurableTokenValue(properties._msh_source || 'macron_pos');
-  var mode = sanitizeDurableTokenValue(properties._msh_fulfilment_mode || properties._msh_fulfillment_mode || 'take_today');
-  var takeNow = sanitizeDurableTokenValue(properties._msh_take_now);
-  var bundleSummary = '';
-  if (bundleAttachConfig && bundleAttachConfig.enabled && bundleAttachConfig.readableProperties) {
-    var readableProps = sanitizeLineItemProperties(bundleAttachConfig.readableProperties);
-    bundleSummary = sanitizeDurableTokenValue(
-      readableProps['Bundle Take Now Summary'] || readableProps['Bundle Summary'] || readableProps['Bundle Order Later Summary'],
-    );
-  }
-  if (bundleSummary === '') {
-    bundleSummary = sanitizeDurableTokenValue(
-      properties['Bundle Take Now Summary'] || properties['Bundle Summary'] || properties['Bundle Order Later Summary'],
-    );
-  }
-
-  var tokenParts = [
-    'source=' + (source || 'macron_pos'),
-    'mode=' + (mode || 'take_today'),
-  ];
-  if (takeNow !== '') {
-    tokenParts.push('take_now=' + takeNow);
-  }
-  if (bundleSummary !== '') {
-    tokenParts.push('bundle=' + bundleSummary);
-  }
-  return '[MSH_POS] ' + tokenParts.join(';');
-}
-
-function buildMshDurableNoteProperties(token) {
-  var cleanToken = toStr(token);
-  if (cleanToken === '') {
-    return {};
-  }
-  return {
-    note: cleanToken,
-    _msh_pos_note_token: cleanToken,
-  };
-}
-
-function buildPendingIntentBundleSummary(rawProperties, bundleAttachConfig) {
-  var properties = sanitizeLineItemProperties(rawProperties);
-  var summary = '';
-  if (bundleAttachConfig && bundleAttachConfig.enabled && bundleAttachConfig.readableProperties) {
-    var readableProps = sanitizeLineItemProperties(bundleAttachConfig.readableProperties);
-    summary = toStr(
-      readableProps['Bundle Take Now Summary'] || readableProps['Bundle Summary'] || readableProps['Bundle Order Later Summary'],
-    );
-  }
-  if (summary === '') {
-    summary = toStr(properties['Bundle Take Now Summary'] || properties['Bundle Summary'] || properties['Bundle Order Later Summary']);
-  }
-  return summary;
 }
 
 function buildBundleGroupedSummaryValue(lines) {
@@ -516,14 +347,19 @@ function buildPersonalisationProperties(meta, primaryFieldValue, extraField1Valu
   if (!meta) {
     return props;
   }
+  function safeLabel(label) {
+    const key = toStr(label);
+    return /^(?:_msh_|Bundle(?: |$)|Item \d+$|Fee For Product$|Personalisation (?:Fee|Summary)$|Linked (?:Fee|Product) Variant Id$|__proto__$|constructor$|prototype$)/i.test(key)
+      ? 'Personalisation · ' + key : key;
+  }
   if (meta.enablePersonalisation && toStr(primaryFieldValue) !== '') {
-    props[meta.personalisationLabel || 'Personalisation'] = toStr(primaryFieldValue);
+    props[safeLabel(meta.personalisationLabel || 'Personalisation')] = toStr(primaryFieldValue);
   }
   if (meta.extraField1Enabled && toStr(extraField1Value) !== '') {
-    props[meta.extraField1Label || 'Additional information'] = toStr(extraField1Value);
+    props[safeLabel(meta.extraField1Label || 'Additional information')] = toStr(extraField1Value);
   }
   if (meta.extraField2Enabled && toStr(extraField2Value) !== '') {
-    props[meta.extraField2Label || 'Additional information 2'] = toStr(extraField2Value);
+    props[safeLabel(meta.extraField2Label || 'Additional information 2')] = toStr(extraField2Value);
   }
   if (includeFeeValue !== null && includeFeeValue !== undefined) {
     var feeNumber = parseFloat(includeFeeValue);
@@ -534,34 +370,10 @@ function buildPersonalisationProperties(meta, primaryFieldValue, extraField1Valu
   return props;
 }
 
-function classifyVariantId(id) {
-  if (typeof id === 'number') {
-    return 'numeric';
-  }
-  var text = toStr(id);
-  var numericOnly = /^\d+$/.test(text);
-  if (numericOnly) {
-    return 'numeric';
-  }
-  return 'gid/string';
-}
-
 function normalizeVariantId(id) {
-  if (typeof id === 'number') {
-    return {valid: true, value: id, type: 'numeric'};
-  }
-  var text = toStr(id);
-  if (text === '') {
-    return {valid: false, value: null, type: 'none'};
-  }
-  var tailMatch = text.match(/(\d+)$/);
-  if (tailMatch && tailMatch[1]) {
-    var parsed = parseInt(tailMatch[1], 10);
-    if (!isNaN(parsed)) {
-      return {valid: true, value: parsed, type: classifyVariantId(text)};
-    }
-  }
-  return {valid: false, value: null, type: classifyVariantId(text)};
+  const match = /^(?:gid:\/\/shopify\/ProductVariant\/)?([1-9]\d*)$/.exec(toStr(id));
+  const value = match ? Number(match[1]) : null;
+  return {valid: Number.isSafeInteger(value), value};
 }
 
 function isMockVariant(id) {
@@ -1003,7 +815,6 @@ export default async function () {
 }
 
 function Modal() {
-  const nativeHandoverEnabled = useNativeHandoverSetting();
   const [clubQuery, setClubQuery] = useState('');
   const [productFilter, setProductFilter] = useState({collectionId: null, value: ''});
   const [catalogueColumns, setCatalogueColumns] = useState(2);
@@ -1085,173 +896,7 @@ function Modal() {
   const [catalogueAttempt, setCatalogueAttempt] = useState(0);
   const bundleRequest = useRef(0);
 
-  var lastCartActionStatusState = useState('idle');
-  var lastCartActionStatus = lastCartActionStatusState[0];
-  var setLastCartActionStatus = lastCartActionStatusState[1];
-
-  var lastCartErrorMessageState = useState('');
-  var lastCartErrorMessage = lastCartErrorMessageState[0];
-  var setLastCartErrorMessage = lastCartErrorMessageState[1];
-
-  var lastCartBeforeCountState = useState(0);
-  var lastCartBeforeCount = lastCartBeforeCountState[0];
-  var setLastCartBeforeCount = lastCartBeforeCountState[1];
-
-  var lastCartAfterCountState = useState(0);
-  var lastCartAfterCount = lastCartAfterCountState[0];
-  var setLastCartAfterCount = lastCartAfterCountState[1];
-
-  var lastNormalizedVariantIdState = useState('');
-  var lastNormalizedVariantId = lastNormalizedVariantIdState[0];
-  var setLastNormalizedVariantId = lastNormalizedVariantIdState[1];
-
-  var lastLineItemPropertiesState = useState({});
-  var lastLineItemProperties = lastLineItemPropertiesState[0];
-  var setLastLineItemProperties = lastLineItemPropertiesState[1];
-
-  var lastCartLineItemUuidState = useState('');
-  var lastCartLineItemUuid = lastCartLineItemUuidState[0];
-  var setLastCartLineItemUuid = lastCartLineItemUuidState[1];
-
-  var lastMainLineAddStatusState = useState('idle');
-  var lastMainLineAddStatus = lastMainLineAddStatusState[0];
-  var setLastMainLineAddStatus = lastMainLineAddStatusState[1];
-
-  var lastPropertiesAttachAttemptedState = useState(false);
-  var lastPropertiesAttachAttempted = lastPropertiesAttachAttemptedState[0];
-  var setLastPropertiesAttachAttempted = lastPropertiesAttachAttemptedState[1];
-
-  var lastPropertiesAttachStatusState = useState('idle');
-  var lastPropertiesAttachStatus = lastPropertiesAttachStatusState[0];
-  var setLastPropertiesAttachStatus = lastPropertiesAttachStatusState[1];
-
-  var lastFeeAmountState = useState(null);
-  var lastFeeAmount = lastFeeAmountState[0];
-  var setLastFeeAmount = lastFeeAmountState[1];
-
-  var lastFeeRequiredState = useState(false);
-  var lastFeeRequired = lastFeeRequiredState[0];
-  var setLastFeeRequired = lastFeeRequiredState[1];
-
-  var lastFeeVariantIdState = useState('');
-  var lastFeeVariantId = lastFeeVariantIdState[0];
-  var setLastFeeVariantId = lastFeeVariantIdState[1];
-
-  var lastFeeVariantStatusState = useState('idle');
-  var lastFeeVariantStatus = lastFeeVariantStatusState[0];
-  var setLastFeeVariantStatus = lastFeeVariantStatusState[1];
-
-  var lastFeeErrorMessageState = useState('');
-  var lastFeeErrorMessage = lastFeeErrorMessageState[0];
-  var setLastFeeErrorMessage = lastFeeErrorMessageState[1];
-
-  var lastFeeLineItemUuidState = useState('');
-  var lastFeeLineItemUuid = lastFeeLineItemUuidState[0];
-  var setLastFeeLineItemUuid = lastFeeLineItemUuidState[1];
-
-  var lastFeePropertiesAttachStatusState = useState('idle');
-  var lastFeePropertiesAttachStatus = lastFeePropertiesAttachStatusState[0];
-  var setLastFeePropertiesAttachStatus = lastFeePropertiesAttachStatusState[1];
-
-  var lastFeeProductTitleTargetState = useState('Personalisation fee (system)');
-  var lastFeeProductTitleTarget = lastFeeProductTitleTargetState[0];
-  var setLastFeeProductTitleTarget = lastFeeProductTitleTargetState[1];
-
-  var lastFeeProductHandleTargetState = useState('personalisation-fee');
-  var lastFeeProductHandleTarget = lastFeeProductHandleTargetState[0];
-  var setLastFeeProductHandleTarget = lastFeeProductHandleTargetState[1];
-
-  var lastFeeLookupQueryState = useState('');
-  var lastFeeLookupQuery = lastFeeLookupQueryState[0];
-  var setLastFeeLookupQuery = lastFeeLookupQueryState[1];
-
-  var lastFeeCandidateCountState = useState(0);
-  var lastFeeCandidateCount = lastFeeCandidateCountState[0];
-  var setLastFeeCandidateCount = lastFeeCandidateCountState[1];
-
-  var lastFeeVariantScanCountState = useState(0);
-  var lastFeeVariantScanCount = lastFeeVariantScanCountState[0];
-  var setLastFeeVariantScanCount = lastFeeVariantScanCountState[1];
-
-  var lastFeeMatchMethodState = useState('none');
-  var lastFeeMatchMethod = lastFeeMatchMethodState[0];
-  var setLastFeeMatchMethod = lastFeeMatchMethodState[1];
-
-  var lastFeeExactTitleValidationPassedState = useState(false);
-  var lastFeeExactTitleValidationPassed = lastFeeExactTitleValidationPassedState[0];
-  var setLastFeeExactTitleValidationPassed = lastFeeExactTitleValidationPassedState[1];
-
-  var lastFeeProductFoundState = useState(false);
-  var lastFeeProductFound = lastFeeProductFoundState[0];
-  var setLastFeeProductFound = lastFeeProductFoundState[1];
-
-  var lastFeeProductIdState = useState('');
-  var lastFeeProductId = lastFeeProductIdState[0];
-  var setLastFeeProductId = lastFeeProductIdState[1];
-
-  var lastFeeVariantTitleMatchedState = useState('');
-  var lastFeeVariantTitleMatched = lastFeeVariantTitleMatchedState[0];
-  var setLastFeeVariantTitleMatched = lastFeeVariantTitleMatchedState[1];
-
-  var lastFeeLineAddAttemptedState = useState(false);
-  var lastFeeLineAddAttempted = lastFeeLineAddAttemptedState[0];
-  var setLastFeeLineAddAttempted = lastFeeLineAddAttemptedState[1];
-
-  var lastFeeLineAddStatusState = useState('idle');
-  var lastFeeLineAddStatus = lastFeeLineAddStatusState[0];
-  var setLastFeeLineAddStatus = lastFeeLineAddStatusState[1];
-
-  var lastFeeVariantAvailableForSaleState = useState(null);
-  var lastFeeVariantAvailableForSale = lastFeeVariantAvailableForSaleState[0];
-  var setLastFeeVariantAvailableForSale = lastFeeVariantAvailableForSaleState[1];
-
-  var lastRollbackAttemptedState = useState(false);
-  var lastRollbackAttempted = lastRollbackAttemptedState[0];
-  var setLastRollbackAttempted = lastRollbackAttemptedState[1];
-
-  var lastRollbackStatusState = useState('idle');
-  var lastRollbackStatus = lastRollbackStatusState[0];
-  var setLastRollbackStatus = lastRollbackStatusState[1];
-
-  var lastRollbackDetailState = useState('');
-  var lastRollbackDetail = lastRollbackDetailState[0];
-  var setLastRollbackDetail = lastRollbackDetailState[1];
-
-  var lastRollbackMainLineRemovedState = useState(false);
-  var lastRollbackMainLineRemoved = lastRollbackMainLineRemovedState[0];
-  var setLastRollbackMainLineRemoved = lastRollbackMainLineRemovedState[1];
-
-  var lastRollbackFeeLineRemovedState = useState(false);
-  var lastRollbackFeeLineRemoved = lastRollbackFeeLineRemovedState[0];
-  var setLastRollbackFeeLineRemoved = lastRollbackFeeLineRemovedState[1];
-
-  var lastPingAttemptedState = useState(false);
-  var lastPingAttempted = lastPingAttemptedState[0];
-  var setLastPingAttempted = lastPingAttemptedState[1];
-
-  var lastPingStatusState = useState('');
-  var lastPingStatus = lastPingStatusState[0];
-  var setLastPingStatus = lastPingStatusState[1];
-
-  var lastPingErrorState = useState('');
-  var lastPingError = lastPingErrorState[0];
-  var setLastPingError = lastPingErrorState[1];
-
-  var lastIntentRequestAttemptedState = useState(false);
-  var lastIntentRequestAttempted = lastIntentRequestAttemptedState[0];
-  var setLastIntentRequestAttempted = lastIntentRequestAttemptedState[1];
-
-  var lastIntentRequestStatusState = useState('');
-  var lastIntentRequestStatus = lastIntentRequestStatusState[0];
-  var setLastIntentRequestStatus = lastIntentRequestStatusState[1];
-
-  var lastIntentRequestErrorState = useState('');
-  var lastIntentRequestError = lastIntentRequestErrorState[0];
-  var setLastIntentRequestError = lastIntentRequestErrorState[1];
-
-  var lastEnteredPersonalisationState = useState(false);
-  var lastEnteredPersonalisation = lastEnteredPersonalisationState[0];
-  var setLastEnteredPersonalisation = lastEnteredPersonalisationState[1];
+  const [cartResult, setCartResult] = useState(null);
 
   var loadingState = useState(true);
   var loading = loadingState[0];
@@ -1744,7 +1389,6 @@ function Modal() {
       extraField1Value,
       extraField2Value
     );
-    setLastEnteredPersonalisation(enteredPersonalisation);
 
     var parsedBundleFee = parseFeeAmount(personalisationMeta.personalisationFeeRaw);
     var bundleFeeAmount = null;
@@ -1846,6 +1490,8 @@ function Modal() {
   }
 
   function handleProductPress(product) {
+    setFulfilmentMode('take_today');
+    setSplitTakeNow(true);
     setPrimaryFieldValue('');
     setExtraField1Value('');
     setExtraField2Value('');
@@ -1894,767 +1540,74 @@ function Modal() {
     }
   }
 
-  function cartLineCount() {
-    if (typeof shopify === 'undefined') {
-      return 0;
-    }
-    if (!shopify.cart || !shopify.cart.current || !shopify.cart.current.value) {
-      return 0;
-    }
-    var lines = shopify.cart.current.value.lineItems;
-    if (!lines || !Array.isArray(lines)) {
-      return 0;
-    }
-    return lines.length;
-  }
-
-  function getCartLineItemsSnapshot() {
-    if (typeof shopify === 'undefined') {
-      return [];
-    }
-    if (!shopify.cart || !shopify.cart.current || !shopify.cart.current.value) {
-      return [];
-    }
-    var lines = shopify.cart.current.value.lineItems;
-    if (!lines || !Array.isArray(lines)) {
-      return [];
-    }
-    return lines;
-  }
-
-  function findCartLineByUuid(lineUuid) {
-    var target = toStr(lineUuid);
-    if (target === '') {
-      return null;
-    }
-    var lines = getCartLineItemsSnapshot();
-    for (var i = 0; i < lines.length; i += 1) {
-      var line = lines[i];
-      var candidate = toStr(line && (line.uuid || line.id || line.lineItemUuid));
-      if (candidate === target) {
-        return line;
-      }
-    }
-    return null;
-  }
-
-  function countLineProperties(line) {
-    if (!line) {
-      return 0;
-    }
-    if (Array.isArray(line.properties)) {
-      return line.properties.length;
-    }
-    if (line.properties && typeof line.properties === 'object') {
-      return Object.keys(line.properties).length;
-    }
-    return 0;
-  }
-
-  function linePropertiesToObject(line) {
-    if (!line) {
-      return {};
-    }
-    if (line.properties && typeof line.properties === 'object' && !Array.isArray(line.properties)) {
-      return sanitizeLineItemProperties(line.properties);
-    }
-    if (Array.isArray(line.properties)) {
-      var mapped = {};
-      for (var i = 0; i < line.properties.length; i += 1) {
-        var entry = line.properties[i];
-        if (!entry) continue;
-        var key = toStr(entry.name || entry.key);
-        var value = toStr(entry.value);
-        if (key !== '' && value !== '') {
-          mapped[key] = value;
-        }
-      }
-      return sanitizeLineItemProperties(mapped);
-    }
-    if (Array.isArray(line.customAttributes)) {
-      var customMapped = {};
-      for (var c = 0; c < line.customAttributes.length; c += 1) {
-        var attr = line.customAttributes[c];
-        if (!attr) continue;
-        var attrKey = toStr(attr.key || attr.name);
-        var attrValue = toStr(attr.value);
-        if (attrKey !== '' && attrValue !== '') {
-          customMapped[attrKey] = attrValue;
-        }
-      }
-      return sanitizeLineItemProperties(customMapped);
-    }
-    return {};
-  }
-
-  async function createPendingMacronPosIntent(payload) {
-    if (typeof fetch === 'undefined') {
-      console.error('[MSH-POS-INTENT][ERROR] pending intent failed | reason=fetch_unavailable');
-      return {ok: false, error: 'fetch_unavailable'};
-    }
-
-    // Always send shop when we can discover it; backend will fall back to
-    // single-known-shop if missing, but explicit is safer in multi-store envs.
-    var enrichedPayload = {};
-    var srcKeys = Object.keys(payload || {});
-    for (var k = 0; k < srcKeys.length; k += 1) {
-      enrichedPayload[srcKeys[k]] = payload[srcKeys[k]];
-    }
-    if (!enrichedPayload.shop) {
-      var discoveredShop = safeReadShopDomain();
-      if (discoveredShop) {
-        enrichedPayload.shop = discoveredShop;
-      }
-    }
-    if (!enrichedPayload.source) {
-      enrichedPayload.source = 'macron_pos';
-    }
-
-    var endpoint = MACRON_POS_INTENT_ENDPOINT;
-
-    var response;
-    try {
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify(enrichedPayload),
-      });
-    } catch (requestErr) {
-      var networkMessage = requestErr && requestErr.message ? requestErr.message : String(requestErr);
-      console.error('[MSH-POS-INTENT][ERROR] pending intent failed | network_error', {
-        endpoint: endpoint,
-        message: networkMessage,
-      });
-      return {ok: false, error: 'network_error: ' + networkMessage};
-    }
-
-    var status = response && typeof response.status === 'number' ? response.status : 0;
-    var json = null;
-    try {
-      json = await response.json();
-    } catch (parseErr) {
-      console.error('[MSH-POS-INTENT][ERROR] pending intent failed | invalid_json_response', {
-        endpoint: endpoint,
-        status: status,
-        message: parseErr && parseErr.message ? parseErr.message : String(parseErr),
-      });
-      return {ok: false, status: status, error: 'invalid_json_response'};
-    }
-
-    if (!response.ok || !json || json.ok !== true) {
-      var errCode = json && json.error ? String(json.error) : 'pending_intent_failed';
-      console.error('[MSH-POS-INTENT][ERROR] pending intent failed', {
-        endpoint: endpoint,
-        status: status,
-        error: errCode,
-      });
-      return {
-        ok: false,
-        status: status,
-        error: errCode,
-      };
-    }
-
-    return {
-      ok: true,
-      intentId: toStr(json.intentId),
-      expiresAt: toStr(json.expiresAt),
-    };
-  }
-
-  async function fetchPersonalisationFeeVariant(feeAmount) {
-    setLastFeeProductHandleTarget(feeProductHandle);
-    setLastFeeProductTitleTarget(feeProductTitle);
-    setLastFeeLookupQuery('FeeVariants: ' + feeProductHandle);
-    const {productId, scanned, match} = await findFeeVariant(feeAmount);
-    setLastFeeProductFound(Boolean(productId));
-    setLastFeeProductId(productId || '');
-    setLastFeeCandidateCount(productId ? 1 : 0);
-    setLastFeeExactTitleValidationPassed(Boolean(productId));
-    setLastFeeVariantScanCount(scanned);
-    setLastFeeMatchMethod(match?.method || 'none');
-    setLastFeeVariantTitleMatched(match?.text || '');
-    setLastFeeVariantAvailableForSale(match ? true : null);
-    return match?.id || null;
-  }
-
   async function addSelectedProductToCart(product, variant, lineItemProperties, feeAmount, bundleAttachConfig) {
     const cart = typeof shopify !== 'undefined' ? shopify.cart : null;
     if (!cart) {
-      toast('Cart API unavailable.');
+      toast('Shopify POS cart is unavailable.');
       return false;
     }
     if (pendingCartAdds.has(cart)) return false;
     pendingCartAdds.add(cart);
     setCartAddPending(true);
+    setCartResult(null);
+    const kit = bundleAttachConfig?.enabled === true;
     try {
-      return await writeSelectedProduct(product, variant, lineItemProperties, feeAmount, bundleAttachConfig);
+      const id = normalizeVariantId(variant?.id);
+      if (!id.valid || !toStr(product?.title) || !toStr(variant?.title)) throw new Error('Select a valid product and size.');
+      const properties = sanitizeLineItemProperties(lineItemProperties);
+      const mode = properties._msh_fulfilment_mode;
+      const take = properties._msh_take_now;
+      if (!['take_today','order_in','split'].includes(mode) || !['true','false'].includes(take) ||
+          (mode !== 'split' && (mode === 'take_today') !== (take === 'true'))) {
+        throw new Error('Choose a handover for this item.');
+      }
+      const hasFee = feeAmount != null;
+      const shop = safeReadShopDomain();
+      const supported = kit ? isNativeHandoverBundle(shop, product, variant, properties)
+        : isNativeHandoverProduct(shop, product, variant, false, hasFee, properties);
+      if (!supported) throw new Error('This item could not be verified for MSH handover. Check the product and its size before adding it.');
+      let fee = null;
+      if (hasFee) {
+        if (!Number.isFinite(feeAmount) || feeAmount <= 0) throw new Error('The personalisation fee is invalid.');
+        if (properties['Personalisation Fee'] !== '£' + feeAmount.toFixed(2)) throw new Error('The personalisation fee does not match the amount on the item.');
+        const {match} = await findFeeVariant(feeAmount);
+        const feeId = normalizeVariantId(match?.id);
+        if (!feeId.valid) throw new Error('No matching personalisation fee is available.');
+        fee = {variantId: feeId.value, label: '£' + feeAmount.toFixed(2)};
+      }
+      const metadata = buildMshLineItemIntentProperties({
+        mode, takeNowInSplit: take === 'true', productTitle: product.title, variantTitle: variant.title,
+        normalizedVariantId: String(id.value), quantity: '1', hasFee, isBundle: kit,
+        bundleSummary: properties['Bundle Take Now Summary'] || properties['Bundle Order Later Summary'],
+      });
+      const record = sanitizeLineItemProperties({
+        ...properties, ...metadata, _msh_handover_owner: NATIVE_HANDOVER_OWNER, _msh_handover_role: kit ? 'kit' : 'merchandise',
+      });
+      const result = await addHandoverToCart(cart, {variantId: id.value, properties: record, fee});
+      setCartResult({status: 'Added and verified', mainUuid: result.mainUuid, feeUuid: result.feeUuid});
+      if (kit) {
+        setBundleParentLineAdded(true);
+        setBundleParentLineUuid(result.mainUuid);
+        setBundleReadablePropertyCount(Object.keys(properties).length);
+        setBundleReadableAttachAttempted(true);
+        setBundleReadableAttachStatus('success');
+        setBundleReadableAttachError('');
+        setBundleFinalParentPropertiesCount(Object.keys(result.properties).length);
+      }
+      toast('Added to cart.');
+      return true;
+    } catch (error) {
+      const message = error?.message || 'Shopify could not confirm the add. Check the POS cart before retrying.';
+      setCartResult({status: message});
+      if (kit) {
+        setBundleReadableAttachStatus('failed');
+        setBundleReadableAttachError(message);
+      }
+      toast(message);
+      return false;
     } finally {
       pendingCartAdds.delete(cart);
       setCartAddPending(false);
-    }
-  }
-
-  async function writeSelectedProduct(product, variant, lineItemProperties, feeAmount, bundleAttachConfig) {
-    setLastCartActionStatus('idle');
-    setLastCartErrorMessage('');
-    setLastCartLineItemUuid('');
-    setLastMainLineAddStatus('idle');
-    setLastPropertiesAttachAttempted(false);
-    setLastPropertiesAttachStatus('idle');
-    setLastLineItemProperties({});
-    setLastFeeAmount(null);
-    setLastFeeRequired(false);
-    setLastFeeVariantId('');
-    setLastFeeVariantStatus('idle');
-    setLastFeeErrorMessage('');
-    setLastFeeLineItemUuid('');
-    setLastFeePropertiesAttachStatus('idle');
-    setLastFeeProductHandleTarget('personalisation-fee');
-    setLastFeeProductTitleTarget('Personalisation fee (system)');
-    setLastFeeLookupQuery('');
-    setLastFeeCandidateCount(0);
-    setLastFeeVariantScanCount(0);
-    setLastFeeMatchMethod('none');
-    setLastFeeExactTitleValidationPassed(false);
-    setLastFeeProductFound(false);
-    setLastFeeProductId('');
-    setLastFeeVariantTitleMatched('');
-    setLastFeeLineAddAttempted(false);
-    setLastFeeLineAddStatus('idle');
-    setLastFeeVariantAvailableForSale(null);
-    setLastRollbackAttempted(false);
-    setLastRollbackStatus('idle');
-    setLastRollbackDetail('');
-    setLastRollbackMainLineRemoved(false);
-    setLastRollbackFeeLineRemoved(false);
-    setLastPingAttempted(false);
-    setLastPingStatus('skipped_direct_fetch');
-    setLastPingError('');
-    setLastIntentRequestAttempted(false);
-    setLastIntentRequestStatus('skipped_direct_fetch');
-    setLastIntentRequestError('');
-    if (!bundleAttachConfig || !bundleAttachConfig.enabled) {
-      setBundleParentLineAdded(false);
-      setBundleParentLineUuid('');
-      setBundleReadablePropertyCount(0);
-      setBundleReadableAttachAttempted(false);
-      setBundleReadableAttachStatus('idle');
-      setBundleReadableAttachError('');
-      setBundleFinalParentPropertiesCount(0);
-    }
-
-    if (!product || !variant) {
-      toast('Select a size first');
-      setLastCartActionStatus('failed');
-      setLastCartErrorMessage('No product or variant selected');
-      return false;
-    }
-    if (isMockVariant(variant.id)) {
-      toast('Mock products cannot be added to the POS cart.');
-      setLastCartActionStatus('failed');
-      setLastCartErrorMessage('Mock product cannot be added');
-      return false;
-    }
-    var normalized = normalizeVariantId(variant.id);
-    setLastNormalizedVariantId(normalized.valid ? String(normalized.value) : '');
-    if (!normalized.valid || normalized.value === null) {
-      toast('Variant ID is invalid for POS cart add.');
-      setLastCartActionStatus('failed');
-      setLastCartErrorMessage('Invalid normalized variant id');
-      return false;
-    }
-    var cartApiAvailable = typeof shopify !== 'undefined' && shopify.cart && shopify.cart.addLineItem;
-    if (!cartApiAvailable) {
-      toast('Cart API unavailable.');
-      setLastCartActionStatus('failed');
-      setLastCartErrorMessage('Cart API unavailable');
-      return false;
-    }
-
-    var beforeCount = cartLineCount();
-    setLastCartBeforeCount(beforeCount);
-    setLastCartAfterCount(beforeCount);
-
-    var feeRequired = false;
-    var numericFee = null;
-    if (feeAmount !== null && feeAmount !== undefined) {
-      var parsedFee = parseFloat(feeAmount);
-      if (!isNaN(parsedFee) && parsedFee > 0) {
-        feeRequired = true;
-        numericFee = parsedFee;
-      }
-    }
-    setLastFeeRequired(feeRequired);
-    setLastFeeAmount(feeRequired ? numericFee : null);
-
-    var propertiesObject = sanitizeLineItemProperties(lineItemProperties);
-
-    var expectedIncrease = 1 + (feeRequired ? 1 : 0);
-    var mainUuid = '';
-    var feeUuid = '';
-    var feeNormalized = null;
-
-    async function rollbackAddedLines(reason) {
-      setLastRollbackAttempted(true);
-      setLastRollbackStatus('attempting');
-      setLastRollbackDetail(reason);
-      var canRemove = shopify.cart && typeof shopify.cart.removeLineItem === 'function';
-      if (!canRemove) {
-        setLastRollbackStatus('failed');
-        setLastRollbackDetail(reason + ' | rollback failed: Cart API missing removeLineItem');
-        return false;
-      }
-      var rollbackErrors = [];
-      if (feeUuid) {
-        try {
-          await shopify.cart.removeLineItem(feeUuid);
-          setLastRollbackFeeLineRemoved(true);
-        } catch (feeRemoveErr) {
-          rollbackErrors.push('fee remove failed: ' + (feeRemoveErr && feeRemoveErr.message ? feeRemoveErr.message : 'unknown'));
-        }
-      }
-      if (mainUuid) {
-        try {
-          await shopify.cart.removeLineItem(mainUuid);
-          setLastRollbackMainLineRemoved(true);
-        } catch (mainRemoveErr) {
-          rollbackErrors.push('main remove failed: ' + (mainRemoveErr && mainRemoveErr.message ? mainRemoveErr.message : 'unknown'));
-        }
-      }
-      if (rollbackErrors.length > 0) {
-        setLastRollbackStatus('failed');
-        setLastRollbackDetail(reason + ' | ' + rollbackErrors.join(' | '));
-        return false;
-      }
-      setLastRollbackStatus('success');
-      setLastRollbackDetail(reason + ' | rollback completed');
-      return true;
-    }
-
-    try {
-      if (feeRequired) {
-        var feeVariantId = null;
-        try {
-          feeVariantId = await fetchPersonalisationFeeVariant(numericFee);
-          setLastFeeVariantId(feeVariantId ? String(feeVariantId) : '');
-          setLastFeeVariantStatus(feeVariantId ? 'found' : 'not_found');
-        } catch (feeErr) {
-          var feeLookupError = feeErr && feeErr.message ? feeErr.message : 'unknown lookup error';
-          setLastFeeVariantStatus(feeLookupError === 'matched fee variant is not available for sale' ? 'not_saleable' : 'failed');
-          setLastFeeErrorMessage(feeLookupError === 'matched fee variant is not available for sale' ? feeLookupError : 'fee lookup failed: ' + feeLookupError);
-          setLastCartActionStatus('failed');
-          toast('Personalisation fee could not be added.');
-          return false;
-        }
-        if (!feeVariantId) {
-          setLastFeeErrorMessage('fee variant not found');
-          setLastFeeVariantStatus('not_found');
-          setLastCartActionStatus('failed');
-          toast('Personalisation fee variant not found.');
-          return false;
-        }
-
-        feeNormalized = normalizeVariantId(feeVariantId);
-        if (!feeNormalized.valid || feeNormalized.value === null) {
-          setLastFeeVariantStatus('failed');
-          setLastFeeErrorMessage('fee variant id invalid');
-          setLastCartActionStatus('failed');
-          toast('Fee variant id invalid.');
-          return false;
-        }
-      } else {
-        setLastFeeVariantStatus('skipped');
-        setLastFeePropertiesAttachStatus('skipped');
-      }
-
-      var pendingIntentMode = toStr(propertiesObject._msh_fulfilment_mode || propertiesObject._msh_fulfillment_mode || 'take_today');
-      var pendingIntentTakeNow = toStr(propertiesObject._msh_take_now);
-      var pendingIntentBundleSummary = buildPendingIntentBundleSummary(propertiesObject, bundleAttachConfig);
-      var derivedSplitTakeNow = pendingIntentTakeNow === 'true';
-      var mainLineQuantity = 1;
-      var explicitLineItemIntentProps = buildMshLineItemIntentProperties({
-        mode: pendingIntentMode,
-        takeNowInSplit: derivedSplitTakeNow,
-        productTitle: product && product.title ? String(product.title) : 'Unknown product',
-        variantTitle: variant && variant.title ? String(variant.title) : 'Unknown variant',
-        normalizedVariantId: String(normalized.value),
-        quantity: String(mainLineQuantity),
-        hasFee: feeRequired,
-        isBundle: Boolean(bundleAttachConfig && bundleAttachConfig.enabled),
-        bundleSummary: pendingIntentBundleSummary || '',
-      });
-      const isNormalProductFlow = !bundleAttachConfig?.enabled;
-      const pilotHandover = nativeHandoverEnabled && (isNormalProductFlow
-        ? isNativeHandoverProduct(safeReadShopDomain(), product, variant, false, feeRequired, propertiesObject)
-        : isNativeHandoverBundle(safeReadShopDomain(), product, variant, propertiesObject));
-      if (pilotHandover) explicitLineItemIntentProps._msh_handover_owner = 'flow_v1';
-      else delete propertiesObject._msh_handover_owner;
-      var explicitIntentKeys = Object.keys(explicitLineItemIntentProps);
-      for (var i = 0; i < explicitIntentKeys.length; i += 1) {
-        var explicitKey = explicitIntentKeys[i];
-        propertiesObject[explicitKey] = explicitLineItemIntentProps[explicitKey];
-      }
-      var mainLineProperties = sanitizeLineItemProperties(propertiesObject);
-      if (!isNormalProductFlow && feeRequired) mainLineProperties['Linked Fee Variant Id'] = String(feeNormalized.value);
-      if (isNormalProductFlow) {
-        var missingNormalMetadata = findMissingNormalProductMetadataKeys(mainLineProperties);
-        if (missingNormalMetadata.length > 0) {
-          console.error('[MSH-POS-PRODUCT-DEBUG] CART LINE ADD RESULT', {
-            ok: false,
-            reason: 'missing_required_metadata',
-            missingKeys: missingNormalMetadata,
-          });
-          toast('Macron POS product metadata missing — item not added.');
-          setLastCartActionStatus('failed');
-          setLastCartErrorMessage('Missing required Macron POS metadata: ' + missingNormalMetadata.join(', '));
-          return false;
-        }
-      }
-      var fallbackMarkerProperties = buildMshFallbackMarkerProperties(mainLineProperties);
-      Object.assign(mainLineProperties, fallbackMarkerProperties);
-      setLastLineItemProperties(mainLineProperties);
-      var orderFallbackProperties = buildMshOrderFallbackProperties(mainLineProperties, bundleAttachConfig);
-      var durableNoteToken = buildMshDurableNoteToken(mainLineProperties, bundleAttachConfig);
-      var durableNoteProperties = buildMshDurableNoteProperties(durableNoteToken);
-      var fallbackMarkerKeyCount = Object.keys(fallbackMarkerProperties).length;
-      setLastPingAttempted(false);
-      setLastPingStatus('skipped_direct_fetch');
-      setLastPingError('');
-      // Legacy orders keep their Render intent as a fallback if Shopify drops
-      // line properties. Pilot items proceed only after their exact Shopify
-      // line and cart ownership markers have both been confirmed.
-      var pendingIntentResult = {ok: false, status: 'not_attempted'};
-      var pendingIntentIsBundleFlow = !isNormalProductFlow;
-      var pendingIntentPayload = {
-        source: 'macron_pos',
-        fulfillmentMode: pendingIntentMode,
-        takeNow: pendingIntentTakeNow,
-        productTitle: product && product.title ? String(product.title) : 'Unknown product',
-        variantTitle: variant && variant.title ? String(variant.title) : 'Unknown variant',
-        normalizedVariantId: String(normalized.value),
-        quantity: String(mainLineQuantity),
-        hasFee: feeRequired,
-        isBundle: pendingIntentIsBundleFlow,
-        bundleSummary: pendingIntentIsBundleFlow ? (pendingIntentBundleSummary || '') : '',
-        createdAtClient: new Date().toISOString(),
-      };
-      const savePendingIntent = async () => {
-        setLastIntentRequestAttempted(true);
-        setLastIntentRequestStatus('attempting');
-        setLastIntentRequestError('');
-        pendingIntentResult = await createPendingMacronPosIntent(pendingIntentPayload);
-        if (pendingIntentResult.ok) {
-          setLastIntentRequestStatus('success');
-        } else {
-          setLastIntentRequestStatus('failed');
-          setLastIntentRequestError(pendingIntentResult.error ? String(pendingIntentResult.error) : 'pending_intent_failed');
-          console.error('[MSH POS] Pending handover could not be saved.');
-
-          // Hard-fail visibly for take_today orders. Silent failure on the
-          // intent save is exactly the bug that caused unfulfilled orders --
-          // the POS extension MUST surface it instead of swallowing.
-          var isTakeTodayIntent = pendingIntentMode === 'take_today' || pendingIntentTakeNow === 'true';
-          if (isTakeTodayIntent) {
-            toast('Macron POS: take-today intent could not be saved. Auto-fulfilment may fail.');
-          }
-        }
-      };
-
-      if (pilotHandover) {
-        setLastIntentRequestStatus('shopify_flow');
-      } else if (isNormalProductFlow) {
-        await savePendingIntent();
-      }
-
-      const requiresNewLine = pilotHandover || !isNormalProductFlow;
-      const linesAtAdd = shopify.cart.current?.value?.lineItems;
-      const existingLineIds = new Set(Array.isArray(linesAtAdd) ? linesAtAdd.map(line => line?.uuid) : []);
-      if (requiresNewLine && (!Array.isArray(linesAtAdd) || linesAtAdd.some(line => !line?.uuid))) {
-        toast('Cart is still updating. Check the POS cart before adding this item.');
-        setLastCartActionStatus('failed');
-        return false;
-      }
-      if (requiresNewLine && linesAtAdd.some(line => {
-        if (Number(line.variantId) !== normalized.value) return false;
-        const labels = linePropertiesToObject(line);
-        return labels._msh_source !== 'macron_pos' || !['take_today','order_in','split'].includes(labels._msh_fulfilment_mode);
-      })) {
-        toast('This size is already in the cart without a handover choice. Review that line before adding another.');
-        setLastCartActionStatus('failed');
-        setLastCartErrorMessage('Existing unlabelled variant; no item added');
-        return false;
-      }
-      setLastMainLineAddStatus('attempting');
-      try {
-        mainUuid = await shopify.cart.addLineItem(normalized.value, mainLineQuantity);
-        setLastMainLineAddStatus('success');
-      } catch (mainAddErr) {
-        setLastMainLineAddStatus('failed');
-        console.error('[BundleAdd] main addLineItem error message=', mainAddErr && mainAddErr.message ? mainAddErr.message : String(mainAddErr));
-        throw mainAddErr;
-      }
-      setLastCartLineItemUuid(mainUuid ? String(mainUuid) : '');
-      if (!mainUuid) {
-        toast('Could not add to cart.');
-        setLastCartActionStatus('failed');
-        setLastCartErrorMessage('Cart API returned no line item uuid');
-        return false;
-      }
-
-      if (existingLineIds.has(mainUuid) && (requiresNewLine || linePropertiesToObject(findCartLineByUuid(mainUuid)).Bundle)) {
-        // Shopify merged this addition. Re-labelling or deleting the returned
-        // UUID here would also change the customer's earlier units.
-        toast('This line’s quantity may have increased. Check its quantity and handover in the cart before checkout or adding it again.');
-        setLastCartActionStatus('failed');
-        setLastCartErrorMessage('Existing cart line returned; handover needs review');
-        return false;
-      }
-
-      setLastPropertiesAttachAttempted(true);
-      var linePropertyAttachOk = false;
-      if (shopify.cart && typeof shopify.cart.addLineItemProperties === 'function') {
-        try {
-          await shopify.cart.addLineItemProperties(mainUuid, mainLineProperties);
-          linePropertyAttachOk = true;
-          setLastPropertiesAttachStatus('success');
-        } catch (mainPropsErr) {
-          setLastPropertiesAttachStatus('failed');
-          console.error('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH FAILURE', mainPropsErr && mainPropsErr.message ? mainPropsErr.message : String(mainPropsErr));
-          if (isNormalProductFlow) {
-            console.error('[MSH-POS-PRODUCT-DEBUG] LINE PROPERTIES ATTACH RESULT', {
-              ok: false,
-              reason: 'attach_properties_failed',
-              message: mainPropsErr && mainPropsErr.message ? mainPropsErr.message : String(mainPropsErr),
-            });
-          }
-          if (isNormalProductFlow && !pendingIntentResult.ok) {
-            await rollbackAddedLines('normal product metadata persistence failed (attach + pending intent)');
-            toast('Macron POS metadata failed — item not added safely.');
-            setLastCartActionStatus('failed');
-            setLastCartErrorMessage('normal product metadata persistence failed');
-            return false;
-          }
-        }
-      } else {
-        setLastPropertiesAttachStatus('failed');
-        console.error('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH FAILURE', 'Cart API missing addLineItemProperties');
-        if (isNormalProductFlow) {
-          console.error('[MSH-POS-PRODUCT-DEBUG] LINE PROPERTIES ATTACH RESULT', {
-            ok: false,
-            reason: 'missing_addLineItemProperties_api',
-          });
-        }
-        if (isNormalProductFlow && !pendingIntentResult.ok) {
-          await rollbackAddedLines('normal product metadata persistence failed (missing addLineItemProperties + pending intent)');
-          toast('Macron POS metadata failed — item not added safely.');
-          setLastCartActionStatus('failed');
-          setLastCartErrorMessage('missing addLineItemProperties and pending intent creation failed');
-          return false;
-        }
-      }
-      if (isNormalProductFlow && !linePropertyAttachOk && pendingIntentResult.ok) {
-        console.warn('[MSH-POS-PRODUCT-DEBUG] LINE PROPERTIES ATTACH RESULT', {
-          ok: false,
-          reason: 'line_property_attach_unavailable_or_failed_using_pending_intent',
-          pendingIntentId: pendingIntentResult.intentId || '',
-        });
-      }
-      // When these values already exist on the exact added line the first
-      // property write has also persisted the fallback. Stale or stripped
-      // properties still use the dedicated retry below.
-      if (fallbackMarkerKeyCount > 0 && !hasProperties(linePropertiesToObject(findCartLineByUuid(mainUuid)), fallbackMarkerProperties)) {
-        if (shopify.cart && typeof shopify.cart.addLineItemProperties === 'function') {
-          try {
-            await shopify.cart.addLineItemProperties(mainUuid, fallbackMarkerProperties);
-          } catch (fallbackErr) {
-            console.error(
-              '[MSH Marker] fallback_marker write=failed error=',
-              fallbackErr && fallbackErr.message ? fallbackErr.message : String(fallbackErr),
-            );
-          }
-        } else {
-          console.error('[MSH Marker] fallback_marker write=skipped error=Cart API missing addLineItemProperties');
-        }
-      }
-
-      if (isNormalProductFlow) await writeOrderMarkers(shopify.cart, orderFallbackProperties, durableNoteProperties);
-
-      const matchesMainLine = state => {
-        const line = state?.lineItems?.find(item => item.uuid === mainUuid);
-        return Number(line?.variantId) === normalized.value && line.quantity === mainLineQuantity &&
-          hasProperties(linePropertiesToObject(line), mainLineProperties);
-      };
-
-      if (bundleAttachConfig && bundleAttachConfig.enabled) {
-        setBundleParentLineAdded(true);
-        setBundleParentLineUuid(String(mainUuid));
-        setBundleReadablePropertyCount(Object.keys(bundleAttachConfig.readableProperties).length);
-        setBundleReadableAttachAttempted(true);
-        if (!matchesMainLine(shopify.cart.current?.value)) {
-          try {
-            await shopify.cart.addLineItemProperties(mainUuid, mainLineProperties);
-          } catch (error) {
-            console.warn('[MSH POS] Could not retry the kit handover properties.');
-          }
-          if (!await confirmCartState(shopify.cart.current, matchesMainLine)) {
-            await rollbackAddedLines('Kit handover could not be confirmed on its own cart line.');
-            setBundleReadableAttachStatus('failed');
-            setBundleReadableAttachError('Kit handover could not be verified.');
-            setLastCartActionStatus('failed');
-            toast('Kit handover could not be saved. Check the POS cart before checkout or retrying.');
-            return false;
-          }
-        }
-        setBundleReadableAttachStatus('success');
-        setBundleReadableAttachError('');
-        setBundleFinalParentPropertiesCount(countLineProperties(findCartLineByUuid(mainUuid)));
-      }
-
-      if (feeRequired) {
-        setLastFeeLineAddAttempted(true);
-        setLastFeeLineAddStatus('attempting');
-        try {
-          feeUuid = await shopify.cart.addLineItem(feeNormalized.value, 1);
-          setLastFeeLineItemUuid(feeUuid ? String(feeUuid) : '');
-          if (!feeUuid) {
-            setLastFeeVariantStatus('failed');
-            setLastFeeErrorMessage('fee addLineItem failed: cart add returned no uuid');
-            setLastFeeLineAddStatus('failed');
-            await rollbackAddedLines('fee addLineItem returned no uuid');
-            setLastCartActionStatus('failed');
-            toast('Fee line could not be added.');
-            return false;
-          }
-          if (!isNormalProductFlow && (feeUuid === mainUuid || existingLineIds.has(feeUuid))) {
-            // Never relabel or delete a fee already present from another sale line.
-            feeUuid = '';
-            await rollbackAddedLines('Shopify reused an existing line for the kit fee.');
-            setLastCartActionStatus('failed');
-            toast('An existing line’s quantity may have increased. Check the kit and fee in the POS cart before checkout.');
-            return false;
-          }
-          setLastFeeLineAddStatus('success');
-        } catch (feeAddErr) {
-          setLastFeeVariantStatus('failed');
-          setLastFeeErrorMessage('fee addLineItem failed: ' + (feeAddErr && feeAddErr.message ? feeAddErr.message : 'unknown add error'));
-          setLastFeeLineAddStatus('failed');
-          await rollbackAddedLines('fee addLineItem threw error');
-          setLastCartActionStatus('failed');
-          toast('Fee line could not be added.');
-          return false;
-        }
-
-        var feeProps = {
-          'Fee For Product': product.title,
-          'Linked Product Variant Id': String(normalized.value),
-          'Personalisation Fee': '£' + numericFee.toFixed(2),
-        };
-        if (shopify.cart && shopify.cart.addLineItemProperties) {
-          try {
-            await shopify.cart.addLineItemProperties(feeUuid, feeProps);
-            setLastFeePropertiesAttachStatus('success');
-            setLastFeeVariantStatus('success');
-          } catch (feePropErr) {
-            setLastFeePropertiesAttachStatus('failed');
-            setLastFeeVariantStatus('failed');
-            setLastFeeErrorMessage('fee addLineItemProperties failed: ' + (feePropErr && feePropErr.message ? feePropErr.message : 'unknown properties error'));
-            await rollbackAddedLines('fee addLineItemProperties failed');
-            setLastCartActionStatus('failed');
-            toast('Fee line added without properties.');
-            return false;
-          }
-        } else {
-          setLastFeePropertiesAttachStatus('failed');
-          setLastFeeVariantStatus('failed');
-          setLastFeeErrorMessage('fee addLineItemProperties failed: Cart API missing addLineItemProperties for fee');
-          await rollbackAddedLines('fee addLineItemProperties missing API');
-          setLastCartActionStatus('failed');
-          toast('Fee properties could not be attached.');
-          return false;
-        }
-
-        if (isNormalProductFlow && shopify.cart && shopify.cart.addLineItemProperties) {
-          try {
-            await shopify.cart.addLineItemProperties(mainUuid, {
-              'Linked Fee Variant Id': String(feeNormalized.value),
-            });
-          } catch (linkErr) {
-            setLastFeeErrorMessage('fee link-back-to-main failed: ' + (linkErr && linkErr.message ? linkErr.message : 'unknown link error'));
-            toast('Added to cart. Fee link-back warning only.');
-          }
-        }
-      }
-
-      let afterCount = cartLineCount();
-      let added = afterCount >= beforeCount + expectedIncrease;
-      if (!added) {
-        // A successful native add can return before the cart publishes its
-        // matching line. Observe its receipt rather than submitting it again.
-        const receipts = feeUuid ? [[mainUuid, normalized.value], [feeUuid, feeNormalized.value]] : [[mainUuid, normalized.value]];
-        added = await confirmCartState(shopify.cart.current, state => receipts.every(([uuid, variantId]) =>
-          !existingLineIds.has(uuid) && state?.lineItems?.some(line => line.uuid === uuid &&
-            Number(line.variantId) === variantId && line.quantity > 0)));
-        afterCount = cartLineCount();
-      }
-      setLastCartAfterCount(afterCount);
-      if (added) {
-        // Only a verified kit with all its components and any fee may leave an
-        // order fallback. A failed add must not become a future handover.
-        if (!isNormalProductFlow) {
-          if (feeRequired) {
-            const feeConfirmed = await confirmCartState(shopify.cart.current, state => {
-              const line = state?.lineItems?.find(item => item.uuid === feeUuid);
-              const properties = linePropertiesToObject(line);
-              return Number(line?.variantId) === feeNormalized.value && line.quantity === 1 &&
-                !properties._msh_handover_owner && hasProperties(properties, feeProps) && matchesMainLine(state);
-            });
-            if (!feeConfirmed) {
-              await rollbackAddedLines('Kit fee could not be verified.');
-              setLastCartActionStatus('failed');
-              toast('Kit fee could not be verified. Check the POS cart before checkout or retrying.');
-              return false;
-            }
-          }
-          await writeOrderMarkers(shopify.cart, orderFallbackProperties, durableNoteProperties);
-          if (!pilotHandover) await savePendingIntent();
-        }
-        if (pilotHandover && !await confirmCartState(shopify.cart.current, state =>
-          matchesMainLine(state) && state.properties?._msh_handover_pilot_seen === 'flow_v1')) {
-          await rollbackAddedLines('Shopify handover markers could not be verified');
-          toast('Handover could not be verified. Check the POS cart before checkout or retrying.');
-          setLastCartActionStatus('failed');
-          setLastCartErrorMessage('Flow handover ownership could not be verified on this line and cart');
-          return false;
-        }
-        toast('Added to cart. Cart lines: ' + afterCount);
-        setLastCartActionStatus('success');
-        setLastCartErrorMessage('');
-        return true;
-      }
-      if (requiresNewLine) {
-        await rollbackAddedLines('Protected handover cart receipt could not be verified.');
-        toast('Handover could not be verified. Check the POS cart before checkout or retrying.');
-        setLastCartActionStatus('failed');
-        setLastCartErrorMessage('Protected handover receipt could not be verified');
-        return false;
-      }
-      toast('Shopify returned a cart receipt. Check the POS cart before adding this item again.');
-      setLastCartActionStatus('failed');
-      setLastCartErrorMessage('Cart receipt could not be verified');
-      return false;
-    } catch (err) {
-      console.error('[BundleAdd] caught error message=', err && err.message ? err.message : String(err));
-      if (mainUuid || feeUuid) {
-        await rollbackAddedLines('unexpected cart add failure');
-      }
-      toast('Could not add to cart.');
-      setLastCartActionStatus('failed');
-      setLastCartErrorMessage(err && err.message ? err.message : String(err));
-      return false;
     }
   }
 
@@ -2865,64 +1818,14 @@ function Modal() {
   }
 
   function renderCartDebug() {
-    var variantId = selectedVariant ? selectedVariant.id : '';
-    return (
-      <s-section heading="Cart diagnostics">
-        <s-box border="base" cornerRadius="base" padding="small">
-          <s-stack direction="block" gap="micro">
-          <s-text size="small">Selected product: {selectedProduct ? selectedProduct.title : ''}</s-text>
-          <s-text size="small">Selected variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
-          <s-text>Variant id: {variantId}</s-text>
-          <s-text>Variant id type: {classifyVariantId(variantId)}</s-text>
-          <s-text>Normalized variant id: {lastNormalizedVariantId}</s-text>
-          <s-text>Product is mock: {selectedVariant ? (isMockVariant(selectedVariant.id) ? 'yes' : 'no') : ''}</s-text>
-          <s-text>Cart API available: {typeof shopify !== 'undefined' && shopify.cart && shopify.cart.addLineItem ? 'yes' : 'no'}</s-text>
-          <s-text>Cart line count: {cartLineCount()}</s-text>
-          <s-text>Last cart before: {lastCartBeforeCount}</s-text>
-          <s-text>Last cart after: {lastCartAfterCount}</s-text>
-          <s-text>Last main line uuid: {lastCartLineItemUuid === '' ? 'none' : lastCartLineItemUuid}</s-text>
-          <s-text>Main line add status: {lastMainLineAddStatus}</s-text>
-          <s-text>Properties attach attempted: {lastPropertiesAttachAttempted ? 'yes' : 'no'}</s-text>
-          <s-text>Properties attach status: {lastPropertiesAttachStatus}</s-text>
-          <s-text>Fee amount: {lastFeeAmount === null ? 'none' : '£' + Number(lastFeeAmount).toFixed(2)}</s-text>
-          <s-text>Entered personalisation: {lastEnteredPersonalisation ? 'yes' : 'no'}</s-text>
-          <s-text>Fee required: {lastFeeRequired ? 'yes' : 'no'}</s-text>
-          <s-text>Fee product handle targeted: {lastFeeProductHandleTarget}</s-text>
-          <s-text>Fee product title targeted: {lastFeeProductTitleTarget}</s-text>
-          <s-text>Fee lookup query: {lastFeeLookupQuery === '' ? 'none' : lastFeeLookupQuery}</s-text>
-          <s-text>Fee candidate count: {lastFeeCandidateCount}</s-text>
-          <s-text>Fee variant scan count: {lastFeeVariantScanCount}</s-text>
-          <s-text>Fee exact title validation: {lastFeeExactTitleValidationPassed ? 'passed' : 'failed'}</s-text>
-          <s-text>Fee match method: {lastFeeMatchMethod}</s-text>
-          <s-text>Fee product found: {lastFeeProductFound ? 'yes' : 'no'}</s-text>
-          <s-text>Fee product id: {lastFeeProductId === '' ? 'none' : lastFeeProductId}</s-text>
-          <s-text>Fee variant status: {lastFeeVariantStatus}</s-text>
-          <s-text>Fee variant id: {lastFeeVariantId}</s-text>
-          <s-text>Fee variant title matched: {lastFeeVariantTitleMatched === '' ? 'none' : lastFeeVariantTitleMatched}</s-text>
-          <s-text>Fee variant available for sale: {lastFeeVariantAvailableForSale === null ? 'unknown' : (lastFeeVariantAvailableForSale ? 'yes' : 'no')}</s-text>
-          <s-text>Fee line add attempted: {lastFeeLineAddAttempted ? 'yes' : 'no'}</s-text>
-          <s-text>Fee line add status: {lastFeeLineAddStatus}</s-text>
-          <s-text>Fee line uuid: {lastFeeLineItemUuid === '' ? 'none' : lastFeeLineItemUuid}</s-text>
-          <s-text>Fee properties attach: {lastFeePropertiesAttachStatus}</s-text>
-          <s-text>Rollback attempted: {lastRollbackAttempted ? 'yes' : 'no'}</s-text>
-          <s-text>Rollback status: {lastRollbackStatus}</s-text>
-          <s-text>Rollback detail: {lastRollbackDetail === '' ? 'none' : lastRollbackDetail}</s-text>
-          <s-text>Main line removed during rollback: {lastRollbackMainLineRemoved ? 'yes' : 'no'}</s-text>
-          <s-text>Fee line removed during rollback: {lastRollbackFeeLineRemoved ? 'yes' : 'no'}</s-text>
-          <s-text>Ping attempted: {lastPingAttempted ? 'yes' : 'no'}</s-text>
-          <s-text>Ping status: {lastPingStatus === '' ? 'none' : lastPingStatus}</s-text>
-          <s-text>Ping error: {lastPingError === '' ? 'none' : lastPingError}</s-text>
-          <s-text>Intent request attempted: {lastIntentRequestAttempted ? 'yes' : 'no'}</s-text>
-          <s-text>Intent request status: {lastIntentRequestStatus === '' ? 'none' : lastIntentRequestStatus}</s-text>
-          <s-text>Intent request error: {lastIntentRequestError === '' ? 'none' : lastIntentRequestError}</s-text>
-          <s-text>Last cart status: {lastCartActionStatus}</s-text>
-          <s-text>Last cart error: {lastCartErrorMessage === '' ? 'none' : lastCartErrorMessage}</s-text>
-          <s-text>Last fee error: {lastFeeErrorMessage === '' ? 'none' : lastFeeErrorMessage}</s-text>
-          <s-text size="small">Line item properties preview: {lastLineItemProperties && Object.keys(lastLineItemProperties).length > 0 ? JSON.stringify(lastLineItemProperties) : 'none'}</s-text>
-          </s-stack>
-        </s-box>
-      </s-section>
-    );
+    if (!cartResult) return null;
+    return <s-section heading="Last cart add">
+      <s-stack gap="small">
+        <s-text>{cartResult.status}</s-text>
+        {cartResult.mainUuid && <s-text>Product line: {cartResult.mainUuid}</s-text>}
+        {cartResult.feeUuid && <s-text>Personalisation fee line: {cartResult.feeUuid}</s-text>}
+      </s-stack>
+    </s-section>;
   }
 
   function renderProductDebug() {
@@ -3120,7 +2023,6 @@ function Modal() {
             : selectedVariant && <s-stack gap="small">
               {renderFulfilmentControls()}
               <s-button variant="primary" loading={cartAddPending} onClick={() => {
-                setLastEnteredPersonalisation(false);
                 addSelectedProductToCart(selectedProduct, selectedVariant, buildMshIntentProperties(fulfilmentMode, splitTakeNow), null);
               }}>Add to cart</s-button>
               {checkoutReminder()}
@@ -3260,26 +2162,15 @@ function Modal() {
         return;
       }
       var enteredPersonalisation = hasEnteredPersonalisationValues(meta, primaryFieldValue, extraField1Value, extraField2Value);
-      setLastEnteredPersonalisation(enteredPersonalisation);
       var parsedFeeAmount = parseFeeAmount(meta.personalisationFeeRaw);
       var feeAmount = null;
       if (enteredPersonalisation && parsedFeeAmount !== null && parsedFeeAmount > 0) {
         feeAmount = parsedFeeAmount;
       }
-      var props = buildPersonalisationProperties(meta, primaryFieldValue, extraField1Value, extraField2Value, feeAmount);
-      var mshIntentProps = buildMshIntentProperties(fulfilmentMode, splitTakeNow);
-      var mshIntentKeys = Object.keys(mshIntentProps);
-      for (var m = 0; m < mshIntentKeys.length; m += 1) {
-        props[mshIntentKeys[m]] = mshIntentProps[mshIntentKeys[m]];
-      }
-      if (Object.keys(props).length > 0) {
-        var summaryParts = [];
-        var keys = Object.keys(props);
-        for (var i = 0; i < keys.length; i += 1) {
-          summaryParts.push(keys[i] + ': ' + props[keys[i]]);
-        }
-        props['Personalisation Summary'] = summaryParts.join(' | ');
-      }
+      const props = buildPersonalisationProperties(meta, primaryFieldValue, extraField1Value, extraField2Value, feeAmount);
+      const summary = Object.entries(props).filter(([label]) => label !== 'Personalisation Fee');
+      if (summary.length) props['Personalisation Summary'] = summary.map(([label, value]) => label + ': ' + value).join(' | ');
+      Object.assign(props, buildMshIntentProperties(fulfilmentMode, splitTakeNow));
       addSelectedProductToCart(selectedProduct, selectedVariant, props, feeAmount).then(function (ok) {
         if (ok) {
           setPrimaryFieldValue('');
