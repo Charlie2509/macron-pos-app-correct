@@ -1,0 +1,6 @@
+{
+  "name": "msh-order-printer-tests",
+  "private": true,
+  "scripts": {"test": "node --test kit-handover.test.mjs"},
+  "devDependencies": {"liquidjs": "10.30.1"}
+}

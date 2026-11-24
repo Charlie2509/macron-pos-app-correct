@@ -19,6 +19,8 @@ Release **MSH kit handover** with the app. Approve its `write_orders` permission
 
 When the customer returns, select just the pieces being handed over and choose **Record collection**. Each kit on the order has its own record. Once its last piece is collected, the block completes that kit's remaining fulfilment at the selling location. If Shopify cannot complete it, the collection remains saved and the block offers a retry after refresh. On edited, refunded or merged orders use the displayed details to review the handover manually.
 
+For the MSH invoice and packing list, apply the [Order Printer update instructions](../../printing/README.md) to copies of the shop's current templates. Preview the same mixed order in both documents before replacing a live template. The documents use the numbered pieces on the order and match later collections by kit line and position.
+
 ## Shopify Flow editor setup
 
 If Shopify limits workflow API access, you can build or review each workflow directly in Flow. Search for the two names before creating any drafts.
