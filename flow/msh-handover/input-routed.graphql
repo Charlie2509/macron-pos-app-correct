@@ -1,0 +1,29 @@
+query {
+  fulfillmentOrder {
+order {
+    id
+    sourceName
+    displayFinancialStatus
+    cancelledAt
+    edited
+    returnStatus
+    refunds { id }
+    retailLocation { id }
+    subtotalLineItemsQuantity
+    lineItems {
+      id title sku quantity currentQuantity unfulfilledQuantity
+      requiresShipping isGiftCard
+      variant { id }
+      lineItemGroup { id }
+      customAttributes { key value }
+    }
+    fulfillmentOrders {
+      id status
+      deliveryMethod { methodType }
+      supportedActions { action }
+      assignedLocation { location { id } }
+      lineItems { id remainingQuantity lineItem { id } }
+    }
+  }
+  }
+}

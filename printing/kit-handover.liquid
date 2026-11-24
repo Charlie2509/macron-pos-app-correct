@@ -1,0 +1,113 @@
+{%- comment -%}MSH kit handover v1. Place inside a Shopify line_item loop.{%- endcomment -%}
+{%- assign msh_source = false -%}
+{%- assign msh_conflicting_source = false -%}
+{%- assign msh_bundle = false -%}
+{%- assign msh_take_group = '' -%}
+{%- assign msh_owe_group = '' -%}
+{%- assign msh_expected_count = '' -%}
+{%- assign msh_choice_count = 0 -%}
+{%- for attr in line_item.properties -%}
+  {%- assign msh_key_prefix = attr.first | slice: 0, 17 -%}
+  {%- if msh_key_prefix == 'Bundle Component ' -%}
+    {%- if attr.first contains ' Fulfilment' or attr.first contains ' Fulfillment' -%}{%- assign msh_choice_count = msh_choice_count | plus: 1 -%}{%- endif -%}
+  {%- endif -%}
+  {%- case attr.first -%}
+    {%- when '_msh_source', '_msh_intent_source', '_msh_fallback_source' -%}
+      {%- if attr.last == 'macron_pos' -%}
+        {%- assign msh_source = true -%}
+      {%- else -%}
+        {%- assign msh_conflicting_source = true -%}
+      {%- endif -%}
+    {%- when 'Bundle' -%}
+      {%- if attr.last != blank -%}{%- assign msh_bundle = true -%}{%- endif -%}
+    {%- when '_msh_bundle_component_count' -%}{%- assign msh_expected_count = attr.last -%}
+    {%- when 'Bundle Take Now Summary' -%}{%- assign msh_take_group = attr.last -%}
+    {%- when 'Bundle Order Later Summary' -%}{%- assign msh_owe_group = attr.last -%}
+  {%- endcase -%}
+{%- endfor -%}
+{%- if msh_source and msh_bundle and msh_conflicting_source == false -%}
+  {%- assign msh_ledger = order.metafields.macron_pos.kit_collections_v1 -%}
+  {%- assign msh_ledger = msh_ledger.value | default: msh_ledger -%}
+  {%- assign msh_lines_type = msh_ledger.lines | json | slice: 0, 1 -%}
+  {%- assign msh_ledger_available = false -%}
+  {%- assign msh_line_id = line_item.id | append: '' | remove_first: 'gid://shopify/LineItem/' -%}
+  {%- assign msh_collection = nil -%}
+  {%- if msh_ledger.version == 1 and msh_lines_type == '{' and line_item.quantity == 1 and msh_line_id != blank -%}
+    {%- assign msh_record = msh_ledger.lines[msh_line_id] -%}
+    {%- assign msh_record_type = msh_record | json | slice: 0, 1 -%}
+    {%- if msh_record == nil or msh_record_type == '{' -%}
+      {%- assign msh_ledger_available = true -%}
+      {%- assign msh_collection = msh_record -%}
+    {%- endif -%}
+  {%- endif -%}
+  {%- assign msh_log_count = 0 -%}
+  {%- for entry in msh_collection -%}{%- assign msh_log_count = msh_log_count | plus: 1 -%}{%- endfor -%}
+  {%- assign msh_log_matches = 0 -%}
+  {%- assign msh_highest_slot = 0 -%}
+  {%- assign msh_count = 0 -%}
+  {%- assign msh_taken_count = 0 -%}
+  {%- assign msh_owed_count = 0 -%}
+  {%- assign msh_record_problem = false -%}
+  {%- capture msh_rows -%}
+    {%- for attr in line_item.properties -%}
+      {%- assign msh_index = attr.first | remove_first: 'Item ' -%}
+      {%- assign msh_index_number = msh_index | plus: 0 -%}
+      {%- assign msh_item_key = 'Item ' | append: msh_index_number -%}
+      {%- if msh_item_key == attr.first and msh_index_number > 0 -%}
+        {%- assign msh_count = msh_count | plus: 1 -%}
+        {%- assign msh_highest_slot = msh_highest_slot | at_least: msh_index_number -%}
+        {%- assign msh_choice_key = 'Bundle Component ' | append: msh_index | append: ' Fulfilment' -%}
+        {%- assign msh_choice_alt = 'Bundle Component ' | append: msh_index | append: ' Fulfillment' -%}
+        {%- assign msh_choice = '' -%}
+        {%- for prop in line_item.properties -%}
+          {%- if prop.first == msh_choice_key or prop.first == msh_choice_alt -%}
+            {%- assign msh_choice = prop.last | strip | downcase -%}
+          {%- endif -%}
+        {%- endfor -%}
+        <tr><td>{{ msh_index }}. {{ attr.last | default: 'Unidentified kit item' | replace: '&amp;', '&' | escape }}</td>
+          <td>{{ line_item.quantity | default: '—' }}</td><td>
+          {%- if attr.last == blank -%}{%- assign msh_record_problem = true -%}Check in Shopify
+          {%- elsif msh_choice == 'take_now' or msh_choice == 'taken_now' -%}
+            {%- assign msh_taken_count = msh_taken_count | plus: 1 -%}
+            {%- if order.financial_status == 'paid' and order.cancelled_at == blank -%}Taken at sale{%- else -%}Take today at sale{%- endif -%}
+          {%- elsif msh_choice == 'order_later' -%}
+            {%- assign msh_owed_count = msh_owed_count | plus: 1 -%}
+            {%- if msh_collection[msh_index] == attr.last -%}{%- assign msh_log_matches = msh_log_matches | plus: 1 -%}Collected later
+            {%- elsif msh_collection[msh_index] != nil -%}{%- assign msh_record_problem = true -%}Check in Shopify
+            {%- else -%}<span>Owed at sale</span>{%- endif -%}
+          {%- elsif msh_choice == 'fulfilled' -%}Marked fulfilled at sale
+          {%- elsif msh_choice == 'unfulfilled' -%}Marked unfulfilled at sale
+          {%- elsif msh_choice == 'partial' -%}Marked partially fulfilled at sale
+          {%- else -%}{%- assign msh_record_problem = true -%}Check in Shopify{%- endif -%}
+          </td></tr>
+      {%- endif -%}
+    {%- endfor -%}
+  {%- endcapture -%}
+  {%- if msh_rows != blank -%}
+    {%- assign msh_actual_count = msh_count | append: '' -%}
+    {%- if msh_expected_count != blank and msh_expected_count != msh_actual_count -%}{%- assign msh_record_problem = true -%}{%- endif -%}
+    {%- if msh_choice_count != msh_count or msh_highest_slot != msh_count or msh_log_count != msh_log_matches -%}{%- assign msh_record_problem = true -%}{%- endif -%}
+    {%- if msh_take_group != blank -%}
+      {%- assign msh_group_rows = msh_take_group | strip | newline_to_br | split: '<br />' -%}
+      {%- if msh_group_rows.size != msh_taken_count -%}{%- assign msh_record_problem = true -%}{%- endif -%}
+    {%- endif -%}
+    {%- if msh_owe_group != blank -%}
+      {%- assign msh_group_rows = msh_owe_group | strip | newline_to_br | split: '<br />' -%}
+      {%- if msh_group_rows.size != msh_owed_count -%}{%- assign msh_record_problem = true -%}{%- endif -%}
+    {%- endif -%}
+    {%- if msh_ledger_available and msh_record_problem == false -%}
+      {%- if order.financial_status == 'paid' and order.cancelled_at == blank and line_item.refunded_quantity == 0 and line_item.successfully_fulfilled_quantity == 0 -%}
+        {%- if msh_log_count > 0 or msh_expected_count != blank -%}
+          {%- assign msh_rows = msh_rows | replace: '<span>Owed at sale</span>', '<span>Still owed</span>' -%}
+        {%- endif -%}
+      {%- endif -%}
+    {%- endif -%}
+    <table class="subtable"><thead><tr><th>Kit item and size</th><th>Qty at sale</th><th>Handover</th></tr></thead><tbody>{{ msh_rows }}</tbody></table>
+    {%- if msh_record_problem -%}<div>Kit record incomplete or inconsistent · check in Shopify</div>{%- endif -%}
+  {%- elsif msh_take_group != blank or msh_owe_group != blank -%}
+    <div><strong>Kit handover at sale</strong>
+    {%- if msh_take_group != blank -%}<div>Take today at sale<br>{{ msh_take_group | escape | newline_to_br }}</div>{%- endif -%}
+    {%- if msh_owe_group != blank -%}<div>Owed at sale<br>{{ msh_owe_group | escape | newline_to_br }}</div>{%- endif -%}</div>
+  {%- else -%}<div>Kit handover unavailable · check in Shopify</div>
+  {%- endif -%}
+{%- endif -%}

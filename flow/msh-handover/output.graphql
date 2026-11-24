@@ -1,0 +1,5 @@
+type Output {
+  ready: Boolean!
+  mutationInput: String!
+  reason: String!
+}

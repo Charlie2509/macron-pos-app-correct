@@ -1,11 +1,11 @@
 {
-  "name": "macron-pos",
+  "name": "macron-till-extensions",
   "private": true,
   "version": "1.0.0",
   "license": "UNLICENSED",
   "dependencies": {
-    "@shopify/ui-extensions": "2025.10.x",
-    "preact": "^10.10.x",
-    "@preact/signals": "^2.3.x"
+    "@shopify/ui-extensions": "2025.10.14",
+    "preact": "10.29.1",
+    "@preact/signals": "2.9.0"
   }
 }
