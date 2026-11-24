@@ -1,84 +1,46 @@
 import db from "../db.server";
 import { unauthenticated } from "../shopify.server";
 
-// Reconciler — safety-net sweeper for Macron POS take_today orders.
-//
-// Why this exists:
-//   The orders/create webhook is the primary fulfilment path. But a transient
-//   failure (webhook timeout, race between intent DB commit and webhook fire,
-//   transient fulfillmentCreate error) will leave a take_today order
-//   UNFULFILLED with no automatic retry. Before this reconciler the only way
-//   to catch those was for staff to spot them by accident days later.
-//
-// What it does:
-//   1. Lists POS-source unfulfilled orders from the last RECONCILE_LOOKBACK_MS.
-//   2. For each order, checks the SAME positive signals the webhook checks:
-//        a. _msh_source=macron_pos on any line item / order custom attribute
-//        b. _msh_fallback_source=macron_pos
-//        c. _msh_order_source=macron_pos
-//        d. A pending intent in the DB with a fingerprint match
-//   3. If any positive signal is present, calls fulfillmentCreate on every
-//      open fulfillment order — same mutation the webhook uses.
-//   4. Marks the matched intent (if any) as consumed.
-//
-// What it deliberately does NOT do:
-//   - It will NOT auto-fulfil an order purely because source_name=pos. That
-//     would wrongly fulfil order_in / split orders. A positive Macron POS
-//     marker or fingerprint match is required.
-//
-// Auth: shared secret in MACRON_POS_RECONCILE_TOKEN env var. The route accepts
-//   POST or GET (for easy curl). Requests without the token return 401.
-//
-// Designed to be hit on a 10-minute cron (Cowork scheduled task or any cron
-// service). Idempotent: re-fulfilling an already-fulfilled order is a no-op
-// because the order's open fulfillment orders will be empty.
+import { planLegacyReconciliation } from "../../flow/msh-handover/plan.mjs";
 
+// Recover fully paid, explicitly allocated legacy merchandise at the selling till.
+// The orders/create webhook retains bundle, gift card and older fallback processing.
+// Requests are authenticated by MACRON_POS_RECONCILE_TOKEN.
 const DEBUG_MARKER = "[MSH-RECONCILE]";
 const RECONCILE_LOOKBACK_MS = 1000 * 60 * 60 * 6; // 6 hours of orders
-const PENDING_INTENT_MATCH_WINDOW_MS = 1000 * 60 * 60; // 60 min — matches webhook
 const MAX_ORDERS_PER_RUN = 50;
 
 const ORDER_LIST_QUERY = `#graphql
   query MacronReconcileOrders($query: String!, $first: Int!) {
     orders(query: $query, first: $first, sortKey: CREATED_AT, reverse: true) {
-      nodes {
-        id
-        name
-        sourceName
-        createdAt
-        processedAt
-        updatedAt
-        note
-        displayFulfillmentStatus
-        tags
-        customAttributes {
-          key
-          value
+      nodes { id name }
+    }
+  }
+`;
+
+// A deep, nested connection for every order in the list exceeds Shopify's
+// request cost budget. Read the current state of each candidate before writing.
+const ORDER_DETAIL_QUERY = `#graphql
+  query MacronReconcileOrder($id: ID!) {
+    order(id: $id) {
+      id name sourceName displayFinancialStatus retailLocation { id } customAttributes { key value }
+      cancelledAt edited returnStatus refunds { id } subtotalLineItemsQuantity
+      lineItems(first: 100) {
+        pageInfo { hasNextPage }
+        nodes {
+          id title sku quantity currentQuantity unfulfilledQuantity
+          requiresShipping isGiftCard variant { id } lineItemGroup { id }
+          customAttributes { key value }
         }
-        lineItems(first: 250) {
-          nodes {
-            id
-            name
-            title
-            variantTitle
-            sku
-            quantity
-            variant { id title }
-            customAttributes { key value }
-          }
-        }
-        fulfillmentOrders(first: 25) {
-          nodes {
-            id
-            status
-            lineItems(first: 250) {
-              nodes {
-                id
-                remainingQuantity
-                totalQuantity
-                lineItem { id title }
-              }
-            }
+      }
+      fulfillmentOrders(first: 5) {
+        pageInfo { hasNextPage }
+        nodes {
+          id status assignedLocation { location { id } } deliveryMethod { methodType }
+          supportedActions { action }
+          lineItems(first: 100) {
+            pageInfo { hasNextPage }
+            nodes { id remainingQuantity lineItem { id } }
           }
         }
       }
@@ -107,156 +69,22 @@ function logError(stage, details = "") {
 function normalizeStringValue(value) {
   return String(value == null ? "" : value).trim();
 }
-function normalizeLowerString(value) {
-  return normalizeStringValue(value).toLowerCase();
-}
-function normalizeComparableText(value) {
-  return normalizeLowerString(value).replace(/\s+/g, " ");
-}
-function normalizeVariantIdValue(value) {
-  const raw = normalizeStringValue(value);
-  if (!raw) return "";
-  const m = raw.match(/(\d+)(?:\?.*)?$/);
-  return m ? m[1] : raw;
-}
-function attributeMap(customAttributes) {
-  const map = {};
-  for (const attr of customAttributes || []) {
-    if (!attr) continue;
-    const k = normalizeStringValue(attr.key || attr.name);
-    const v = normalizeStringValue(attr.value);
-    if (k) map[k] = v;
-  }
-  return map;
-}
-
-function hasMacronPosMarker(order) {
-  // 1. Order-level customAttributes
-  const orderAttrs = attributeMap(order?.customAttributes);
-  if (normalizeLowerString(orderAttrs._msh_source) === "macron_pos") return "order_attr_msh_source";
-  if (normalizeLowerString(orderAttrs._msh_order_source) === "macron_pos") return "order_attr_msh_order_source";
-  if (normalizeLowerString(orderAttrs._msh_fallback_source) === "macron_pos") return "order_attr_msh_fallback_source";
-
-  // 2. Any line item's customAttributes
-  for (const line of order?.lineItems?.nodes || []) {
-    const lineAttrs = attributeMap(line?.customAttributes);
-    if (normalizeLowerString(lineAttrs._msh_source) === "macron_pos") return "line_attr_msh_source";
-    if (normalizeLowerString(lineAttrs._msh_fallback_source) === "macron_pos") return "line_attr_msh_fallback_source";
-    if (normalizeLowerString(lineAttrs._msh_intent_source) === "macron_pos") return "line_attr_msh_intent_source";
-  }
-
-  // 3. Order note durable token
-  const note = normalizeStringValue(order?.note);
-  if (note.includes("[MSH_POS]") || note.toLowerCase().includes("[msh_pos]")) return "note_token";
-
-  return "";
-}
-
-// Determines fulfilment intent (take_today vs order_in) from the same signals
-// the webhook reads. Returns "take_today" | "order_in" | "" (unknown).
-function readFulfilmentMode(order) {
-  const orderAttrs = attributeMap(order?.customAttributes);
-  const orderMode = normalizeLowerString(
-    orderAttrs._msh_fulfilment_mode || orderAttrs._msh_fulfillment_mode || orderAttrs._msh_intent_fulfilment_mode,
-  );
-  if (orderMode === "take_today" || orderMode === "order_in" || orderMode === "split") return orderMode;
-
-  for (const line of order?.lineItems?.nodes || []) {
-    const lineAttrs = attributeMap(line?.customAttributes);
-    const lineMode = normalizeLowerString(
-      lineAttrs._msh_fulfilment_mode ||
-        lineAttrs._msh_fulfillment_mode ||
-        lineAttrs._msh_intent_fulfilment_mode ||
-        lineAttrs._msh_fallback_fulfilment_mode,
-    );
-    if (lineMode === "take_today" || lineMode === "order_in" || lineMode === "split") return lineMode;
-    const lineTakeNow = normalizeLowerString(lineAttrs._msh_take_now || lineAttrs._msh_intent_take_now);
-    if (lineTakeNow === "true") return "take_today";
-  }
-  return "";
-}
-
-function getOrderLineSummary(order) {
-  return (order?.lineItems?.nodes || [])
-    .map((line) => ({
-      title: normalizeStringValue(line?.title),
-      variantTitle: normalizeStringValue(line?.variantTitle || line?.variant?.title),
-      normalizedVariantId: normalizeVariantIdValue(line?.variant?.id),
-      quantity: Number(line?.quantity || 0),
-    }))
-    .filter((l) => l.title && l.quantity > 0);
-}
-
-// Fingerprint match against pending intents — same shape as webhook.
-async function findMatchingPendingIntent({ shop, order }) {
-  const now = new Date();
-  const earliest = new Date(now.getTime() - PENDING_INTENT_MATCH_WINDOW_MS);
-  const intents = await db.pendingMacronPosIntent.findMany({
-    where: {
-      shop,
-      source: "macron_pos",
-      consumedAt: null,
-      expiresAt: { gt: now },
-      createdAt: { gte: earliest },
-    },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
-  if (intents.length === 0) return null;
-
-  const orderLines = getOrderLineSummary(order);
-  for (const intent of intents) {
-    const cmpIntentTitle = normalizeComparableText(intent.productTitle);
-    const intentQty = Number(intent.quantity || 0);
-    const intentVariantId = normalizeVariantIdValue(intent.normalizedVariantId);
-    for (const line of orderLines) {
-      if (normalizeComparableText(line.title) !== cmpIntentTitle) continue;
-      if (intentQty > 0 && intentQty !== line.quantity) continue;
-      if (intentVariantId && line.normalizedVariantId && line.normalizedVariantId !== intentVariantId) continue;
-      // (Bundle summary fingerprint isn't enforced here — webhook already
-      // tries that path. The reconciler is intentionally a slightly looser
-      // match because by the time we run, we already know an intent exists
-      // and the order looks POS-y.)
-      return intent;
-    }
-  }
-  return null;
-}
-
 async function fulfilOrder(admin, order) {
-  const fulfillmentOrders = (order?.fulfillmentOrders?.nodes || []).filter(
-    (fo) => normalizeStringValue(fo?.status).toUpperCase() === "OPEN",
-  );
-  if (fulfillmentOrders.length === 0) {
-    return { ok: true, reason: "no_open_fulfillment_orders", fulfilledCount: 0 };
+  const responseRead = await admin.graphql(ORDER_DETAIL_QUERY, {variables: {id: order.id}});
+  const detail = await responseRead.json();
+  if (detail.errors?.length || detail.data?.order?.id !== order.id) {
+    return {ok: false, reason: 'order_detail_failed', userErrors: detail.errors || []};
   }
-
-  const fulfillmentOrderLineItems = [];
-  for (const fo of fulfillmentOrders) {
-    const lineItems = (fo?.lineItems?.nodes || [])
-      .filter((li) => Number(li?.remainingQuantity || 0) > 0)
-      .map((li) => ({ id: li.id, quantity: Number(li.remainingQuantity || 0) }));
-    if (lineItems.length === 0) continue;
-    fulfillmentOrderLineItems.push({ fulfillmentOrderId: fo.id, fulfillmentOrderLineItems: lineItems });
-  }
-  if (fulfillmentOrderLineItems.length === 0) {
-    return { ok: true, reason: "no_remaining_quantities", fulfilledCount: 0 };
-  }
-
-  const fulfillment = {
-    lineItemsByFulfillmentOrder: fulfillmentOrderLineItems,
-    notifyCustomer: false,
-  };
-  const response = await admin.graphql(FULFILLMENT_CREATE_MUTATION, {
-    variables: { fulfillment },
-  });
+  const plan = planLegacyReconciliation(detail.data.order);
+  if (!plan.ready) return {ok: true, reason: plan.reason, fulfilledCount: 0};
+  const variables = JSON.parse(plan.mutationInput);
+  const response = await admin.graphql(FULFILLMENT_CREATE_MUTATION, { variables });
   const body = await response.json();
-  const data = body?.data?.fulfillmentCreate;
-  const userErrors = data?.userErrors || [];
-  if (userErrors.length > 0) {
-    return { ok: false, reason: "fulfillmentCreate_userErrors", userErrors };
+  const result = body?.data?.fulfillmentCreate;
+  if (body?.errors?.length || !result?.fulfillment?.id || result.userErrors?.length) {
+    return {ok: false, reason: 'fulfillmentCreate_failed', userErrors: result?.userErrors || body?.errors || []};
   }
-  return { ok: true, reason: "fulfilled", fulfilledCount: fulfillmentOrderLineItems.length };
+  return {ok: true, reason: 'fulfilled', fulfilledCount: variables.fulfillment.lineItemsByFulfillmentOrder.length};
 }
 
 async function reconcileShop(shop) {
@@ -266,12 +94,8 @@ async function reconcileShop(shop) {
     return { shop, ok: false, error: "no_admin_client", processed: 0, fulfilled: 0, skipped: 0, errors: 0 };
   }
 
-  const lookbackHours = Math.max(1, Math.floor(RECONCILE_LOOKBACK_MS / (1000 * 60 * 60)));
-  // Shopify search query language: only fetch orders that are open POS orders
-  // with status:open AND fulfillment_status:unfulfilled, created in the
-  // lookback window. Unfulfilled gift cards are ignored — they're handled
-  // separately and have remainingQuantity=0 after the gift-card webhook runs.
-  const searchQuery = `created_at:>-${lookbackHours}h source_name:pos status:open fulfillment_status:unfulfilled`;
+  const earliest = new Date(Date.now() - RECONCILE_LOOKBACK_MS).toISOString();
+  const searchQuery = `created_at:>='${earliest}' source_name:pos status:open financial_status:paid (fulfillment_status:unfulfilled OR fulfillment_status:partial)`;
   let listResponse;
   try {
     listResponse = await admin.graphql(ORDER_LIST_QUERY, {
@@ -282,7 +106,10 @@ async function reconcileShop(shop) {
     return { shop, ok: false, error: "order_list_failed", processed: 0, fulfilled: 0, skipped: 0, errors: 0 };
   }
   const listBody = await listResponse.json();
-  const orders = listBody?.data?.orders?.nodes || [];
+  const orders = listBody?.data?.orders?.nodes;
+  if (listBody?.errors?.length || !Array.isArray(orders)) {
+    return {shop, ok: false, error: 'order_list_failed', processed: 0, fulfilled: 0, skipped: 0, errors: 1};
+  }
   logInfo("ORDER LIST OK", `shop=${shop} count=${orders.length} query=${searchQuery}`);
 
   let fulfilledCount = 0;
@@ -294,54 +121,18 @@ async function reconcileShop(shop) {
     const orderId = order?.id || "unknown";
     const orderName = order?.name || "unknown";
 
-    if (normalizeStringValue(order?.displayFulfillmentStatus).toUpperCase() === "FULFILLED") {
-      skippedCount += 1;
-      continue;
-    }
-
-    const markerHit = hasMacronPosMarker(order);
-    const intent = markerHit ? null : await findMatchingPendingIntent({ shop, order });
-    const positiveSignal = markerHit || (intent ? `pending_intent:${intent.id}` : "");
-
-    if (!positiveSignal) {
-      skippedCount += 1;
-      details.push({ id: orderId, name: orderName, action: "skipped", reason: "no_positive_signal" });
-      continue;
-    }
-
-    const mode = readFulfilmentMode(order);
-    if (mode && mode !== "take_today" && mode !== "split") {
-      // Explicitly order_in — must NOT auto-fulfil here.
-      skippedCount += 1;
-      details.push({ id: orderId, name: orderName, action: "skipped", reason: `mode_is_${mode}`, signal: positiveSignal });
-      continue;
-    }
-
     try {
       const result = await fulfilOrder(admin, order);
       if (result.ok && result.reason === "fulfilled") {
         fulfilledCount += 1;
-        if (intent) {
-          try {
-            await db.pendingMacronPosIntent.update({
-              where: { id: intent.id },
-              data: { consumedAt: new Date(), matchedOrderId: String(orderId) },
-            });
-          } catch (markErr) {
-            logError(
-              "INTENT MARK CONSUMED FAILED",
-              `intent_id=${intent.id} order_id=${orderId} error=${markErr && markErr.message ? markErr.message : String(markErr)}`,
-            );
-          }
-        }
-        details.push({ id: orderId, name: orderName, action: "fulfilled", signal: positiveSignal });
+        details.push({ id: orderId, name: orderName, action: "fulfilled", signal: "verified_line_instructions" });
         logInfo(
           "ORDER FULFILLED",
-          `shop=${shop} order_id=${orderId} order_name=${orderName} signal=${positiveSignal} mode=${mode || "unknown"}`,
+          `shop=${shop} order_id=${orderId} order_name=${orderName} signal=verified_line_instructions`,
         );
       } else if (result.ok) {
         skippedCount += 1;
-        details.push({ id: orderId, name: orderName, action: "skipped", reason: result.reason, signal: positiveSignal });
+        details.push({ id: orderId, name: orderName, action: "skipped", reason: result.reason, signal: "verified_line_instructions" });
       } else {
         errorCount += 1;
         details.push({
@@ -350,7 +141,7 @@ async function reconcileShop(shop) {
           action: "error",
           reason: result.reason,
           userErrors: result.userErrors || [],
-          signal: positiveSignal,
+          signal: "verified_line_instructions",
         });
         logError(
           "FULFILLMENT FAILED",
@@ -360,7 +151,7 @@ async function reconcileShop(shop) {
     } catch (fulfilErr) {
       errorCount += 1;
       const message = fulfilErr && fulfilErr.message ? fulfilErr.message : String(fulfilErr);
-      details.push({ id: orderId, name: orderName, action: "error", reason: "exception", message, signal: positiveSignal });
+      details.push({ id: orderId, name: orderName, action: "error", reason: "exception", message, signal: "verified_line_instructions" });
       logError("FULFILLMENT EXCEPTION", `shop=${shop} order_id=${orderId} message=${message}`);
     }
   }

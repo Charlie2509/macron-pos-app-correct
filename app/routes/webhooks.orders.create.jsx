@@ -1,3 +1,4 @@
+import { flatBundleHandover, hasHandoverOwner, isLegacySpecialty } from "../../flow/msh-handover/plan.mjs";
 import db from "../db.server";
 import { authenticate, sessionStorage, unauthenticated } from "../shopify.server";
 
@@ -15,15 +16,17 @@ const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
         key
         value
       }
-      displayFulfillmentStatus
-      lineItems(first: 250) {
+      displayFulfillmentStatus displayFinancialStatus cancelledAt edited returnStatus refunds { id }
+      retailLocation { id }
+      lineItems(first: 100) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           name
           title
           variantTitle
           sku
-          quantity
+          quantity currentQuantity requiresShipping isGiftCard lineItemGroup { id }
           variant {
             id
             title
@@ -34,11 +37,13 @@ const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
           }
         }
       }
-      fulfillmentOrders(first: 25) {
+      fulfillmentOrders(first: 5) {
+        pageInfo { hasNextPage }
         nodes {
           id
-          status
-          lineItems(first: 250) {
+          status assignedLocation { location { id } } deliveryMethod { methodType } supportedActions { action }
+          lineItems(first: 100) {
+            pageInfo { hasNextPage }
             nodes {
               id
               remainingQuantity
@@ -58,6 +63,45 @@ const ORDER_WITH_FULFILLMENT_ORDERS_QUERY = `#graphql
     }
   }
 `;
+
+// The gift activation and ownership checks need every sold line even when
+// native routing is too large to hand over automatically in one request.
+const EXTRA_ORDER_LINES_QUERY = `#graphql
+  query MacronAdditionalHandoverLines($orderId: ID!, $after: String!) {
+    order(id: $orderId) {
+      id updatedAt
+      lineItems(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id name title variantTitle sku quantity currentQuantity requiresShipping isGiftCard
+          lineItemGroup { id } variant { id title } customAttributes { key value }
+        }
+      }
+    }
+  }
+`;
+
+async function completeOrderLineRead(admin, order) {
+  let page = order.lineItems;
+  if (page?.pageInfo?.hasNextPage === false && Array.isArray(page.nodes)) return order;
+  if (!order.updatedAt || !Array.isArray(page?.nodes)) return null;
+  const nodes = [...page.nodes];
+  const cursors = new Set();
+  while (page.pageInfo?.hasNextPage === true) {
+    const after = page.pageInfo.endCursor;
+    if (!after || cursors.has(after)) return null;
+    cursors.add(after);
+    const response = await admin.graphql(EXTRA_ORDER_LINES_QUERY, {variables: {orderId: order.id, after}});
+    const body = await response.json();
+    const next = body.data?.order;
+    if (body.errors?.length || next?.id !== order.id || next.updatedAt !== order.updatedAt) return null;
+    page = next.lineItems;
+    if (!Array.isArray(page?.nodes) || page.nodes.length === 0) return null;
+    nodes.push(...page.nodes);
+  }
+  if (page.pageInfo?.hasNextPage !== false || new Set(nodes.map(line => line.id)).size !== nodes.length) return null;
+  return {...order, lineItems: {nodes, pageInfo: page.pageInfo}};
+}
 
 const FULFILLMENT_CREATE_MUTATION = `#graphql
   mutation MacronFulfillmentCreate($fulfillment: FulfillmentInput!) {
@@ -901,87 +945,6 @@ function parseDurableNoteTokenFromSources(...sources) {
   return parseDurableNoteTokenFromText("");
 }
 
-function splitBundleItemValue(rawValue) {
-  const text = String(rawValue == null ? "" : rawValue).trim();
-  if (!text) return { componentTitle: "", variantTitle: "" };
-  if (text.includes(" — ")) {
-    const [componentTitle, ...variantParts] = text.split(" — ");
-    return {
-      componentTitle: String(componentTitle || "").trim(),
-      variantTitle: String(variantParts.join(" — ") || "").trim(),
-    };
-  }
-  if (text.includes(" - ")) {
-    const [componentTitle, ...variantParts] = text.split(" - ");
-    return {
-      componentTitle: String(componentTitle || "").trim(),
-      variantTitle: String(variantParts.join(" - ") || "").trim(),
-    };
-  }
-  return { componentTitle: text, variantTitle: "" };
-}
-
-function parseBundleComponentFulfillment(rawValue, defaultTakeNow) {
-  const normalized = normalizeStringValue(rawValue);
-  if (normalized === "take_now" || normalized === "take now") return true;
-  if (normalized === "order_later" || normalized === "order later") return false;
-  return defaultTakeNow;
-}
-
-function parseBundleComponentsFromAttributes(attributes = {}, mode = "", takeNow = null) {
-  if (!attributes.Bundle) return null;
-  const defaultTakeNow = shouldFulfillNowForMode(mode, takeNow);
-  const componentRows = {};
-  const readabilityOnlyKeys = new Set(["Bundle Summary", "Bundle Take Now", "Bundle Order Later"]);
-
-  for (const [key, value] of Object.entries(attributes)) {
-    if (readabilityOnlyKeys.has(key)) {
-      continue;
-    }
-    const itemMatch = key.match(/^Item\s+(\d+)$/i);
-    if (itemMatch) {
-      const index = Number(itemMatch[1]);
-      componentRows[index] = componentRows[index] || {};
-      componentRows[index].itemRaw = value;
-      continue;
-    }
-    const fulfilmentMatch = key.match(/^Bundle Component\s+(\d+)\s+Fulfi(?:l|ll)ment$/i);
-    if (fulfilmentMatch) {
-      const index = Number(fulfilmentMatch[1]);
-      componentRows[index] = componentRows[index] || {};
-      componentRows[index].fulfilmentRaw = value;
-    }
-  }
-
-  const indexes = Object.keys(componentRows).map((k) => Number(k)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
-  if (indexes.length === 0) return null;
-
-  return indexes.map((index) => {
-    const row = componentRows[index] || {};
-    const { componentTitle, variantTitle } = splitBundleItemValue(row.itemRaw);
-    return {
-      index,
-      componentTitle,
-      variantTitle,
-      fulfillNow: parseBundleComponentFulfillment(row.fulfilmentRaw, defaultTakeNow),
-      itemRaw: row.itemRaw == null ? "" : String(row.itemRaw),
-      fulfilmentRaw: row.fulfilmentRaw == null ? "" : String(row.fulfilmentRaw),
-    };
-  });
-}
-
-function scoreBundleComponentCandidate(orderLineTitle, componentTitle, variantTitle) {
-  const title = normalizeStringValue(orderLineTitle);
-  const component = normalizeStringValue(componentTitle);
-  const variant = normalizeStringValue(variantTitle);
-  if (!title || !component) return 0;
-  if (variant && (title === `${component} - ${variant}` || title === `${component} / ${variant}`)) return 5;
-  if (variant && title.includes(component) && title.includes(variant)) return 4;
-  if (title.startsWith(component)) return 3;
-  if (title.includes(component)) return 2;
-  return 0;
-}
-
 function toOrderGid(payload) {
   if (payload && typeof payload.admin_graphql_api_id === "string" && payload.admin_graphql_api_id.length > 0) {
     return payload.admin_graphql_api_id;
@@ -1241,14 +1204,17 @@ async function tryMatchPendingIntent({ shop, payloadSourceName, order }) {
   }
 
   const matchedIntent = matchedCandidates[0].intent;
-  await db.pendingMacronPosIntent.update({
-    where: { id: matchedIntent.id },
+  const claimed = await db.pendingMacronPosIntent.updateMany({
+    where: { id: matchedIntent.id, consumedAt: null },
     data: {
       consumedAt: now,
       matchedOrderId: String(order?.id || ""),
     },
   });
 
+  if (claimed.count !== 1) {
+    return {attempted: true, reason: "intent_already_claimed", candidates: [], matchedIntent: null};
+  }
   return {
     attempted: true,
     reason: "single_match",
@@ -1443,7 +1409,7 @@ export const action = async ({ request }) => {
     }
 
     const orderLookup = await queryOrderWithRetry(admin, orderGid, { attempts: 8, baseDelayMs: 600 });
-    const order = orderLookup.order;
+    let order = orderLookup.order;
 
     if (!order) {
       logDebugError(
@@ -1461,16 +1427,48 @@ export const action = async ({ request }) => {
       } retries_used=${orderLookup.attemptsUsed} exhausted=${String(orderLookup.exhausted)}`,
     );
 
-    await processGiftCardActivationsForOrder({
-      shop,
-      admin,
-      order,
-    });
+    try {
+      order = await completeOrderLineRead(admin, order);
+    } catch {
+      order = null;
+    }
+    if (!order) {
+      logDebugError("INCOMPLETE ORDER LINES", `order_id=${orderGid}; retrying before processing this order`);
+      return new Response("Retry the order after Shopify has supplied all its lines.", {status: 503});
+    }
+    if (String(topic).toUpperCase().replace("/", "_") === "ORDERS_CREATE") {
+      await processGiftCardActivationsForOrder({shop, admin, order});
+    }
+    if (order.fulfillmentOrders?.pageInfo?.hasNextPage !== false ||
+        order.fulfillmentOrders.nodes.some(fo => fo.lineItems?.pageInfo?.hasNextPage !== false)) {
+      logDebugError("ROUTING REVIEW REQUIRED", `order_id=${order.id} review open kit and garment quantities in Shopify; incomplete routing page`);
+      return new Response("Review outstanding quantities in Shopify. This order has additional fulfilment routes or route lines.");
+    }
+    if (order.sourceName !== 'pos' || order.displayFinancialStatus !== 'PAID' ||
+        !order.retailLocation?.id || order.cancelledAt !== null || order.edited !== false ||
+        order.returnStatus !== 'NO_RETURN' || !Array.isArray(order.refunds) || order.refunds.length ||
+        order.lineItems?.pageInfo?.hasNextPage !== false) {
+      logDebug("MERCHANDISE HANDOVER DEFERRED", `order_id=${order.id}`);
+      return new Response();
+    }
 
     const markerFoundAfterFetch = hasMacronPosMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
     const fallbackMarkerFoundAfterFetch = hasMacronPosFallbackMarkerInOrderLineAttributes(order.lineItems?.nodes || []);
     const lineItemIntentAfterFetch = findMacronLineItemIntent(order.lineItems?.nodes || []);
     const fetchedOrderAttributes = attributeMap(order.customAttributes || []);
+    // Gift card activation above is independent. For merchandise, an owner's
+    // per-line stamp reserves that same line on every delivery, including retries.
+    const rawReservedIds = new Set(payloadLineItems.filter(line => hasHandoverOwner(line?.properties))
+      .map(line => String(line.id)));
+    const reservedIds = new Set((order.lineItems?.nodes || [])
+      .filter(line => hasHandoverOwner(line.customAttributes) || rawReservedIds.has(parseNumericId(line.id)))
+      .map(line => line.id));
+    const pilotCart = rawReservedIds.size > 0 || reservedIds.size > 0 ||
+      '_msh_handover_pilot_seen' in fetchedOrderAttributes || '_msh_handover_pilot_seen' in payloadNoteAttributes;
+    if (pilotCart && (order.lineItems?.pageInfo?.hasNextPage !== false ||
+        order.lineItems.nodes.every(line => reservedIds.has(line.id)))) {
+      return new Response();
+    }
     const fetchedOrderIntent = parseOrderLevelIntentProperties(fetchedOrderAttributes);
     const orderFallbackAfterFetch = parseOrderLevelFallbackMarker(fetchedOrderAttributes);
     const fetchedOrderDurableNote = parseDurableNoteTokenFromSources(
@@ -1538,7 +1536,9 @@ export const action = async ({ request }) => {
     const posOrderFallbackDetected = isPosTakeTodayFallbackDetected(resolvedIntentFallback);
     const giftCardIntentDetected = hasGiftCardIntentForOrder(order?.lineItems?.nodes || [], fetchedOrderAttributes);
 
-    const shouldTryPendingIntent =
+    const singleLegacyRow = !pilotCart && order.lineItems?.pageInfo?.hasNextPage === false &&
+      order.lineItems.nodes.length === 1 && payloadLineItems.length === 1;
+    const shouldTryPendingIntent = singleLegacyRow &&
       !recognizedByLineItemIntent &&
       !recognizedByLineMarker &&
       !recognizedByFallbackMarker &&
@@ -1658,16 +1658,21 @@ export const action = async ({ request }) => {
       !recognizedByOrderFallbackMarker &&
       !recognizedByDurableNoteMarker &&
       recognizedByPendingIntent;
-    const orderLevelFallbackOnly =
+    const orderLevelFallbackOnly = singleLegacyRow &&
       !recognizedByLineItemIntent &&
       !recognizedByLineMarker &&
       !recognizedByFallbackMarker &&
       (recognizedByOrderFallbackMarker || recognizedByDurableNoteMarker);
 
-    const allOrderLines = [];
-    const bundleParents = [];
 
     for (const orderLine of order.lineItems?.nodes || []) {
+      if (reservedIds.has(orderLine.id)) continue;
+      // Pilot orders can include native items. Only explicitly labelled legacy
+      // lines may be considered here; the last cart item or a title cannot claim them.
+      if (pilotCart && (!isLegacySpecialty(orderLine.customAttributes) ||
+          attributeMap(orderLine.customAttributes)._msh_source !== 'macron_pos')) continue;
+      if (orderLine.requiresShipping !== true || orderLine.isGiftCard !== false ||
+          orderLine.quantity !== orderLine.currentQuantity || orderLine.lineItemGroup !== null) continue;
       const rawCustomAttributes = Array.isArray(orderLine?.customAttributes) ? orderLine.customAttributes : [];
       const attributes = attributeMap(orderLine.customAttributes);
       const hasMshSource = normalizeSource(attributes._msh_source) === expectedMarkerValue;
@@ -1736,22 +1741,19 @@ export const action = async ({ request }) => {
       const orderLineNumericId = parseNumericId(orderLineGid);
       const parsedIntentQuantity = parsePositiveIntegerOrNull(lineItemIntent.quantity);
       const lineQuantity = Number(orderLine?.quantity || 0);
-      const parsedBundleComponents = parseBundleComponentsFromAttributes(
-        attributes,
-        intentAuthoritativeMode,
-        intentAuthoritativeTakeNow,
-      );
-      const isBundleParent = Array.isArray(parsedBundleComponents) && parsedBundleComponents.length > 0;
+      const kitHandover = flatBundleHandover(orderLine.customAttributes);
+      const isBundleParent = kitHandover !== null;
       const splitTakeNowRequested =
         intentAuthoritativeSource === "macron_pos" &&
         intentAuthoritativeMode === "split";
       const splitLineTakeNow = intentAuthoritativeTakeNow === true;
       const splitOrderFallbackMode = resolvedIntentFallback.mode;
       const splitOrderFallbackTakeNow = resolvedIntentFallback.takeNow;
-      const splitIntentQuantityValid = splitTakeNowRequested && parsedIntentQuantity !== null;
+      const splitIntentQuantityValid = splitTakeNowRequested && parsedIntentQuantity !== null && parsedIntentQuantity === lineQuantity;
       const splitSelectedQuantity =
         splitIntentQuantityValid && lineQuantity > 0 ? Math.min(parsedIntentQuantity, lineQuantity) : 0;
-      const splitEligible = splitTakeNowRequested && splitIntentQuantityValid && splitSelectedQuantity > 0;
+      const splitEligible = splitTakeNowRequested && splitLineTakeNow && !feeOrSystem && !giftCardLikeLine &&
+        splitIntentQuantityValid && splitSelectedQuantity > 0;
       const splitReason = !splitTakeNowRequested
         ? "not_split_mode"
         : !splitIntentQuantityValid
@@ -1778,15 +1780,20 @@ export const action = async ({ request }) => {
         );
       }
       const fallbackEligibleProductLine =
-        posOrderFallbackDetected &&
+        orderLevelFallbackOnly && posOrderFallbackDetected &&
         !feeOrSystem &&
         !giftCardLikeLine &&
         !isBundleParent &&
         intentAuthoritativeMode !== "split" &&
         intentAuthoritativeMode !== "order_in";
-      const recoveredEligibleForSelection = splitTakeNowRequested ? splitEligible : recoveredEligible;
-      const effectiveEligible =
-        recoveredEligibleForSelection || fallbackEligibleProductLine;
+      // MSH flat kits are sold as one Shopify line. Its native quantity
+      // cannot represent handing over just some of its component garments.
+      const parentVariant = normalizeVariantIdValue(orderLine.variant?.id);
+      const wholeKitTaken = !isBundleParent || (kitHandover === 'take' && parsedIntentQuantity === lineQuantity &&
+        parentVariant && lineItemIntent.variantId === parentVariant);
+      const recoveredEligibleForSelection = wholeKitTaken && !giftCardLikeLine && !feeOrSystem &&
+        (splitTakeNowRequested ? (isBundleParent ? splitIntentQuantityValid : splitEligible) : recoveredEligible);
+      const effectiveEligible = recoveredEligibleForSelection || fallbackEligibleProductLine;
       const selectionReason = effectiveEligible
         ? recoveredEligibleForSelection
           ? `line_eligible_${intentRecoverySource}`
@@ -1834,7 +1841,7 @@ export const action = async ({ request }) => {
         feeOrSystemReason,
         giftCardLikeLine,
         isBundleParent,
-        bundleComponents: parsedBundleComponents || [],
+        kitHandover,
         eligible: effectiveEligible,
         selectedQuantity: splitTakeNowRequested ? splitSelectedQuantity : lineQuantity,
         reason: selectionReason,
@@ -1867,30 +1874,6 @@ export const action = async ({ request }) => {
         },
       });
 
-      allOrderLines.push({
-        orderLineGid,
-        orderLineNumericId,
-        title: orderLine?.title || "",
-        sku: orderLine?.sku || "",
-        quantity: Number(orderLine?.quantity || 0),
-        source: effectiveSource,
-        mode: effectiveMode,
-        takeNow: effectiveTakeNow,
-        feeOrSystem,
-        giftCardLikeLine,
-        isBundleParent,
-        attributes,
-      });
-
-      if (isBundleParent) {
-        bundleParents.push({
-          orderLineGid,
-          orderLineNumericId,
-          title: orderLine?.title || "",
-          parsedBundleComponents,
-        });
-      }
-
       if (effectiveEligible) {
         if (orderLineGid) eligibleOrderLineGids.add(orderLineGid);
         if (orderLineNumericId) eligibleOrderLineNumericIds.add(orderLineNumericId);
@@ -1913,98 +1896,8 @@ export const action = async ({ request }) => {
       "ELIGIBLE ORDER LINE COUNT",
       `order_id=${order.id} eligible_count=${eligibleOrderLines.length} take_today_eligible_count=${takeTodayEligibleCount} split_eligible_count=${splitEligibleCount} order_in_count=${orderInCount} fee_system_count=${feeSystemCount}`,
     );
-    if (bundleParents.length > 0) {
-      const unmatchedBundleComponents = [];
-      const alreadyMatchedLineIds = new Set([...eligibleOrderLineGids]);
-      const candidateLines = allOrderLines.filter((line) => !line.feeOrSystem && !line.isBundleParent);
-      const bundleMappings = [];
-
-      for (const parent of bundleParents) {
-        for (const component of parent.parsedBundleComponents || []) {
-          if (!component.fulfillNow) {
-            bundleMappings.push({
-              parentLineId: parent.orderLineGid,
-              parentTitle: parent.title,
-              componentIndex: component.index,
-              componentTitle: component.componentTitle,
-              variantTitle: component.variantTitle,
-              fulfillNow: false,
-              matchedOrderLineId: "",
-              matchScore: 0,
-              skipped: "order_later",
-            });
-            continue;
-          }
-          let bestLine = null;
-          let bestScore = 0;
-          for (const candidate of candidateLines) {
-            if (!candidate.orderLineGid || alreadyMatchedLineIds.has(candidate.orderLineGid)) continue;
-            const score = scoreBundleComponentCandidate(candidate.title, component.componentTitle, component.variantTitle);
-            if (score > bestScore) {
-              bestLine = candidate;
-              bestScore = score;
-            }
-          }
-          if (bestLine && bestScore > 0) {
-            eligibleOrderLineGids.add(bestLine.orderLineGid);
-            if (bestLine.orderLineNumericId) eligibleOrderLineNumericIds.add(bestLine.orderLineNumericId);
-            eligibleOrderLines.push({
-              orderLineGid: bestLine.orderLineGid,
-              orderLineNumericId: bestLine.orderLineNumericId,
-              title: bestLine.title,
-              quantity: bestLine.quantity,
-              mode: "bundle_component",
-              takeNow: true,
-            });
-            alreadyMatchedLineIds.add(bestLine.orderLineGid);
-            bundleMappings.push({
-              parentLineId: parent.orderLineGid,
-              parentTitle: parent.title,
-              componentIndex: component.index,
-              componentTitle: component.componentTitle,
-              variantTitle: component.variantTitle,
-              fulfillNow: true,
-              matchedOrderLineId: bestLine.orderLineGid,
-              matchedOrderLineTitle: bestLine.title,
-              matchScore: bestScore,
-            });
-          } else {
-            unmatchedBundleComponents.push({
-              parentLineId: parent.orderLineGid,
-              parentTitle: parent.title,
-              componentIndex: component.index,
-              componentTitle: component.componentTitle,
-              variantTitle: component.variantTitle,
-              fulfillNow: true,
-            });
-            bundleMappings.push({
-              parentLineId: parent.orderLineGid,
-              parentTitle: parent.title,
-              componentIndex: component.index,
-              componentTitle: component.componentTitle,
-              variantTitle: component.variantTitle,
-              fulfillNow: true,
-              matchedOrderLineId: "",
-              matchScore: 0,
-            });
-          }
-        }
-      }
-
-      logDebug("BUNDLE COMPONENT MAPPING JSON", `order_id=${order.id} data=${JSON.stringify(bundleMappings)}`);
-      if (unmatchedBundleComponents.length > 0) {
-        logDebug(
-          "BUNDLE COMPONENTS UNMATCHED",
-          `order_id=${order.id} unmatched_count=${unmatchedBundleComponents.length} bypassed_for_parent_line_fulfillment=true data=${JSON.stringify(
-            unmatchedBundleComponents,
-          )}`,
-        );
-      }
-      logDebug(
-        "BUNDLE COMPONENT MATCHING STATUS",
-        `order_id=${order.id} candidate_child_lines=${candidateLines.length} parent_fallback_mode=enabled`,
-      );
-    }
+    // Flat bundle properties describe the printed kit. A similarly named
+    // standalone order line is a separate sale, never an implicit component.
     logDebug("ORDER LINE DECISIONS JSON", `order_id=${order.id} data=${JSON.stringify(lineDecisions)}`);
     logDebug("SIMPLIFIED ORDER LINES JSON", `order_id=${order.id} data=${JSON.stringify(simplifiedOrderLines)}`);
     logDebug(
@@ -2027,6 +1920,10 @@ export const action = async ({ request }) => {
     let selectedFoLineCount = 0;
 
     for (const fulfillmentOrder of foNodes) {
+      if (fulfillmentOrder.assignedLocation?.location?.id !== order.retailLocation.id ||
+          fulfillmentOrder.deliveryMethod?.methodType !== 'RETAIL' ||
+          !['OPEN','IN_PROGRESS'].includes(fulfillmentOrder.status) ||
+          !fulfillmentOrder.supportedActions?.some(a => a.action === 'CREATE_FULFILLMENT')) continue;
       const selectedLineItems = [];
       const foLineDecisions = [];
       const simplifiedFoLines = [];
@@ -2045,7 +1942,8 @@ export const action = async ({ request }) => {
         const matchedByNumericId = Boolean(
           !matchedByGid && orderLineNumericId && eligibleOrderLineNumericIds.has(orderLineNumericId),
         );
-        const matched = matchedByGid || matchedByNumericId;
+        const matched = !reservedIds.has(orderLineGid) && !rawReservedIds.has(orderLineNumericId) &&
+          !hasHandoverOwner(linkedOrderLine.customAttributes) && (matchedByGid || matchedByNumericId);
         const validFoLineId = foLineId.startsWith("gid://shopify/FulfillmentOrderLineItem/");
         const selectedQuantityOverride = matchedByGid
           ? selectedLineQuantityOverridesByOrderLineGid.get(orderLineGid)

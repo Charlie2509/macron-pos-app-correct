@@ -32,3 +32,14 @@ target = "pos.home.tile.render"
 [[extensions.targeting]]
 module = "./src/GiftCardModal.jsx"
 target = "pos.home.modal.render"
+
+[[extensions]]
+type = "ui_extension"
+name = "MSH kit handover"
+handle = "msh-kit-handover"
+uid = "9a6788d8-6110-45b7-88df-8cb91baac665"
+description = "Shows individual kit components and records collections on a paid MSH order."
+
+[[extensions.targeting]]
+module = "./src/KitHandover.jsx"
+target = "admin.order-details.block.render"

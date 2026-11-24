@@ -1,4 +1,8 @@
-# Shopify App Template - React Router
+# Macron POS
+
+The [MSH paid till handover guide](flow/msh-handover/README.md) covers the pilot setup, checks on two iPads, and switching the pilot off. The sections below describe the Shopify app framework.
+
+## Shopify App Template - React Router
 
 This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using [React Router](https://reactrouter.com/). It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix) and converted to React Router.
 

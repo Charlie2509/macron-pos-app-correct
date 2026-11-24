@@ -1,6 +1,16 @@
 import "@shopify/ui-extensions/preact";
+import {isNativeHandoverBundle, isNativeHandoverProduct} from "./flow-pilot.js";
+import {verifiedKitHandover} from "../../../flow/msh-handover/plan.mjs";
+import {useNativeHandoverSetting} from "./handover-setting.js";
 import {render} from 'preact';
-import {useEffect, useState} from 'preact/hooks';
+import {CatalogueGrid, OptionButtons, RangeSearch, catalogueLabel, matchesSaleSearch} from './SaleControls';
+import {useEffect, useRef, useState} from 'preact/hooks';
+import {allVariantEdges, createRangeLoader, nextCatalogueCursor, readCatalogue} from './catalogue.js';
+import {buildBundleComponents, prepareBundleComponents} from './bundle-components.js';
+import {confirmCartState, hasProperties, writeOrderMarkers} from './cart-properties.js';
+import {feeProductHandle, feeProductTitle, findFeeVariant} from './fee-variant.js';
+
+const pendingCartAdds = new WeakSet();
 
 // File with live data debug instrumentation, bundle plumbing, personalisation meta debug, and navigation/cart flows.
 
@@ -35,254 +45,6 @@ function safeReadShopDomain() {
   return '';
 }
 
-// ---------------- Mock helpers ----------------
-function mockVariants(prefix) {
-  return [
-    {id: prefix + '-s', title: 'Small'},
-    {id: prefix + '-m', title: 'Medium'},
-    {id: prefix + '-l', title: 'Large'},
-  ];
-}
-
-function mockBundleComponents() {
-  return [
-    {id: 'comp-tee', handle: 'comp-tee', title: 'Training Tee', variants: mockVariants('comp-tee')},
-    {id: 'comp-shorts', handle: 'comp-shorts', title: 'Training Shorts', variants: mockVariants('comp-shorts')},
-    {id: 'comp-socks', handle: 'comp-socks', title: 'Socks', variants: mockVariants('comp-socks')},
-  ];
-}
-
-function mockMetaNone() {
-  return {
-    enablePersonalisation: false,
-    personalisationLabel: '',
-    personalisationFeeRaw: '',
-    personalisationMaxCharsRaw: '',
-    personalisationRequired: false,
-    extraField1Enabled: false,
-    extraField1Label: '',
-    extraField1Required: false,
-    extraField2Enabled: false,
-    extraField2Label: '',
-    extraField2Required: false,
-    enableFileUpload: false,
-    fileUploadLabel: '',
-    fileUploadHelpText: '',
-    fileUploadRequired: false,
-  };
-}
-
-function mockMetaPrimary(label, fee, maxChars, required) {
-  return {
-    enablePersonalisation: true,
-    personalisationLabel: label,
-    personalisationFeeRaw: fee,
-    personalisationMaxCharsRaw: maxChars,
-    personalisationRequired: required,
-    extraField1Enabled: false,
-    extraField1Label: '',
-    extraField1Required: false,
-    extraField2Enabled: false,
-    extraField2Label: '',
-    extraField2Required: false,
-    enableFileUpload: false,
-    fileUploadLabel: '',
-    fileUploadHelpText: '',
-    fileUploadRequired: false,
-  };
-}
-
-function mockMetaExtra1(label) {
-  return {
-    enablePersonalisation: true,
-    personalisationLabel: label,
-    personalisationFeeRaw: '',
-    personalisationMaxCharsRaw: '',
-    personalisationRequired: true,
-    extraField1Enabled: true,
-    extraField1Label: 'Please Enter The Players Name And Age Group',
-    extraField1Required: true,
-    extraField2Enabled: false,
-    extraField2Label: '',
-    extraField2Required: false,
-    enableFileUpload: false,
-    fileUploadLabel: '',
-    fileUploadHelpText: '',
-    fileUploadRequired: false,
-  };
-}
-
-function mockMetaFileUpload(label, help) {
-  return {
-    enablePersonalisation: true,
-    personalisationLabel: '',
-    personalisationFeeRaw: '',
-    personalisationMaxCharsRaw: '',
-    personalisationRequired: false,
-    extraField1Enabled: false,
-    extraField1Label: '',
-    extraField1Required: false,
-    extraField2Enabled: false,
-    extraField2Label: '',
-    extraField2Required: false,
-    enableFileUpload: true,
-    fileUploadLabel: label,
-    fileUploadHelpText: help,
-    fileUploadRequired: true,
-  };
-}
-
-function mockBundleMeta(components) {
-  return {
-    isBundle: true,
-    componentHandles: ['comp-tee', 'comp-shorts', 'comp-socks'],
-    componentProducts: components,
-  };
-}
-
-function mockBundleMetaEmpty() {
-  return {
-    isBundle: false,
-    componentHandles: [],
-    componentProducts: [],
-  };
-}
-
-var MOCK_CLUBS = [
-  {
-    name: 'All Stars Academy',
-    type: 'subsections',
-    subsections: [
-      {
-        label: 'Coaches',
-        products: [
-          {
-            id: 'mock-coach-polo',
-            title: 'Staff Polo',
-            variants: mockVariants('mock-coach-polo'),
-            personalisationMeta: mockMetaNone(),
-            bundleMeta: mockBundleMetaEmpty(),
-          },
-          {
-            id: 'mock-coach-tee',
-            title: 'Training Tee',
-            variants: mockVariants('mock-coach-tee'),
-            personalisationMeta: mockMetaPrimary('Printed Initials', '2.50', '3', false),
-            bundleMeta: mockBundleMetaEmpty(),
-          },
-        ],
-      },
-      {
-        label: 'Players',
-        products: [
-          {
-            id: 'mock-player-polo',
-            title: 'Staff Polo',
-            variants: mockVariants('mock-player-polo'),
-            personalisationMeta: mockMetaPrimary('Printed Number To Back Of Shirt', '', '', true),
-            bundleMeta: mockBundleMetaEmpty(),
-          },
-          {
-            id: 'mock-player-tee',
-            title: 'Training Tee',
-            variants: mockVariants('mock-player-tee'),
-            personalisationMeta: mockMetaExtra1('Name & Number'),
-            bundleMeta: mockBundleMetaEmpty(),
-          },
-        ],
-      },
-    ],
-    products: [],
-  },
-  {
-    name: 'Bexhill United',
-    type: 'products',
-    subsections: [],
-    products: [
-      {
-        id: 'mock-bexhill-home',
-        title: 'Home Shirt',
-        variants: mockVariants('mock-bexhill-home'),
-        personalisationMeta: mockMetaNone(),
-        bundleMeta: mockBundleMetaEmpty(),
-      },
-      {
-        id: 'mock-bexhill-train',
-        title: 'Training Top',
-        variants: mockVariants('mock-bexhill-train'),
-        personalisationMeta: mockMetaPrimary('Printed Initials', '2.50 GBP', '3', false),
-        bundleMeta: mockBundleMetaEmpty(),
-      },
-    ],
-  },
-  {
-    name: 'Eastbourne United AFC',
-    type: 'subsections',
-    subsections: [
-      {
-        label: 'Juniors',
-        products: [
-          {
-            id: 'mock-eua-jr-match',
-            title: 'Match Shirt',
-            variants: mockVariants('mock-eua-jr-match'),
-            personalisationMeta: mockMetaFileUpload('Please Upload Your Sponsor Logo Here', 'Logo file (not wired in POS V1)'),
-            bundleMeta: mockBundleMetaEmpty(),
-          },
-          {
-            id: 'mock-eua-jr-rain',
-            title: 'Rain Jacket',
-            variants: mockVariants('mock-eua-jr-rain'),
-            personalisationMeta: mockMetaNone(),
-            bundleMeta: mockBundleMetaEmpty(),
-          },
-        ],
-      },
-      {
-        label: 'Seniors',
-        products: [
-          {
-            id: 'mock-eua-sr-match',
-            title: 'Match Shirt',
-            variants: mockVariants('mock-eua-sr-match'),
-            personalisationMeta: mockMetaPrimary('Printed Number To Back Of Shirt', '', '', true),
-            bundleMeta: mockBundleMetaEmpty(),
-          },
-          {
-            id: 'mock-eua-sr-rain',
-            title: 'Rain Jacket',
-            variants: mockVariants('mock-eua-sr-rain'),
-            personalisationMeta: mockMetaPrimary('Printed Initials', '2.50', '3', false),
-            bundleMeta: mockBundleMeta(mockBundleComponents()),
-          },
-        ],
-      },
-    ],
-    products: [],
-  },
-  {
-    name: 'Hastings United',
-    type: 'products',
-    subsections: [],
-    products: [
-      {
-        id: 'mock-hastings-match',
-        title: 'Match Shirt',
-        variants: mockVariants('mock-hastings-match'),
-        personalisationMeta: mockMetaNone(),
-        bundleMeta: mockBundleMetaEmpty(),
-      },
-      {
-        id: 'mock-hastings-rain',
-        title: 'Rain Jacket',
-        variants: mockVariants('mock-hastings-rain'),
-        personalisationMeta: mockMetaFileUpload('Please Upload Your Sponsor Logo Here', 'Logo file (not wired in POS V1)'),
-        bundleMeta: mockBundleMetaEmpty(),
-      },
-    ],
-  },
-];
-// ---------------- Normalisation helpers ----------------
 function toStr(value) {
   if (value === null || value === undefined) {
     return '';
@@ -483,6 +245,7 @@ function buildMshOrderFallbackProperties(rawProperties, bundleAttachConfig) {
   var mode = toStr(properties._msh_fulfilment_mode || properties._msh_fulfillment_mode);
   var takeNow = toStr(properties._msh_take_now);
   var orderFallback = {};
+  if (properties._msh_handover_owner === 'flow_v1') orderFallback._msh_handover_pilot_seen = 'flow_v1';
 
   if (source !== '') {
     orderFallback._msh_order_source = source;
@@ -580,19 +343,11 @@ function buildPendingIntentBundleSummary(rawProperties, bundleAttachConfig) {
   return summary;
 }
 
-function bundleComponentLineText(index, componentTitle, variantTitle) {
-  return String(index) + '. ' + toStr(componentTitle) + ' — ' + toStr(variantTitle);
-}
-
 function buildBundleGroupedSummaryValue(lines) {
   if (!lines || lines.length === 0) {
     return '';
   }
   return '- ' + lines.join('\n- ');
-}
-
-function buildBundleComponentSummaryLine(componentTitle, variantTitle) {
-  return toStr(componentTitle) + ' — ' + toStr(variantTitle);
 }
 
 function buildBundlePersonalisationSummaryValue(personalisationProps) {
@@ -612,44 +367,16 @@ function buildBundlePersonalisationSummaryValue(personalisationProps) {
 }
 
 function buildBundleReadableProperties(bundleTitle, components, selections, fulfilmentByComponent, fulfilmentMode, personalisationProps) {
-  var props = {};
-  props.Bundle = toStr(bundleTitle);
-  var mode = fulfilmentMode === 'order_in' || fulfilmentMode === 'split' ? fulfilmentMode : 'take_today';
-  var takeNowSummaryLines = [];
-  var orderLaterSummaryLines = [];
-  for (var i = 0; i < components.length; i += 1) {
-    var item = components[i];
-    var selected = selections[item.key];
-    if (!selected) {
-      continue;
-    }
-    props['Item ' + String(i + 1)] = item.title + ' — ' + selected.title;
-    var componentFulfilment = 'take_now';
-    if (mode === 'order_in') {
-      componentFulfilment = 'order_later';
-    } else if (mode === 'split') {
-      var explicit = fulfilmentByComponent[item.key];
-      componentFulfilment = explicit === 'order_later' ? 'order_later' : 'take_now';
-    }
-    props['Bundle Component ' + String(i + 1) + ' Fulfilment'] = componentFulfilment;
-    var summaryLine = buildBundleComponentSummaryLine(item.title, selected.title);
-    if (componentFulfilment === 'order_later') {
-      orderLaterSummaryLines.push(summaryLine);
-    } else {
-      takeNowSummaryLines.push(summaryLine);
-    }
-  }
-  if (takeNowSummaryLines.length > 0) {
-    props['Bundle Take Now Summary'] = buildBundleGroupedSummaryValue(takeNowSummaryLines);
-  }
-  if (orderLaterSummaryLines.length > 0) {
-    props['Bundle Order Later Summary'] = buildBundleGroupedSummaryValue(orderLaterSummaryLines);
-  }
+  const props = buildBundleComponents(bundleTitle, components, selections, fulfilmentByComponent, fulfilmentMode);
   if (personalisationProps && typeof personalisationProps === 'object') {
     var personalisationKeys = Object.keys(personalisationProps);
     for (var p = 0; p < personalisationKeys.length; p += 1) {
       var personalisationKey = personalisationKeys[p];
-      props[personalisationKey] = personalisationProps[personalisationKey];
+      // A shop-defined personalisation label must never overwrite a kit item.
+      const label = toStr(personalisationKey);
+      const reserved = /^(?:_msh_|Item \d+$|Bundle(?: |$)|Fee For Product$|Linked (?:Fee|Product) Variant Id$)/i.test(label);
+      const key = reserved ? 'Personalisation · ' + label : label;
+      props[key] = personalisationProps[personalisationKey];
     }
     if (personalisationKeys.length > 0) {
       var summaryParts = [];
@@ -672,7 +399,7 @@ function parseFeeDisplay(raw) {
   if (text === '') {
     return '';
   }
-  var cleaned = text.replace(/[^0-9.\-]/g, '');
+  var cleaned = text.replace(/[^0-9.-]/g, '');
   var fee = parseFloat(cleaned);
   if (isNaN(fee) || fee <= 0) {
     return '';
@@ -686,7 +413,7 @@ function parseFeeAmount(raw) {
   }
   if (typeof raw === 'object') {
     if (raw.amount !== undefined) {
-      var numObj = parseFloat(toStr(raw.amount).replace(/[^0-9.\-]/g, ''));
+      var numObj = parseFloat(toStr(raw.amount).replace(/[^0-9.-]/g, ''));
       if (!isNaN(numObj) && numObj > 0) {
         return numObj;
       }
@@ -697,7 +424,7 @@ function parseFeeAmount(raw) {
   if (text === '') {
     return null;
   }
-  var cleaned = text.replace(/[^0-9.\-]/g, '');
+  var cleaned = text.replace(/[^0-9.-]/g, '');
   var fee = parseFloat(cleaned);
   if (isNaN(fee) || fee <= 0) {
     return null;
@@ -937,40 +664,11 @@ function mapVariants(variantEdges) {
             }
           }
         }
-        list.push({id: edge.node.id, title: edge.node.title, selectedOptions: selectedOptions, optionMap: optionMap});
+        list.push({id: edge.node.id, title: edge.node.title, sku: edge.node.sku, requiresShipping: edge.node.inventoryItem?.requiresShipping, selectedOptions: selectedOptions, optionMap: optionMap});
       }
     }
   }
   return list;
-}
-
-function mapProducts(productEdges) {
-  var products = [];
-  if (!productEdges || !Array.isArray(productEdges)) {
-    return products;
-  }
-  for (var i = 0; i < productEdges.length; i += 1) {
-    var edge = productEdges[i];
-    if (!edge || !edge.node) {
-      continue;
-    }
-    var node = edge.node;
-    var productImage = null;
-    if (node.featuredImage && node.featuredImage.url) {
-      productImage = node.featuredImage.url;
-    } else if (node.images && node.images.edges && node.images.edges[0] && node.images.edges[0].node && node.images.edges[0].node.url) {
-      productImage = node.images.edges[0].node.url;
-    }
-    products.push({
-      id: node.id,
-      title: node.title,
-      imageUrl: productImage,
-      variants: mapVariants(node.variants ? node.variants.edges : []),
-      personalisationMeta: mapPersonalisationMeta(node),
-      bundleMeta: mapBundleMeta(node.bundleComponents),
-    });
-  }
-  return products;
 }
 
 function mapCollections(collectionNodes) {
@@ -1108,7 +806,7 @@ async function fetchLiveClubs() {
           id
           title
           image {
-            url
+            url(transform: {maxWidth: 240, maxHeight: 240})
           }
           productsCount {
             count
@@ -1119,70 +817,20 @@ async function fetchLiveClubs() {
     }
   }`;
 
-  var allCollections = [];
-  var cursor = null;
-  var hasNextPage = true;
-  var pageSafetyLimit = 20;
-  var pagesFetched = 0;
-  var errors = [];
-
-  while (hasNextPage && pagesFetched < pageSafetyLimit) {
+  const allCollections = [];
+  const seen = new Set();
+  let cursor = null;
+  let pagesFetched = 0;
+  do {
+    const data = await readCatalogue(query, {cursor});
+    const page = data.collections;
+    if (!Array.isArray(page?.edges)) throw new Error('Could not read the club directory.');
+    for (const edge of page.edges) {
+      if (edge.node) allCollections.push(edge.node);
+    }
     pagesFetched += 1;
-    var response;
-    try {
-      response = await fetch('shopify:admin/api/graphql.json', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: query,
-          variables: {cursor: cursor},
-        }),
-      });
-    } catch (err) {
-      throw new Error('Admin API fetch failed: ' + (err && err.message ? err.message : String(err)));
-    }
-
-    if (!response || !response.ok) {
-      var statusCode = response && response.status ? response.status : 'unknown';
-      var statusText = response && response.statusText ? response.statusText : 'unknown';
-      var bodyText = '';
-      try {
-        bodyText = await response.text();
-      } catch (e) {
-        bodyText = '';
-      }
-      throw new Error('Admin API HTTP error: ' + statusCode + ' ' + statusText + (bodyText ? ' ' + bodyText : ''));
-    }
-
-    var json;
-    try {
-      json = await response.json();
-    } catch (err) {
-      throw new Error('Failed to parse GraphQL JSON: ' + (err && err.message ? err.message : String(err)));
-    }
-
-    if (json && json.errors && Array.isArray(json.errors) && json.errors.length > 0) {
-      errors = errors.concat(json.errors);
-    }
-
-    if (!json || !json.data || !json.data.collections) {
-      errors.push({message: 'Missing data in GraphQL response'});
-      break;
-    }
-
-    var edges = json.data.collections.edges || [];
-    for (var i = 0; i < edges.length; i += 1) {
-      if (edges[i] && edges[i].node) {
-        allCollections.push(edges[i].node);
-      }
-    }
-
-    var pageInfo = json.data.collections.pageInfo;
-    hasNextPage = pageInfo && pageInfo.hasNextPage === true;
-    cursor = hasNextPage ? pageInfo.endCursor : null;
-  }
+    cursor = nextCatalogueCursor(page.pageInfo, seen);
+  } while (cursor);
 
   var mapped = mapCollections(allCollections);
   return {
@@ -1191,7 +839,6 @@ async function fetchLiveClubs() {
     directClubsCount: mapped.directClubsCount,
     subsectionClubsCount: mapped.subsectionClubsCount,
     orphanChildIgnored: mapped.orphanChildIgnored,
-    errors: errors,
     rawCollectionsCount: allCollections.length,
     pagesFetched: pagesFetched,
   };
@@ -1211,21 +858,17 @@ async function fetchProductsForCollection(collectionId) {
           node {
             id
             title
-            featuredImage {
-              url
-            }
-            images(first: 1) {
-              edges {
-                node {
-                  url
-                }
-              }
+            isGiftCard
+            featuredMedia {
+              preview { image { url(transform: {maxWidth: 240, maxHeight: 240}) } }
             }
             variants(first: 20) {
+              pageInfo { hasNextPage endCursor }
               edges {
                 node {
                   id
                   title
+                  sku inventoryItem { requiresShipping }
                   selectedOptions {
                     name
                     value
@@ -1256,64 +899,28 @@ async function fetchProductsForCollection(collectionId) {
     }
   }`;
 
-  var products = [];
-  var cursor = null;
-  var hasNextPage = true;
-  var pageSafetyLimit = 10;
-  var pagesFetched = 0;
-
-  while (hasNextPage && pagesFetched < pageSafetyLimit) {
-    pagesFetched += 1;
-    var response = await fetch('shopify:admin/api/graphql.json', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query: query,
-        variables: {id: collectionId, cursor: cursor},
-      }),
-    });
-    if (!response || !response.ok) {
-      var statusCode = response && response.status ? response.status : 'unknown';
-      var statusText = response && response.statusText ? response.statusText : 'unknown';
-      var bodyText = '';
-      try {
-        bodyText = await response.text();
-      } catch (e) {
-        bodyText = '';
-      }
-      throw new Error('Product fetch error: ' + statusCode + ' ' + statusText + (bodyText ? ' ' + bodyText : ''));
+  const products = [];
+  const seen = new Set();
+  let cursor = null;
+  do {
+    const data = await readCatalogue(query, {id: collectionId, cursor});
+    const page = data.collection?.products;
+    if (!Array.isArray(page?.edges)) throw new Error('Could not read this range.');
+    for (const edge of page.edges) {
+      const node = edge.node;
+      if (!node) continue;
+      products.push({
+        id: node.id,
+        title: node.title,
+        isGiftCard: node.isGiftCard,
+        imageUrl: node.featuredMedia?.preview?.image?.url || '',
+        variants: mapVariants(await allVariantEdges(node.id, node.variants)),
+        personalisationMeta: mapPersonalisationMeta(node),
+        bundleMeta: mapBundleMeta(node.bundleComponents),
+      });
     }
-    var json = await response.json();
-    if (!json || !json.data || !json.data.collection || !json.data.collection.products) {
-      break;
-    }
-    var edges = json.data.collection.products.edges || [];
-    for (var i = 0; i < edges.length; i += 1) {
-      if (edges[i] && edges[i].node) {
-        products.push({
-          id: edges[i].node.id,
-          title: edges[i].node.title,
-          imageUrl: edges[i].node.featuredImage && edges[i].node.featuredImage.url
-            ? edges[i].node.featuredImage.url
-            : (edges[i].node.images &&
-              edges[i].node.images.edges &&
-              edges[i].node.images.edges[0] &&
-              edges[i].node.images.edges[0].node &&
-              edges[i].node.images.edges[0].node.url
-              ? edges[i].node.images.edges[0].node.url
-              : ''),
-          variants: mapVariants(edges[i].node.variants ? edges[i].node.variants.edges : []),
-          personalisationMeta: mapPersonalisationMeta(edges[i].node),
-          bundleMeta: mapBundleMeta(edges[i].node.bundleComponents),
-        });
-      }
-    }
-    var pageInfo = json.data.collection.products.pageInfo;
-    hasNextPage = pageInfo && pageInfo.hasNextPage === true;
-    cursor = hasNextPage ? pageInfo.endCursor : null;
-  }
+    cursor = nextCatalogueCursor(page.pageInfo, seen);
+  } while (cursor);
 
   return products;
 }
@@ -1345,8 +952,15 @@ async function fetchBundleComponentsByReferences(componentRefs) {
     return result;
   }
 
-  var byHandleQuery = 'query BundleComponentByHandle($handle: String!) { productByHandle(handle: $handle) { id title handle variants(first: 50) { edges { node { id title } } } } }';
-  var byGidQuery = 'query BundleComponentByGid($id: ID!) { node(id: $id) { ... on Product { id title handle variants(first: 50) { edges { node { id title } } } } } }';
+  const componentQuery = `query BundleComponent($identifier: ProductIdentifierInput!) {
+    productByIdentifier(identifier: $identifier) {
+      id title handle
+      variants(first: 50) {
+        edges { node { id title selectedOptions { name value } } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }`;
   for (var h = 0; h < normalizedRefs.length; h += 1) {
     var normalized = normalizedRefs[h];
     var ref = normalized.raw;
@@ -1359,37 +973,8 @@ async function fetchBundleComponentsByReferences(componentRefs) {
       continue;
     }
     try {
-      var query = normalized.type === 'product_gid' ? byGidQuery : byHandleQuery;
-      var variables = normalized.type === 'product_gid' ? {id: normalized.value} : {handle: normalized.value};
-      var response = await fetch('shopify:admin/api/graphql.json', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: query,
-          variables: variables,
-        }),
-      });
-
-      if (!response || !response.ok) {
-        result.unresolvedRefs.push(ref);
-        result.errors.push('Bundle component fetch HTTP error for ref "' + ref + '"');
-        continue;
-      }
-
-      var json = await response.json();
-      if (json && json.errors && Array.isArray(json.errors) && json.errors.length > 0) {
-        result.unresolvedRefs.push(ref);
-        result.errors.push('Bundle component GraphQL error for ref "' + ref + '": ' + (json.errors[0] && json.errors[0].message ? json.errors[0].message : 'unknown error'));
-        continue;
-      }
-      var productNode = null;
-      if (normalized.type === 'product_gid') {
-        productNode = json && json.data && json.data.node ? json.data.node : null;
-      } else {
-        productNode = json && json.data && json.data.productByHandle ? json.data.productByHandle : null;
-      }
+      const identifier = normalized.type === 'product_gid' ? {id: normalized.value} : {handle: normalized.value};
+      const {productByIdentifier: productNode} = await readCatalogue(componentQuery, {identifier});
       if (!productNode) {
         result.unresolvedRefs.push(ref);
         continue;
@@ -1398,7 +983,7 @@ async function fetchBundleComponentsByReferences(componentRefs) {
         id: productNode.id,
         handle: toStr(productNode.handle),
         title: productNode.title,
-        variants: mapVariants(productNode.variants && productNode.variants.edges ? productNode.variants.edges : []),
+        variants: mapVariants(await allVariantEdges(productNode.id, productNode.variants)),
       };
       if (normalized.type === 'product_gid') {
         result.resolvedByGidCount += 1;
@@ -1412,46 +997,37 @@ async function fetchBundleComponentsByReferences(componentRefs) {
   }
   return result;
 }
-var collectionProductsRequestCache = {};
-
-async function getCollectionProductsCached(collectionId) {
-  if (!collectionId) {
-    return [];
-  }
-  if (!collectionProductsRequestCache[collectionId]) {
-    collectionProductsRequestCache[collectionId] = fetchProductsForCollection(collectionId).then(function (products) {
-      return products || [];
-    }).catch(function (err) {
-      delete collectionProductsRequestCache[collectionId];
-      throw err;
-    });
-  }
-  return collectionProductsRequestCache[collectionId];
-}
-
 // ---------------- UI ----------------
 export default async function () {
   render(<Modal />, document.body);
 }
 
-function ScreenScroll(props) {
-  return (
-    <s-scroll-box style="height: 100%;">
-      {props.children}
-    </s-scroll-box>
-  );
-}
-
 function Modal() {
+  const nativeHandoverEnabled = useNativeHandoverSetting();
+  const [clubQuery, setClubQuery] = useState('');
+  const [productFilter, setProductFilter] = useState({collectionId: null, value: ''});
+  const [catalogueColumns, setCatalogueColumns] = useState(2);
+  useEffect(() => {
+    let mounted = true;
+    const device = typeof shopify === 'undefined' ? null : shopify.device;
+    if (device?.isTablet) {
+      device.isTablet().then(tablet => {
+        if (mounted && tablet) setCatalogueColumns(3);
+      }).catch(() => {});
+    }
+    return () => { mounted = false; };
+  }, []);
+
+  const [cartAddPending, setCartAddPending] = useState(false);
   var screenState = useState('clubs');
   var screen = screenState[0];
   var setScreen = screenState[1];
 
-  var clubsState = useState(MOCK_CLUBS);
+  var clubsState = useState([]);
   var clubs = clubsState[0];
   var setClubs = clubsState[1];
 
-  var dataSourceState = useState('Mock data');
+  var dataSourceState = useState('Shopify');
   var dataSource = dataSourceState[0];
   var setDataSource = dataSourceState[1];
 
@@ -1502,25 +1078,12 @@ function Modal() {
   var liveSourceStageState = useState('idle');
   var liveSourceStage = liveSourceStageState[0];
   var setLiveSourceStage = liveSourceStageState[1];
-  var errorState = useState('');
-  var errorMessage = errorState[0];
-  var setErrorMessage = errorState[1];
-
-  var productListLoadingState = useState(false);
-  var productListLoading = productListLoadingState[0];
-  var setProductListLoading = productListLoadingState[1];
-
-  var currentProductsState = useState([]);
-  var currentProducts = currentProductsState[0];
-  var setCurrentProducts = currentProductsState[1];
-
-  var currentProductsCollectionIdState = useState(null);
-  var currentProductsCollectionId = currentProductsCollectionIdState[0];
-  var setCurrentProductsCollectionId = currentProductsCollectionIdState[1];
-
-  var productsCacheState = useState({});
-  var productsCache = productsCacheState[0];
-  var setProductsCache = productsCacheState[1];
+  const [rangeLoader] = useState(() => createRangeLoader(fetchProductsForCollection));
+  const [range, setRange] = useState({id: null, products: [], loading: false, error: ''});
+  const {id: currentProductsCollectionId, products: currentProducts, loading: productListLoading, error: productListError} = range;
+  const errorMessage = productListError;
+  const [catalogueAttempt, setCatalogueAttempt] = useState(0);
+  const bundleRequest = useRef(0);
 
   var lastCartActionStatusState = useState('idle');
   var lastCartActionStatus = lastCartActionStatusState[0];
@@ -1690,7 +1253,7 @@ function Modal() {
   var lastEnteredPersonalisation = lastEnteredPersonalisationState[0];
   var setLastEnteredPersonalisation = lastEnteredPersonalisationState[1];
 
-  var loadingState = useState(false);
+  var loadingState = useState(true);
   var loading = loadingState[0];
   var setLoading = loadingState[1];
 
@@ -1818,200 +1381,57 @@ function Modal() {
   var showDebug = showDebugState[0];
   var setShowDebug = showDebugState[1];
 
-  async function loadProductsForCollection(collectionId) {
-    if (!collectionId) {
-      return;
-    }
-    if (productsCache[collectionId] && Array.isArray(productsCache[collectionId])) {
-      setCurrentProductsCollectionId(collectionId);
-      setCurrentProducts(productsCache[collectionId]);
-      setProductListLoading(false);
-      return;
-    }
-    setProductListLoading(true);
-    setCurrentProducts(currentProductsCollectionId === collectionId ? currentProducts : []);
-    setCurrentProductsCollectionId(collectionId);
-    try {
-      var products = await getCollectionProductsCached(collectionId);
-      setCurrentProducts(products);
-      setProductsCache(function (previousCache) {
-        var nextCache = {};
-        var previousKeys = Object.keys(previousCache || {});
-        for (var k = 0; k < previousKeys.length; k += 1) {
-          nextCache[previousKeys[k]] = previousCache[previousKeys[k]];
-        }
-        nextCache[collectionId] = products;
-        return nextCache;
-      });
-    } catch (err) {
-      setErrorMessage(err && err.message ? err.message : String(err));
-      setCurrentProducts([]);
-    }
-    setProductListLoading(false);
+  function loadProductsForCollection(collectionId) {
+    return rangeLoader.select(collectionId, setRange);
   }
 
+  function retryClubs() {
+    setCatalogueAttempt(attempt => attempt + 1);
+  }
+
+  useEffect(() => () => {
+    rangeLoader.leave();
+    bundleRequest.current += 1;
+  }, [rangeLoader]);
 
   useEffect(function () {
-    if (dataSource !== 'Live data') {
-      return;
-    }
-    if (screen !== 'subsections') {
-      return;
-    }
-    if (!selectedClub || !selectedClub.subsections || !Array.isArray(selectedClub.subsections)) {
-      return;
-    }
-    function warmSubsectionCollection(subsectionCollectionId) {
-      if (!subsectionCollectionId) {
-        return;
-      }
-      if (productsCache[subsectionCollectionId] && Array.isArray(productsCache[subsectionCollectionId])) {
-        return;
-      }
-      getCollectionProductsCached(subsectionCollectionId).then(function (products) {
-        setProductsCache(function (previousCache) {
-          var nextCache = {};
-          var previousKeys = Object.keys(previousCache || {});
-          for (var p = 0; p < previousKeys.length; p += 1) {
-            nextCache[previousKeys[p]] = previousCache[previousKeys[p]];
-          }
-          if (!nextCache[subsectionCollectionId]) {
-            nextCache[subsectionCollectionId] = products;
-          }
-          return nextCache;
-        });
-      }).catch(function () {
-        return null;
-      });
-    }
-    for (var i = 0; i < selectedClub.subsections.length; i += 1) {
-      var subsection = selectedClub.subsections[i];
-      warmSubsectionCollection(subsection && subsection.collectionId ? subsection.collectionId : null);
-    }
-  }, [dataSource, screen, selectedClub, productsCache]);
-
-  useEffect(function () {
-    var cancelled = false;
+    let cancelled = false;
     async function load() {
       setLiveFetchStarted(true);
-      setLiveSourceStage('starting fetch');
+      setLiveFetchFailed(false);
+      setLiveFetchErrorMessage('');
+      setLiveSourceStage('loading collections');
       setLoading(true);
       try {
-        setLiveSourceStage('sending admin graphql request');
-        var liveResult = await fetchLiveClubs();
-        if (cancelled) {
-          return;
-        }
-        setLiveSourceStage('parsing graphql response');
-        setPagesFetched(liveResult.pagesFetched || 0);
-        setRawCollectionsCount(liveResult.rawCollectionsCount || 0);
-        setLiveCollectionsCount(liveResult.collectionsCount || 0);
-        setDirectClubsCount(liveResult.directClubsCount || 0);
-        setSubsectionClubsCount(liveResult.subsectionClubsCount || 0);
-        setOrphanChildIgnored(liveResult.orphanChildIgnored || 0);
-        if (!liveResult) {
-          setLiveFetchFailed(true);
-          setLiveFetchSucceeded(false);
-          setLiveFetchErrorMessage('No GraphQL result');
-          setLiveSourceStage('falling back to mock');
-          setPagesFetched(0);
-          setRawCollectionsCount(0);
-          setLiveCollectionsCount(0);
-          setDirectClubsCount(0);
-          setSubsectionClubsCount(0);
-          setOrphanChildIgnored(0);
-          setLiveUsableClubCount(0);
-          setClubs(MOCK_CLUBS);
-          setDataSource('Mock data');
-          setLoading(false);
-          return;
-        }
-        if (liveResult.errors && liveResult.errors.length > 0) {
-          var errMsg = 'GraphQL errors returned (' + liveResult.errors.length + ')';
-          if (liveResult.errors[0] && liveResult.errors[0].message) {
-            errMsg = liveResult.errors[0].message;
-          }
-          setLiveFetchFailed(true);
-          setLiveFetchSucceeded(false);
-          setLiveFetchErrorMessage(errMsg);
-          setLiveSourceStage('falling back to mock');
-          setPagesFetched(0);
-          setRawCollectionsCount(0);
-          setLiveCollectionsCount(0);
-          setDirectClubsCount(0);
-          setSubsectionClubsCount(0);
-          setOrphanChildIgnored(0);
-          setLiveUsableClubCount(0);
-          setClubs(MOCK_CLUBS);
-          setDataSource('Mock data');
-          setLoading(false);
-          return;
-        }
-        setLiveSourceStage('normalizing collections');
-        var liveClubs = liveResult.clubs || [];
-        setLiveUsableClubCount(liveClubs.length);
-        if ((liveResult.collectionsCount || 0) === 0) {
-          setLiveFetchFailed(true);
-          setLiveFetchSucceeded(false);
-          setLiveFetchErrorMessage('Collections query returned 0 collections');
-          setLiveSourceStage('falling back to mock');
-          setPagesFetched(pagesFetched);
-          setRawCollectionsCount(liveResult.rawCollectionsCount || 0);
-          setLiveUsableClubCount(0);
-          setDirectClubsCount(0);
-          setSubsectionClubsCount(0);
-          setOrphanChildIgnored(liveResult.orphanChildIgnored || 0);
-          setClubs(MOCK_CLUBS);
-          setDataSource('Mock data');
-          setLoading(false);
-          return;
-        }
-        if (liveClubs.length === 0) {
-          setLiveFetchFailed(true);
-          setLiveFetchSucceeded(false);
-          setLiveFetchErrorMessage('Collections returned but no usable clubs built');
-          setLiveSourceStage('falling back to mock');
-          setLiveUsableClubCount(0);
-          setDirectClubsCount(0);
-          setSubsectionClubsCount(0);
-          setOrphanChildIgnored(liveResult.orphanChildIgnored || 0);
-          setClubs(MOCK_CLUBS);
-          setDataSource('Mock data');
-          setLoading(false);
-          return;
-        }
-        setLiveSourceStage('using live data');
-        setClubs(liveClubs);
+        const result = await fetchLiveClubs();
+        if (cancelled) return;
+        if (!result.clubs.length) throw new Error('Shopify returned no club shops.');
+        setPagesFetched(result.pagesFetched);
+        setRawCollectionsCount(result.rawCollectionsCount);
+        setLiveCollectionsCount(result.collectionsCount);
+        setDirectClubsCount(result.directClubsCount);
+        setSubsectionClubsCount(result.subsectionClubsCount);
+        setOrphanChildIgnored(result.orphanChildIgnored);
+        setLiveUsableClubCount(result.clubs.length);
+        setClubs(result.clubs);
         setDataSource('Live data');
         setLiveFetchSucceeded(true);
-        setLiveFetchFailed(false);
-        setLiveFetchErrorMessage('');
-      } catch (err) {
-        if (!cancelled) {
-          setLiveFetchFailed(true);
-          setLiveFetchSucceeded(false);
-          setLiveFetchErrorMessage(err && err.message ? err.message : String(err));
-          setLiveSourceStage('falling back to mock');
-          setPagesFetched(0);
-          setRawCollectionsCount(0);
-          setLiveCollectionsCount(0);
-          setDirectClubsCount(0);
-          setSubsectionClubsCount(0);
-          setOrphanChildIgnored(0);
-          setLiveUsableClubCount(0);
-          setClubs(MOCK_CLUBS);
-          setDataSource('Mock data');
-        }
-      }
-      if (!cancelled) {
-        setLoading(false);
+        setLiveSourceStage('using live data');
+      } catch (error) {
+        if (cancelled) return;
+        setLiveFetchFailed(true);
+        setLiveFetchSucceeded(false);
+        setLiveFetchErrorMessage(error.message || 'Could not load club shops.');
+        setLiveSourceStage('could not load live data');
+        setDataSource('Shopify unavailable');
+        setClubs([]);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }
     load();
-    return function () {
-      cancelled = true;
-    };
-  }, []);
+    return () => { cancelled = true; };
+  }, [catalogueAttempt]);
 
   function resetToClubs() {
     setSelectedClub(null);
@@ -2022,9 +1442,9 @@ function Modal() {
     setPrimaryFieldValue('');
     setExtraField1Value('');
     setExtraField2Value('');
-    setCurrentProducts([]);
-    setCurrentProductsCollectionId(null);
-    setProductListLoading(false);
+    rangeLoader.leave();
+    setRange({id: null, products: [], loading: false, error: ''});
+    bundleRequest.current += 1;
     setBundleComponents([]);
     setBundleSelections({});
     setBundleComponentFulfilment({});
@@ -2042,6 +1462,7 @@ function Modal() {
   }
 
   function resetBundleBuilderState() {
+    bundleRequest.current += 1;
     setBundleComponents([]);
     setBundleSelections({});
     setBundleComponentFulfilment({});
@@ -2058,6 +1479,7 @@ function Modal() {
   }
 
   async function loadBundleComponentsForProduct(product) {
+    const currentRequest = ++bundleRequest.current;
     if (!product || !product.bundleMeta || !product.bundleMeta.isBundle) {
       setBundleComponents([]);
       return;
@@ -2093,6 +1515,7 @@ function Modal() {
     }
 
     setBundleLoading(true);
+    setBundleComponentFulfilment({});
     setBundleError('');
     setBundleComponents([]);
     setBundleSelections({});
@@ -2112,6 +1535,7 @@ function Modal() {
 
     if (dataSource === 'Live data' && componentRefs.length > 0) {
       var fetched = await fetchBundleComponentsByReferences(componentRefs);
+      if (bundleRequest.current !== currentRequest) return;
       debugErrors = fetched.errors || [];
       resolvedByHandleCount = fetched.resolvedByHandleCount || 0;
       resolvedByGidCount = fetched.resolvedByGidCount || 0;
@@ -2124,9 +1548,7 @@ function Modal() {
         var fallbackById = normalizedRef.type === 'product_gid' ? fallbackByIdMap[normalizedRef.value] : null;
         var fallbackAny = fallbackByHandle ? fallbackByHandle : fallbackById;
         if (found) {
-          var foundKey = toStr(found.handle);
           loaded.push({
-            key: foundKey !== '' ? foundKey : found.id,
             id: found.id,
             handle: found.handle,
             title: found.title,
@@ -2134,9 +1556,7 @@ function Modal() {
           });
         } else if (fallbackAny) {
           var fallbackAnyHandle = fallbackAny && fallbackAny.handle ? toStr(fallbackAny.handle) : '';
-          var fallbackAnyId = fallbackAny && fallbackAny.id ? toStr(fallbackAny.id) : '';
           loaded.push({
-            key: fallbackAnyHandle !== '' ? fallbackAnyHandle : fallbackAnyId,
             id: fallbackAny.id,
             handle: fallbackAnyHandle,
             title: fallbackAny.title,
@@ -2152,7 +1572,6 @@ function Modal() {
         var component = meta.componentProducts[i];
         var componentHandle = component && component.handle ? toStr(component.handle) : '';
         loaded.push({
-          key: componentHandle !== '' ? componentHandle : component.id,
           id: component.id,
           handle: componentHandle,
           title: component.title,
@@ -2168,10 +1587,13 @@ function Modal() {
       resolvedByGidCount = classifiedGidCount;
     }
 
-    if (loaded.length === 0) {
-      setBundleError('No bundle components could be loaded');
-    }
-    setBundleComponents(loaded);
+    const expectedCount = componentRefs.length || meta.componentProducts.length;
+    const allItemsAvailable = loaded.length > 0 && loaded.length === expectedCount &&
+      loaded.every(item => item.id && item.title && item.variants?.length > 0);
+    if (!allItemsAvailable) setBundleError('Some bundle items or sizes could not be loaded.');
+    const recipe = prepareBundleComponents(allItemsAvailable ? loaded : []);
+    setBundleSelections(recipe.selections);
+    setBundleComponents(recipe.components);
     setBundleDebugUnresolvedRefs(unresolvedRefs);
     setBundleDebugResolvedByHandleCount(resolvedByHandleCount);
     setBundleDebugResolvedByGidCount(resolvedByGidCount);
@@ -2252,6 +1674,7 @@ function Modal() {
   }, [bundleComponents, fulfilmentMode, splitTakeNow]);
 
   async function addBundleParentToCart() {
+    if (typeof shopify !== 'undefined' && pendingCartAdds.has(shopify.cart)) return;
     if (!selectedProduct || !selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle) {
       toast('No bundle selected');
       return;
@@ -2280,7 +1703,7 @@ function Modal() {
       setBundleAddError('Invalid normalized parent variant id');
       return;
     }
-    if (!bundleComponents || bundleComponents.length === 0) {
+    if (bundleLoading || bundleError || !bundleComponents || bundleComponents.length === 0) {
       toast('Bundle components not loaded');
       setBundleAddStatus('failed');
       setBundleAddError('No bundle components loaded');
@@ -2337,40 +1760,14 @@ function Modal() {
     setBundleReadableAttachError('');
     setBundleFinalParentPropertiesCount(0);
 
-    console.log('[BundleAdd] mode=', fulfilmentMode, 'componentCount=', bundleComponents.length);
-    for (var idx = 0; idx < bundleComponents.length; idx += 1) {
-      var item = bundleComponents[idx];
-      var selected = bundleSelections[item.key];
-      var selectedComponentFulfilment = bundleComponentFulfilment[item.key];
-      var componentFulfilment = defaultBundleComponentFulfilment(fulfilmentMode);
-      if (fulfilmentMode === 'split') {
-        componentFulfilment = selectedComponentFulfilment;
-        if (componentFulfilment !== 'take_now' && componentFulfilment !== 'order_later') {
-          toast('Select fulfilment for each bundle component');
-          setBundleAddStatus('failed');
-          setBundleAddError('Missing split fulfilment for component: ' + item.title);
-          return;
-        }
-      } else if (fulfilmentMode === 'order_in') {
-        componentFulfilment = 'order_later';
-      } else {
-        componentFulfilment = 'take_now';
+    if (fulfilmentMode === 'split') {
+      const missingMode = bundleComponents.find(item => !['take_now','order_later'].includes(bundleComponentFulfilment[item.key]));
+      if (missingMode) {
+        toast('Select fulfilment for each bundle component');
+        setBundleAddStatus('failed');
+        setBundleAddError('Missing split fulfilment for component: ' + missingMode.title);
+        return;
       }
-      var fulfilmentKey = 'Bundle Component ' + String(idx + 1) + ' Fulfilment';
-      console.log(
-        '[BundleAdd] component',
-        idx + 1,
-        'title=',
-        item.title,
-        'variant=',
-        selected ? selected.title : '',
-        'state=',
-        selectedComponentFulfilment,
-        'property=',
-        fulfilmentKey,
-        '=>',
-        componentFulfilment
-      );
     }
 
     var personalisationProps = buildPersonalisationProperties(
@@ -2380,25 +1777,29 @@ function Modal() {
       extraField2Value,
       bundleFeeAmount
     );
-    var bundleProps = buildBundleReadableProperties(
-      selectedProduct.title,
-      bundleComponents,
-      bundleSelections,
-      bundleComponentFulfilment,
-      fulfilmentMode,
-      personalisationProps
-    );
+    let bundleProps;
+    try {
+      bundleProps = buildBundleReadableProperties(selectedProduct.title, bundleComponents, bundleSelections,
+        bundleComponentFulfilment, fulfilmentMode, personalisationProps);
+    } catch (error) {
+      setBundleAddStatus('failed');
+      setBundleAddError(error.message);
+      toast(error.message);
+      return;
+    }
     var mshIntentProps = buildBundleMshIntentProperties(fulfilmentMode);
     var mshKeys = Object.keys(mshIntentProps);
     for (var mk = 0; mk < mshKeys.length; mk += 1) {
       bundleProps[mshKeys[mk]] = mshIntentProps[mshKeys[mk]];
     }
     var sanitizedBundleProps = sanitizeLineItemProperties(bundleProps);
-    console.log('[BundleAdd] parentTitle=', selectedProduct.title);
-    console.log('[BundleAdd] selectedParentVariantId(raw)=', parentVariant.id);
-    console.log('[BundleAdd] selectedParentVariantId(normalized)=', normalizedParentVariant.value);
-    console.log('[BundleAdd] rawBundleProperties=', bundleProps);
-    console.log('[BundleAdd] sanitizedBundleProperties=', sanitizedBundleProps);
+    const attributes = Object.entries(sanitizedBundleProps).map(([key, value]) => ({key, value}));
+    if (!verifiedKitHandover(attributes, selectedProduct.title)) {
+      setBundleAddStatus('failed');
+      setBundleAddError('Kit items or handover choices could not be verified.');
+      toast('Check the size and handover for each kit item before adding it.');
+      return;
+    }
 
     setBundleAddStatus(bundleFeeAmount !== null ? 'resolving_fee' : 'adding_parent');
     setBundleAddError('');
@@ -2430,21 +1831,6 @@ function Modal() {
       setScreen('subsections');
       return;
     }
-    if (dataSource === 'Mock data') {
-      setProductListLoading(false);
-      setCurrentProducts(club.products || []);
-      setCurrentProductsCollectionId(club.collectionId ? club.collectionId : club.name);
-      setScreen('products');
-      return;
-    }
-    if (club.collectionId && productsCache[club.collectionId] && Array.isArray(productsCache[club.collectionId])) {
-      setCurrentProducts(productsCache[club.collectionId]);
-      setProductListLoading(false);
-    } else {
-      setCurrentProducts([]);
-      setProductListLoading(true);
-    }
-    setCurrentProductsCollectionId(club.collectionId ? club.collectionId : club.name);
     setScreen('products');
     await loadProductsForCollection(club.collectionId);
   }
@@ -2455,29 +1841,17 @@ function Modal() {
     setSelectedVariant(null);
     setSelectedOptionValues({});
     resetBundleBuilderState();
-    if (dataSource === 'Mock data') {
-      setProductListLoading(false);
-      setCurrentProducts(subsection.products || []);
-      setCurrentProductsCollectionId(subsection.collectionId ? subsection.collectionId : subsection.label);
-      setScreen('products');
-      return;
-    }
-    if (subsection.collectionId && productsCache[subsection.collectionId] && Array.isArray(productsCache[subsection.collectionId])) {
-      setCurrentProducts(productsCache[subsection.collectionId]);
-      setProductListLoading(false);
-    } else {
-      setCurrentProducts([]);
-      setProductListLoading(true);
-    }
-    setCurrentProductsCollectionId(subsection.collectionId ? subsection.collectionId : subsection.label);
     setScreen('products');
     await loadProductsForCollection(subsection.collectionId);
   }
 
   function handleProductPress(product) {
+    setPrimaryFieldValue('');
+    setExtraField1Value('');
+    setExtraField2Value('');
     setSelectedProduct(product);
     var defaultVariant = null;
-    if (product && product.bundleMeta && product.bundleMeta.isBundle && Array.isArray(product.variants) && product.variants.length > 0) {
+    if (product?.variants?.length === 1 || (product?.bundleMeta?.isBundle && product?.variants?.length)) {
       defaultVariant = product.variants[0];
     }
     setSelectedVariant(defaultVariant);
@@ -2637,19 +2011,6 @@ function Modal() {
     }
 
     var endpoint = MACRON_POS_INTENT_ENDPOINT;
-    console.log('[MSH-POS-INTENT] saving pending intent', {
-      endpoint: endpoint,
-      shop: enrichedPayload.shop || '(unset, backend will fallback)',
-      fulfillmentMode: enrichedPayload.fulfillmentMode || '',
-      takeNow: enrichedPayload.takeNow || '',
-      productTitle: enrichedPayload.productTitle || '',
-      variantTitle: enrichedPayload.variantTitle || '',
-      normalizedVariantId: enrichedPayload.normalizedVariantId || '',
-      quantity: enrichedPayload.quantity || '',
-      hasFee: enrichedPayload.hasFee || false,
-      isBundle: enrichedPayload.isBundle || false,
-      bundleSummaryPresent: Boolean(enrichedPayload.bundleSummary),
-    });
 
     var response;
     try {
@@ -2689,7 +2050,6 @@ function Modal() {
         endpoint: endpoint,
         status: status,
         error: errCode,
-        body: json,
       });
       return {
         ok: false,
@@ -2698,12 +2058,6 @@ function Modal() {
       };
     }
 
-    console.log('[MSH-POS-INTENT] saved pending intent', {
-      endpoint: endpoint,
-      status: status,
-      intentId: toStr(json.intentId),
-      expiresAt: toStr(json.expiresAt),
-    });
     return {
       ok: true,
       intentId: toStr(json.intentId),
@@ -2712,178 +2066,39 @@ function Modal() {
   }
 
   async function fetchPersonalisationFeeVariant(feeAmount) {
-    var targetProductHandle = 'personalisation-fee';
-    var targetProductTitle = 'Personalisation fee (system)';
-    setLastFeeProductHandleTarget(targetProductHandle);
-    setLastFeeProductTitleTarget(targetProductTitle);
-    setLastFeeLookupQuery('');
-    setLastFeeCandidateCount(0);
-    setLastFeeVariantScanCount(0);
-    setLastFeeMatchMethod('none');
-    setLastFeeExactTitleValidationPassed(false);
-    setLastFeeProductFound(false);
-    setLastFeeProductId('');
-    setLastFeeVariantTitleMatched('');
-    setLastFeeVariantAvailableForSale(null);
-    if (feeAmount === null || feeAmount === undefined) {
-      return null;
-    }
-    var numericFee = parseFloat(feeAmount);
-    if (isNaN(numericFee) || numericFee <= 0) {
-      return null;
-    }
-    if (typeof fetch === 'undefined') {
-      throw new Error('Admin API fetch unavailable for fee lookup');
-    }
-
-    setLastFeeLookupQuery('productByHandle(handle: "' + targetProductHandle + '")');
-    var gql = 'query FeeVariants($handle: String!) { productByHandle(handle: $handle) { id title variants(first: 100) { edges { node { id title availableForSale selectedOptions { name value } } } } } }';
-    var response = await fetch('shopify:admin/api/graphql.json', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: gql, variables: { handle: targetProductHandle } }),
-    });
-
-    if (!response || !response.ok) {
-      var statusCode = response && response.status ? response.status : 'unknown';
-      var statusText = response && response.statusText ? response.statusText : 'unknown';
-      var bodyText = '';
-      try {
-        bodyText = await response.text();
-      } catch (e) {
-        bodyText = '';
-      }
-      throw new Error('Fee variant fetch HTTP error: ' + statusCode + ' ' + statusText + (bodyText ? ' ' + bodyText : ''));
-    }
-
-    var json;
-    try {
-      json = await response.json();
-    } catch (err) {
-      throw new Error('Fee variant JSON parse error: ' + (err && err.message ? err.message : String(err)));
-    }
-    if (json && json.errors && Array.isArray(json.errors) && json.errors.length > 0) {
-      throw new Error('Fee variant GraphQL error: ' + (json.errors[0] && json.errors[0].message ? json.errors[0].message : 'unknown error'));
-    }
-    if (!json || !json.data) {
-      return null;
-    }
-
-    var feeProductNode = json.data.productByHandle ? json.data.productByHandle : null;
-    setLastFeeCandidateCount(feeProductNode ? 1 : 0);
-
-    if (!feeProductNode) {
-      setLastFeeExactTitleValidationPassed(false);
-      return null;
-    }
-
-    if (toStr(feeProductNode.title) !== targetProductTitle) {
-      setLastFeeExactTitleValidationPassed(false);
-      setLastFeeProductFound(false);
-      setLastFeeProductId(feeProductNode.id ? String(feeProductNode.id) : '');
-      setLastFeeErrorMessage('fee product title mismatch for handle ' + targetProductHandle);
-      return null;
-    }
-
-    setLastFeeExactTitleValidationPassed(true);
-    setLastFeeProductFound(true);
-    setLastFeeProductId(feeProductNode.id ? String(feeProductNode.id) : '');
-
-    var variantEdges = feeProductNode.variants && feeProductNode.variants.edges ? feeProductNode.variants.edges : [];
-    setLastFeeVariantScanCount(variantEdges.length);
-    var feeFixed = numericFee.toFixed(2);
-    var foundByExactTitle = null;
-    var foundByExactOption = null;
-    var foundByNumericText = null;
-
-    for (var v = 0; v < variantEdges.length; v += 1) {
-      var variantNode = variantEdges[v] && variantEdges[v].node ? variantEdges[v].node : null;
-      if (!variantNode) {
-        continue;
-      }
-      var variantTitle = toStr(variantNode.title);
-      if (variantTitle === feeFixed) {
-        foundByExactTitle = { id: variantNode.id, matchedText: variantTitle, availableForSale: variantNode.availableForSale === true };
-        break;
-      }
-      if (variantNode.selectedOptions && Array.isArray(variantNode.selectedOptions)) {
-        for (var o = 0; o < variantNode.selectedOptions.length; o += 1) {
-          var exactOptionValue = toStr(variantNode.selectedOptions[o] ? variantNode.selectedOptions[o].value : '');
-          if (exactOptionValue === feeFixed) {
-            foundByExactOption = { id: variantNode.id, matchedText: exactOptionValue, availableForSale: variantNode.availableForSale === true };
-            break;
-          }
-        }
-      }
-      if (foundByExactOption) {
-        break;
-      }
-
-      var candidateTexts = [];
-      if (variantTitle !== '') {
-        candidateTexts.push(variantTitle);
-      }
-      if (variantNode.selectedOptions && Array.isArray(variantNode.selectedOptions)) {
-        for (var n = 0; n < variantNode.selectedOptions.length; n += 1) {
-          var optionValue = toStr(variantNode.selectedOptions[n] ? variantNode.selectedOptions[n].value : '');
-          if (optionValue !== '') {
-            candidateTexts.push(optionValue);
-          }
-        }
-      }
-
-      for (var c = 0; c < candidateTexts.length; c += 1) {
-        var candidate = toStr(candidateTexts[c]);
-        var candidateAmount = parseFeeAmount(candidate);
-        if (candidateAmount !== null && Math.abs(candidateAmount - numericFee) < 0.0001) {
-          foundByNumericText = { id: variantNode.id, matchedText: candidate, availableForSale: variantNode.availableForSale === true };
-          break;
-        }
-      }
-      if (foundByNumericText) {
-        break;
-      }
-    }
-
-    if (foundByExactTitle && foundByExactTitle.id) {
-      setLastFeeMatchMethod('exact_title');
-      setLastFeeVariantTitleMatched(foundByExactTitle.matchedText ? String(foundByExactTitle.matchedText) : '');
-      setLastFeeVariantAvailableForSale(foundByExactTitle.availableForSale ? true : false);
-      if (!foundByExactTitle.availableForSale) {
-        setLastFeeErrorMessage('matched fee variant is not available for sale');
-        throw new Error('matched fee variant is not available for sale');
-      }
-      return foundByExactTitle.id;
-    }
-
-    if (foundByExactOption && foundByExactOption.id) {
-      setLastFeeMatchMethod('exact_option');
-      setLastFeeVariantTitleMatched(foundByExactOption.matchedText ? String(foundByExactOption.matchedText) : '');
-      setLastFeeVariantAvailableForSale(foundByExactOption.availableForSale ? true : false);
-      if (!foundByExactOption.availableForSale) {
-        setLastFeeErrorMessage('matched fee variant is not available for sale');
-        throw new Error('matched fee variant is not available for sale');
-      }
-      return foundByExactOption.id;
-    }
-
-    if (foundByNumericText && foundByNumericText.id) {
-      setLastFeeMatchMethod('numeric_text');
-      setLastFeeVariantTitleMatched(foundByNumericText.matchedText ? String(foundByNumericText.matchedText) : '');
-      setLastFeeVariantAvailableForSale(foundByNumericText.availableForSale ? true : false);
-      if (!foundByNumericText.availableForSale) {
-        setLastFeeErrorMessage('matched fee variant is not available for sale');
-        throw new Error('matched fee variant is not available for sale');
-      }
-      return foundByNumericText.id;
-    }
-
-    setLastFeeMatchMethod('none');
-    return null;
+    setLastFeeProductHandleTarget(feeProductHandle);
+    setLastFeeProductTitleTarget(feeProductTitle);
+    setLastFeeLookupQuery('FeeVariants: ' + feeProductHandle);
+    const {productId, scanned, match} = await findFeeVariant(feeAmount);
+    setLastFeeProductFound(Boolean(productId));
+    setLastFeeProductId(productId || '');
+    setLastFeeCandidateCount(productId ? 1 : 0);
+    setLastFeeExactTitleValidationPassed(Boolean(productId));
+    setLastFeeVariantScanCount(scanned);
+    setLastFeeMatchMethod(match?.method || 'none');
+    setLastFeeVariantTitleMatched(match?.text || '');
+    setLastFeeVariantAvailableForSale(match ? true : null);
+    return match?.id || null;
   }
 
-
   async function addSelectedProductToCart(product, variant, lineItemProperties, feeAmount, bundleAttachConfig) {
+    const cart = typeof shopify !== 'undefined' ? shopify.cart : null;
+    if (!cart) {
+      toast('Cart API unavailable.');
+      return false;
+    }
+    if (pendingCartAdds.has(cart)) return false;
+    pendingCartAdds.add(cart);
+    setCartAddPending(true);
+    try {
+      return await writeSelectedProduct(product, variant, lineItemProperties, feeAmount, bundleAttachConfig);
+    } finally {
+      pendingCartAdds.delete(cart);
+      setCartAddPending(false);
+    }
+  }
+
+  async function writeSelectedProduct(product, variant, lineItemProperties, feeAmount, bundleAttachConfig) {
     setLastCartActionStatus('idle');
     setLastCartErrorMessage('');
     setLastCartLineItemUuid('');
@@ -3072,13 +2287,19 @@ function Modal() {
         isBundle: Boolean(bundleAttachConfig && bundleAttachConfig.enabled),
         bundleSummary: pendingIntentBundleSummary || '',
       });
+      const isNormalProductFlow = !bundleAttachConfig?.enabled;
+      const pilotHandover = nativeHandoverEnabled && (isNormalProductFlow
+        ? isNativeHandoverProduct(safeReadShopDomain(), product, variant, false, feeRequired, propertiesObject)
+        : isNativeHandoverBundle(safeReadShopDomain(), product, variant, propertiesObject));
+      if (pilotHandover) explicitLineItemIntentProps._msh_handover_owner = 'flow_v1';
+      else delete propertiesObject._msh_handover_owner;
       var explicitIntentKeys = Object.keys(explicitLineItemIntentProps);
       for (var i = 0; i < explicitIntentKeys.length; i += 1) {
         var explicitKey = explicitIntentKeys[i];
         propertiesObject[explicitKey] = explicitLineItemIntentProps[explicitKey];
       }
       var mainLineProperties = sanitizeLineItemProperties(propertiesObject);
-      var isNormalProductFlow = !(bundleAttachConfig && bundleAttachConfig.enabled);
+      if (!isNormalProductFlow && feeRequired) mainLineProperties['Linked Fee Variant Id'] = String(feeNormalized.value);
       if (isNormalProductFlow) {
         var missingNormalMetadata = findMissingNormalProductMetadataKeys(mainLineProperties);
         if (missingNormalMetadata.length > 0) {
@@ -3092,24 +2313,20 @@ function Modal() {
           setLastCartErrorMessage('Missing required Macron POS metadata: ' + missingNormalMetadata.join(', '));
           return false;
         }
-        console.log('[MSH-POS-PRODUCT-DEBUG] CART LINE PAYLOAD', mainLineProperties);
       }
-      setLastLineItemProperties(mainLineProperties);
       var fallbackMarkerProperties = buildMshFallbackMarkerProperties(mainLineProperties);
+      Object.assign(mainLineProperties, fallbackMarkerProperties);
+      setLastLineItemProperties(mainLineProperties);
       var orderFallbackProperties = buildMshOrderFallbackProperties(mainLineProperties, bundleAttachConfig);
       var durableNoteToken = buildMshDurableNoteToken(mainLineProperties, bundleAttachConfig);
       var durableNoteProperties = buildMshDurableNoteProperties(durableNoteToken);
       var fallbackMarkerKeyCount = Object.keys(fallbackMarkerProperties).length;
-      var orderFallbackKeyCount = Object.keys(orderFallbackProperties).length;
-      var durableNoteKeyCount = Object.keys(durableNoteProperties).length;
       setLastPingAttempted(false);
       setLastPingStatus('skipped_direct_fetch');
       setLastPingError('');
-      // Pending intent is now created for BOTH normal product and bundle
-      // flows. The line-item-properties path is unreliable (real orders have
-      // shown raw_properties=[] on the webhook side), so the pending intent
-      // is the durable fallback that lets the webhook auto-fulfil take_today
-      // orders even when properties get stripped at the POS API layer.
+      // Legacy orders keep their Render intent as a fallback if Shopify drops
+      // line properties. Pilot items proceed only after their exact Shopify
+      // line and cart ownership markers have both been confirmed.
       var pendingIntentResult = {ok: false, status: 'not_attempted'};
       var pendingIntentIsBundleFlow = !isNormalProductFlow;
       var pendingIntentPayload = {
@@ -3125,63 +2342,58 @@ function Modal() {
         bundleSummary: pendingIntentIsBundleFlow ? (pendingIntentBundleSummary || '') : '',
         createdAtClient: new Date().toISOString(),
       };
-      setLastIntentRequestAttempted(true);
-      setLastIntentRequestStatus('attempting');
-      setLastIntentRequestError('');
-      console.log(
-        pendingIntentIsBundleFlow
-          ? '[MSH-POS-PRODUCT-DEBUG] BUNDLE INTENT CREATE REQUEST'
-          : '[MSH-POS-PRODUCT-DEBUG] NORMAL PRODUCT INTENT CREATE REQUEST',
-        pendingIntentPayload,
-      );
-      pendingIntentResult = await createPendingMacronPosIntent(pendingIntentPayload);
-      if (pendingIntentResult.ok) {
-        setLastIntentRequestStatus('success');
-        console.log('[MSH-POS-PRODUCT-DEBUG] PENDING INTENT CREATE RESULT', {
-          ok: true,
-          isBundle: pendingIntentIsBundleFlow,
-          intentId: pendingIntentResult.intentId,
-          expiresAt: pendingIntentResult.expiresAt,
-        });
-      } else {
-        setLastIntentRequestStatus('failed');
-        setLastIntentRequestError(pendingIntentResult.error ? String(pendingIntentResult.error) : 'pending_intent_failed');
-        console.error('[MSH-POS-PRODUCT-DEBUG] PENDING INTENT CREATE RESULT', pendingIntentResult);
+      const savePendingIntent = async () => {
+        setLastIntentRequestAttempted(true);
+        setLastIntentRequestStatus('attempting');
+        setLastIntentRequestError('');
+        pendingIntentResult = await createPendingMacronPosIntent(pendingIntentPayload);
+        if (pendingIntentResult.ok) {
+          setLastIntentRequestStatus('success');
+        } else {
+          setLastIntentRequestStatus('failed');
+          setLastIntentRequestError(pendingIntentResult.error ? String(pendingIntentResult.error) : 'pending_intent_failed');
+          console.error('[MSH POS] Pending handover could not be saved.');
 
-        // Hard-fail visibly for take_today orders. Silent failure on the
-        // intent save is exactly the bug that caused unfulfilled orders --
-        // the POS extension MUST surface it instead of swallowing.
-        var isTakeTodayIntent = pendingIntentMode === 'take_today' || pendingIntentTakeNow === 'true';
-        if (isTakeTodayIntent) {
-          toast('Macron POS: take-today intent could not be saved. Auto-fulfilment may fail.');
+          // Hard-fail visibly for take_today orders. Silent failure on the
+          // intent save is exactly the bug that caused unfulfilled orders --
+          // the POS extension MUST surface it instead of swallowing.
+          var isTakeTodayIntent = pendingIntentMode === 'take_today' || pendingIntentTakeNow === 'true';
+          if (isTakeTodayIntent) {
+            toast('Macron POS: take-today intent could not be saved. Auto-fulfilment may fail.');
+          }
         }
+      };
+
+      if (pilotHandover) {
+        setLastIntentRequestStatus('shopify_flow');
+      } else if (isNormalProductFlow) {
+        await savePendingIntent();
       }
 
-      console.log('ADDING BUNDLE WITH PROPERTIES:', propertiesObject);
-      console.log('[MSH Marker] line_item_properties payload=', mainLineProperties);
-      console.log('[MSH Marker] fallback_marker payload=', fallbackMarkerProperties);
-      console.log('[MSH Marker] order_fallback payload=', orderFallbackProperties);
-      console.log('[MSH Marker] durable_note token=', durableNoteToken);
-      console.log('[MSH Marker] durable_note payload=', durableNoteProperties);
-      console.log('[BundleAdd] final parent title=', product && product.title ? product.title : '');
-      console.log('[BundleAdd] final normalized parent variant id=', normalized.value);
-      console.log('[BundleAdd] final addLineItem args=', [normalized.value, mainLineQuantity]);
+      const requiresNewLine = pilotHandover || !isNormalProductFlow;
+      const linesAtAdd = shopify.cart.current?.value?.lineItems;
+      const existingLineIds = new Set(Array.isArray(linesAtAdd) ? linesAtAdd.map(line => line?.uuid) : []);
+      if (requiresNewLine && (!Array.isArray(linesAtAdd) || linesAtAdd.some(line => !line?.uuid))) {
+        toast('Cart is still updating. Check the POS cart before adding this item.');
+        setLastCartActionStatus('failed');
+        return false;
+      }
+      if (requiresNewLine && linesAtAdd.some(line => {
+        if (Number(line.variantId) !== normalized.value) return false;
+        const labels = linePropertiesToObject(line);
+        return labels._msh_source !== 'macron_pos' || !['take_today','order_in','split'].includes(labels._msh_fulfilment_mode);
+      })) {
+        toast('This size is already in the cart without a handover choice. Review that line before adding another.');
+        setLastCartActionStatus('failed');
+        setLastCartErrorMessage('Existing unlabelled variant; no item added');
+        return false;
+      }
       setLastMainLineAddStatus('attempting');
       try {
         mainUuid = await shopify.cart.addLineItem(normalized.value, mainLineQuantity);
         setLastMainLineAddStatus('success');
-        console.log('[MSH POS DEBUG] MAIN LINE ADDED', { uuid: mainUuid ? String(mainUuid) : '', variantId: String(normalized.value), quantity: String(mainLineQuantity) });
-        if (isNormalProductFlow) {
-          console.log('[MSH-POS-PRODUCT-DEBUG] CART LINE ADD RESULT', {
-            ok: true,
-            lineUuid: mainUuid ? String(mainUuid) : '',
-            variantId: String(normalized.value),
-            quantity: String(mainLineQuantity),
-          });
-        }
       } catch (mainAddErr) {
         setLastMainLineAddStatus('failed');
-        console.error('[BundleAdd] main addLineItem error object=', mainAddErr);
         console.error('[BundleAdd] main addLineItem error message=', mainAddErr && mainAddErr.message ? mainAddErr.message : String(mainAddErr));
         throw mainAddErr;
       }
@@ -3193,26 +2405,22 @@ function Modal() {
         return false;
       }
 
+      if (existingLineIds.has(mainUuid) && (requiresNewLine || linePropertiesToObject(findCartLineByUuid(mainUuid)).Bundle)) {
+        // Shopify merged this addition. Re-labelling or deleting the returned
+        // UUID here would also change the customer's earlier units.
+        toast('This line’s quantity may have increased. Check its quantity and handover in the cart before checkout or adding it again.');
+        setLastCartActionStatus('failed');
+        setLastCartErrorMessage('Existing cart line returned; handover needs review');
+        return false;
+      }
+
       setLastPropertiesAttachAttempted(true);
       var linePropertyAttachOk = false;
       if (shopify.cart && typeof shopify.cart.addLineItemProperties === 'function') {
-        console.log('[MSH POS DEBUG] LINE ITEM PROPERTIES OUTBOUND', mainLineProperties);
         try {
           await shopify.cart.addLineItemProperties(mainUuid, mainLineProperties);
           linePropertyAttachOk = true;
           setLastPropertiesAttachStatus('success');
-          console.log('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH SUCCESS', { uuid: String(mainUuid) });
-          if (isNormalProductFlow) {
-            var attachedLine = findCartLineByUuid(mainUuid);
-            var attachedProps = linePropertiesToObject(attachedLine);
-            var attachedMissingKeys = findMissingNormalProductMetadataKeys(attachedProps);
-            console.log('[MSH-POS-PRODUCT-DEBUG] LINE PROPERTIES ATTACH RESULT', {
-              ok: true,
-              lineUuid: String(mainUuid),
-              attachedPropertyCount: Object.keys(attachedProps).length,
-              missingRequiredKeysOnSnapshot: attachedMissingKeys,
-            });
-          }
         } catch (mainPropsErr) {
           setLastPropertiesAttachStatus('failed');
           console.error('[MSH POS DEBUG] LINE ITEM PROPERTIES ATTACH FAILURE', mainPropsErr && mainPropsErr.message ? mainPropsErr.message : String(mainPropsErr));
@@ -3223,7 +2431,7 @@ function Modal() {
               message: mainPropsErr && mainPropsErr.message ? mainPropsErr.message : String(mainPropsErr),
             });
           }
-          if (!pendingIntentResult.ok) {
+          if (isNormalProductFlow && !pendingIntentResult.ok) {
             await rollbackAddedLines('normal product metadata persistence failed (attach + pending intent)');
             toast('Macron POS metadata failed — item not added safely.');
             setLastCartActionStatus('failed');
@@ -3255,12 +2463,13 @@ function Modal() {
           pendingIntentId: pendingIntentResult.intentId || '',
         });
       }
-      if (fallbackMarkerKeyCount > 0) {
+      // When these values already exist on the exact added line the first
+      // property write has also persisted the fallback. Stale or stripped
+      // properties still use the dedicated retry below.
+      if (fallbackMarkerKeyCount > 0 && !hasProperties(linePropertiesToObject(findCartLineByUuid(mainUuid)), fallbackMarkerProperties)) {
         if (shopify.cart && typeof shopify.cart.addLineItemProperties === 'function') {
-          console.log('[MSH Marker] fallback_marker api=shopify.cart.addLineItemProperties line_uuid=', mainUuid);
           try {
             await shopify.cart.addLineItemProperties(mainUuid, fallbackMarkerProperties);
-            console.log('[MSH Marker] fallback_marker write=success');
           } catch (fallbackErr) {
             console.error(
               '[MSH Marker] fallback_marker write=failed error=',
@@ -3270,83 +2479,39 @@ function Modal() {
         } else {
           console.error('[MSH Marker] fallback_marker write=skipped error=Cart API missing addLineItemProperties');
         }
-      } else {
-        console.log('[MSH Marker] fallback_marker write=skipped reason=no marker data');
       }
 
-      if (orderFallbackKeyCount > 0) {
-        if (shopify.cart && typeof shopify.cart.addCartProperties === 'function') {
-          console.log('[MSH Marker] order_fallback api=shopify.cart.addCartProperties');
-          try {
-            await shopify.cart.addCartProperties(orderFallbackProperties);
-            console.log('[MSH Marker] order_fallback write=success');
-          } catch (orderFallbackErr) {
-            console.error(
-              '[MSH Marker] order_fallback write=failed error=',
-              orderFallbackErr && orderFallbackErr.message ? orderFallbackErr.message : String(orderFallbackErr),
-            );
-          }
-        } else {
-          console.error('[MSH Marker] order_fallback write=skipped error=Cart API missing addCartProperties');
-        }
-      } else {
-        console.log('[MSH Marker] order_fallback write=skipped reason=no marker data');
-      }
+      if (isNormalProductFlow) await writeOrderMarkers(shopify.cart, orderFallbackProperties, durableNoteProperties);
 
-      if (durableNoteKeyCount > 0) {
-        if (shopify.cart && typeof shopify.cart.addCartProperties === 'function') {
-          console.log('[MSH Marker] durable_note api=shopify.cart.addCartProperties');
-          try {
-            await shopify.cart.addCartProperties(durableNoteProperties);
-            console.log('[MSH Marker] durable_note write=success');
-          } catch (durableNoteErr) {
-            console.error(
-              '[MSH Marker] durable_note write=failed error=',
-              durableNoteErr && durableNoteErr.message ? durableNoteErr.message : String(durableNoteErr),
-            );
-          }
-        } else {
-          console.error('[MSH Marker] durable_note write=skipped error=Cart API missing addCartProperties');
-        }
-      } else {
-        console.log('[MSH Marker] durable_note write=skipped reason=no marker data');
-      }
+      const matchesMainLine = state => {
+        const line = state?.lineItems?.find(item => item.uuid === mainUuid);
+        return Number(line?.variantId) === normalized.value && line.quantity === mainLineQuantity &&
+          hasProperties(linePropertiesToObject(line), mainLineProperties);
+      };
 
       if (bundleAttachConfig && bundleAttachConfig.enabled) {
         setBundleParentLineAdded(true);
         setBundleParentLineUuid(String(mainUuid));
-        console.log('[BundleAdd] parent line added=yes uuid=', mainUuid);
-        var readableProps = sanitizeLineItemProperties(bundleAttachConfig.readableProperties || {});
-        var readablePropertyCount = Object.keys(readableProps).length;
-        setBundleReadablePropertyCount(readablePropertyCount);
-        var locatedParentLine = findCartLineByUuid(mainUuid);
-        console.log('[BundleAdd] exact parent line located in cart=', locatedParentLine);
+        setBundleReadablePropertyCount(Object.keys(bundleAttachConfig.readableProperties).length);
         setBundleReadableAttachAttempted(true);
-        console.log('[BundleAdd] exact property attach method=shopify.cart.addLineItemProperties');
-        console.log('[BundleAdd] exact attach payload=', readableProps);
-        if (shopify.cart && typeof shopify.cart.addLineItemProperties === 'function') {
+        if (!matchesMainLine(shopify.cart.current?.value)) {
           try {
-            await shopify.cart.addLineItemProperties(mainUuid, readableProps);
-            setBundleReadableAttachStatus('success');
-            setBundleReadableAttachError('');
-            console.log('[BundleAdd] readable property attach result=success');
-          } catch (bundleAttachErr) {
-            var readableAttachMessage = bundleAttachErr && bundleAttachErr.message ? bundleAttachErr.message : String(bundleAttachErr);
-            setBundleReadableAttachStatus('failed');
-            setBundleReadableAttachError(readableAttachMessage);
-            console.error('[BundleAdd] readable property attach result=failed error=', readableAttachMessage);
-            toast('Bundle added, but readable properties failed to attach.');
+            await shopify.cart.addLineItemProperties(mainUuid, mainLineProperties);
+          } catch (error) {
+            console.warn('[MSH POS] Could not retry the kit handover properties.');
           }
-        } else {
-          setBundleReadableAttachStatus('failed');
-          setBundleReadableAttachError('Cart API missing addLineItemProperties');
-          console.error('[BundleAdd] readable property attach result=failed error=Cart API missing addLineItemProperties');
+          if (!await confirmCartState(shopify.cart.current, matchesMainLine)) {
+            await rollbackAddedLines('Kit handover could not be confirmed on its own cart line.');
+            setBundleReadableAttachStatus('failed');
+            setBundleReadableAttachError('Kit handover could not be verified.');
+            setLastCartActionStatus('failed');
+            toast('Kit handover could not be saved. Check the POS cart before checkout or retrying.');
+            return false;
+          }
         }
-        var finalParentLine = findCartLineByUuid(mainUuid);
-        var finalPropertiesCount = countLineProperties(finalParentLine);
-        setBundleFinalParentPropertiesCount(finalPropertiesCount);
-        console.log('[BundleAdd] final cart line snapshot after attach=', finalParentLine);
-        console.log('[BundleAdd] final cart line properties count=', finalPropertiesCount);
+        setBundleReadableAttachStatus('success');
+        setBundleReadableAttachError('');
+        setBundleFinalParentPropertiesCount(countLineProperties(findCartLineByUuid(mainUuid)));
       }
 
       if (feeRequired) {
@@ -3362,6 +2527,14 @@ function Modal() {
             await rollbackAddedLines('fee addLineItem returned no uuid');
             setLastCartActionStatus('failed');
             toast('Fee line could not be added.');
+            return false;
+          }
+          if (!isNormalProductFlow && (feeUuid === mainUuid || existingLineIds.has(feeUuid))) {
+            // Never relabel or delete a fee already present from another sale line.
+            feeUuid = '';
+            await rollbackAddedLines('Shopify reused an existing line for the kit fee.');
+            setLastCartActionStatus('failed');
+            toast('An existing line’s quantity may have increased. Check the kit and fee in the POS cart before checkout.');
             return false;
           }
           setLastFeeLineAddStatus('success');
@@ -3404,7 +2577,7 @@ function Modal() {
           return false;
         }
 
-        if (shopify.cart && shopify.cart.addLineItemProperties) {
+        if (isNormalProductFlow && shopify.cart && shopify.cart.addLineItemProperties) {
           try {
             await shopify.cart.addLineItemProperties(mainUuid, {
               'Linked Fee Variant Id': String(feeNormalized.value),
@@ -3416,20 +2589,64 @@ function Modal() {
         }
       }
 
-      var afterCount = cartLineCount();
+      let afterCount = cartLineCount();
+      let added = afterCount >= beforeCount + expectedIncrease;
+      if (!added) {
+        // A successful native add can return before the cart publishes its
+        // matching line. Observe its receipt rather than submitting it again.
+        const receipts = feeUuid ? [[mainUuid, normalized.value], [feeUuid, feeNormalized.value]] : [[mainUuid, normalized.value]];
+        added = await confirmCartState(shopify.cart.current, state => receipts.every(([uuid, variantId]) =>
+          !existingLineIds.has(uuid) && state?.lineItems?.some(line => line.uuid === uuid &&
+            Number(line.variantId) === variantId && line.quantity > 0)));
+        afterCount = cartLineCount();
+      }
       setLastCartAfterCount(afterCount);
-      if (afterCount >= beforeCount + expectedIncrease) {
+      if (added) {
+        // Only a verified kit with all its components and any fee may leave an
+        // order fallback. A failed add must not become a future handover.
+        if (!isNormalProductFlow) {
+          if (feeRequired) {
+            const feeConfirmed = await confirmCartState(shopify.cart.current, state => {
+              const line = state?.lineItems?.find(item => item.uuid === feeUuid);
+              const properties = linePropertiesToObject(line);
+              return Number(line?.variantId) === feeNormalized.value && line.quantity === 1 &&
+                !properties._msh_handover_owner && hasProperties(properties, feeProps) && matchesMainLine(state);
+            });
+            if (!feeConfirmed) {
+              await rollbackAddedLines('Kit fee could not be verified.');
+              setLastCartActionStatus('failed');
+              toast('Kit fee could not be verified. Check the POS cart before checkout or retrying.');
+              return false;
+            }
+          }
+          await writeOrderMarkers(shopify.cart, orderFallbackProperties, durableNoteProperties);
+          if (!pilotHandover) await savePendingIntent();
+        }
+        if (pilotHandover && !await confirmCartState(shopify.cart.current, state =>
+          matchesMainLine(state) && state.properties?._msh_handover_pilot_seen === 'flow_v1')) {
+          await rollbackAddedLines('Shopify handover markers could not be verified');
+          toast('Handover could not be verified. Check the POS cart before checkout or retrying.');
+          setLastCartActionStatus('failed');
+          setLastCartErrorMessage('Flow handover ownership could not be verified on this line and cart');
+          return false;
+        }
         toast('Added to cart. Cart lines: ' + afterCount);
         setLastCartActionStatus('success');
         setLastCartErrorMessage('');
         return true;
       }
-      toast('Cart API returned, but cart did not update');
+      if (requiresNewLine) {
+        await rollbackAddedLines('Protected handover cart receipt could not be verified.');
+        toast('Handover could not be verified. Check the POS cart before checkout or retrying.');
+        setLastCartActionStatus('failed');
+        setLastCartErrorMessage('Protected handover receipt could not be verified');
+        return false;
+      }
+      toast('Shopify returned a cart receipt. Check the POS cart before adding this item again.');
       setLastCartActionStatus('failed');
-      setLastCartErrorMessage('No cart count change');
+      setLastCartErrorMessage('Cart receipt could not be verified');
       return false;
     } catch (err) {
-      console.error('[BundleAdd] caught error object=', err);
       console.error('[BundleAdd] caught error message=', err && err.message ? err.message : String(err));
       if (mainUuid || feeUuid) {
         await rollbackAddedLines('unexpected cart add failure');
@@ -3443,6 +2660,8 @@ function Modal() {
 
   function handleBack() {
     if (screen === 'bundleBuilder') {
+      bundleRequest.current += 1;
+      setBundleLoading(false);
       setScreen('productDetail');
       return;
     }
@@ -3458,6 +2677,7 @@ function Modal() {
       return;
     }
     if (screen === 'products') {
+      rangeLoader.leave();
       setSelectedProduct(null);
       setSelectedVariant(null);
       setSelectedOptionValues({});
@@ -3721,36 +2941,8 @@ function Modal() {
     );
   }
 
-  function renderScreenIntro(title, subtitle) {
-    var showBack = screen !== 'clubs';
-    return (
-      <s-section>
-        <s-box border="base" cornerRadius="large" padding="base">
-          <s-stack direction="block" gap="base">
-            {showBack ? (
-              <s-stack direction="inline" gap="small" alignItems="center">
-                <s-box inlineSize="auto">
-                  <s-button variant="secondary" onClick={handleBack}>← Back</s-button>
-                </s-box>
-              </s-stack>
-            ) : null}
-            <s-stack direction="block" gap="small">
-              <s-text emphasis="bold">{title}</s-text>
-              {subtitle ? <s-text size="small" appearance="subdued">{subtitle}</s-text> : null}
-            </s-stack>
-          </s-stack>
-        </s-box>
-      </s-section>
-    );
-  }
-
-
-  function productTileColumns() {
-    return 4;
-  }
-
-  function productCardMinHeight() {
-    return '260px';
+  function renderBack(label) {
+    return <s-stack direction="inline"><s-button variant="secondary" disabled={cartAddPending} onClick={handleBack}>{label}</s-button></s-stack>;
   }
 
   function deriveVariantOptionNames(product) {
@@ -3781,755 +2973,280 @@ function Modal() {
     return deriveVariantOptionNames(product).length > 1;
   }
 
-  function getCurrentVariantOptionSelections(product) {
-    var currentSelections = {};
-    if (selectedVariant && selectedVariant.optionMap) {
-      var selectedKeys = Object.keys(selectedVariant.optionMap);
-      for (var i = 0; i < selectedKeys.length; i += 1) {
-        currentSelections[selectedKeys[i]] = selectedVariant.optionMap[selectedKeys[i]];
+  function handleVariantOptionValueSelect(product, name, value) {
+    const names = deriveVariantOptionNames(product);
+    const next = {};
+    let candidates = product.variants;
+    for (const option of names) {
+      const choice = option === name ? value : selectedOptionValues[option];
+      if (!choice) continue;
+      const matching = candidates.filter(variant => variant.optionMap?.[option] === choice);
+      if (matching.length) {
+        next[option] = choice;
+        candidates = matching;
       }
     }
-    var stateKeys = Object.keys(selectedOptionValues || {});
-    for (var s = 0; s < stateKeys.length; s += 1) {
-      currentSelections[stateKeys[s]] = selectedOptionValues[stateKeys[s]];
-    }
-    return currentSelections;
-  }
-
-  function getOptionValuesForProduct(product, optionName) {
-    var values = [];
-    var variants = product && product.variants ? product.variants : [];
-    for (var i = 0; i < variants.length; i += 1) {
-      var optionMap = variants[i] && variants[i].optionMap ? variants[i].optionMap : {};
-      var value = toStr(optionMap[optionName]);
-      if (value !== '' && values.indexOf(value) === -1) {
-        values.push(value);
-      }
-    }
-    return values;
-  }
-
-  function optionValueIsAvailable(product, optionName, optionValue, currentSelections) {
-    var variants = product && product.variants ? product.variants : [];
-    for (var i = 0; i < variants.length; i += 1) {
-      var optionMap = variants[i] && variants[i].optionMap ? variants[i].optionMap : {};
-      if (toStr(optionMap[optionName]) !== toStr(optionValue)) {
-        continue;
-      }
-      var matchesOtherSelections = true;
-      var selectionKeys = Object.keys(currentSelections || {});
-      for (var s = 0; s < selectionKeys.length; s += 1) {
-        var selectionKey = selectionKeys[s];
-        if (selectionKey === optionName) {
-          continue;
-        }
-        var selectionValue = toStr(currentSelections[selectionKey]);
-        if (selectionValue !== '' && toStr(optionMap[selectionKey]) !== selectionValue) {
-          matchesOtherSelections = false;
-          break;
-        }
-      }
-      if (matchesOtherSelections) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function handleVariantOptionValueSelect(product, optionName, optionValue) {
-    var nextSelections = {};
-    var existingKeys = Object.keys(selectedOptionValues || {});
-    for (var i = 0; i < existingKeys.length; i += 1) {
-      nextSelections[existingKeys[i]] = selectedOptionValues[existingKeys[i]];
-    }
-    nextSelections[optionName] = optionValue;
-    setSelectedOptionValues(nextSelections);
-
-    var optionNames = deriveVariantOptionNames(product);
-    var variants = product && product.variants ? product.variants : [];
-    var matches = [];
-    for (var v = 0; v < variants.length; v += 1) {
-      var optionMap = variants[v] && variants[v].optionMap ? variants[v].optionMap : {};
-      var isMatch = true;
-      for (var s = 0; s < optionNames.length; s += 1) {
-        var currentOptionName = optionNames[s];
-        var chosenValue = toStr(nextSelections[currentOptionName]);
-        if (chosenValue !== '' && toStr(optionMap[currentOptionName]) !== chosenValue) {
-          isMatch = false;
-          break;
-        }
-      }
-      if (isMatch) {
-        matches.push(variants[v]);
-      }
-    }
-
-    var allChosen = true;
-    for (var o = 0; o < optionNames.length; o += 1) {
-      if (toStr(nextSelections[optionNames[o]]) === '') {
-        allChosen = false;
-        break;
-      }
-    }
-
-    if (allChosen && matches.length === 1) {
-      setSelectedVariant(matches[0]);
-      return;
-    }
-    if (selectedVariant) {
-      var selectedStillMatches = false;
-      for (var m = 0; m < matches.length; m += 1) {
-        if (matches[m].id === selectedVariant.id) {
-          selectedStillMatches = true;
-          break;
-        }
-      }
-      if (!selectedStillMatches) {
-        setSelectedVariant(null);
-      }
-    }
+    setSelectedOptionValues(next);
+    setSelectedVariant(names.every(option => next[option]) && candidates.length === 1 ? candidates[0] : null);
   }
 
   function renderVariantSelectors(product) {
-    if (!product || !product.variants) {
-      return null;
-    }
+    const variants = product.variants || [];
+    if (!variants.length) return <s-text tone="critical">No sizes available</s-text>;
     if (!productUsesSeparateOptions(product)) {
-      return renderVariants(product);
+      return <OptionButtons items={variants} columns={catalogueColumns === 3 ? 4 : 2} selected={selectedVariant?.id}
+        onPick={handleVariantSelect} disabled={cartAddPending} />;
     }
-    var optionNames = deriveVariantOptionNames(product);
-    var currentSelections = getCurrentVariantOptionSelections(product);
-    return (
-      <s-stack direction="block" gap="base">
-        {optionNames.map(function (optionName) {
-          var values = getOptionValuesForProduct(product, optionName);
-          return (
-            <s-stack key={optionName} direction="block" gap="small">
-              <s-text>{optionName}</s-text>
-              <s-stack direction="inline" wrap="true" gap="small">
-                {values.map(function (value) {
-                  var active = toStr(currentSelections[optionName]) === toStr(value);
-                  var available = optionValueIsAvailable(product, optionName, value, currentSelections);
-                  return (
-                    <s-button
-                      key={optionName + '-' + value}
-                      variant={active ? 'primary' : 'secondary'}
-                      disabled={!available}
-                      onClick={function () { handleVariantOptionValueSelect(product, optionName, value); }}
-                    >
-                      {value}
-                    </s-button>
-                  );
-                })}
-              </s-stack>
-            </s-stack>
-          );
-        })}
-      </s-stack>
-    );
+    const names = deriveVariantOptionNames(product);
+    return <s-stack gap="base">
+      {names.map((name, index) => {
+        const prefix = names.slice(0, index);
+        const compatible = variants.filter(variant => prefix.every(option =>
+          !selectedOptionValues[option] || variant.optionMap?.[option] === selectedOptionValues[option]));
+        const available = new Set(compatible.map(variant => variant.optionMap?.[name]));
+        const values = [...new Set(variants.map(variant => variant.optionMap?.[name]).filter(Boolean))];
+        return <s-stack key={name} gap="small">
+          <s-text type="strong">{name}</s-text>
+          <OptionButtons items={values.map(value => ({id: value, title: value}))}
+            columns={catalogueColumns === 3 ? 4 : 2} selected={selectedOptionValues[name]} disabled={cartAddPending}
+            isAvailable={item => available.has(item.id)}
+            onPick={item => handleVariantOptionValueSelect(product, name, item.id)} />
+        </s-stack>;
+      })}
+    </s-stack>;
   }
-
-
-  function renderImageOrFallback(imageUrl, altText, height, fitMode) {
-    var cleanUrl = toStr(imageUrl);
-    var imageHeight = toStr(height) === '' ? '64px' : toStr(height);
-    var fallbackLabel = altText ? 'No image for ' + altText : 'No image';
-    var imageFit = toStr(fitMode);
-    var fitProps = {};
-    if (imageFit === 'contain' || imageFit === 'cover' || imageFit === 'fill') {
-      fitProps.fit = imageFit;
-    }
-    return (
-      cleanUrl !== '' ? (
-        <s-box blockSize={imageHeight} inlineSize="fill" padding="none">
-          <s-stack direction="block" alignItems="center" justifyContent="center">
-            <s-image src={cleanUrl} accessibilityDescription={altText || ''} {...fitProps} />
-          </s-stack>
-        </s-box>
-      ) : (
-        <s-box blockSize="auto" inlineSize="fill" padding="none">
-          <s-stack direction="block" alignItems="center">
-            <s-text size="small" appearance="subdued">{fallbackLabel}</s-text>
-          </s-stack>
-        </s-box>
-      )
-    );
-  }
-
-
-  function tileWidth(columns) {
-    if (columns === 4) {
-      return '24%';
-    }
-    if (columns === 3) {
-      return '32%';
-    }
-    if (columns === 2) {
-      return '49%';
-    }
-    return '100%';
-  }
-
-
-
-  function renderCollectionTile(item, subtitle, onPress, columns) {
-    var title = item && item.name ? item.name : (item && item.label ? item.label : 'Collection');
-    var imageHeight = columns >= 4 ? '64px' : '72px';
-    return (
-      <s-clickable key={'collection-' + title} onClick={onPress}>
-        <s-box border="base" cornerRadius="large" padding="small">
-          <s-stack direction="block" gap="base">
-            <s-box border="base" cornerRadius="base" padding="small" blockSize={columns >= 4 ? '84px' : '92px'} inlineSize="fill">
-              {renderImageOrFallback(item ? item.imageUrl : '', title, imageHeight, 'contain')}
-            </s-box>
-            <s-stack direction="block" gap="micro" alignItems="center">
-              <s-box style="text-align:center; width:100%;">
-                <s-text emphasis="bold" size="small">{title}</s-text>
-              </s-box>
-              {subtitle ? (
-                <s-box style="text-align:center; width:100%;">
-                  <s-text size="small" appearance="subdued">{subtitle}</s-text>
-                </s-box>
-              ) : null}
-            </s-stack>
-          </s-stack>
-        </s-box>
-      </s-clickable>
-    );
-  }
-
-
-  function renderProductTile(product, onPress, columns) {
-    var imageHeight = columns >= 4 ? '64px' : '72px';
-    return (
-      <s-clickable key={'product-' + product.id} onClick={onPress}>
-        <s-box border="base" cornerRadius="large" padding="small">
-          <s-stack direction="block" gap="base">
-            <s-box border="base" cornerRadius="base" padding="small" blockSize={columns >= 4 ? '84px' : '92px'} inlineSize="fill">
-              {renderImageOrFallback(product.imageUrl, product.title, imageHeight, 'contain')}
-            </s-box>
-            <s-stack direction="block" gap="small" alignItems="center">
-              <s-box style="text-align:center; width:100%;">
-                <s-text emphasis="bold" size="small">{product.title}</s-text>
-              </s-box>
-            </s-stack>
-          </s-stack>
-        </s-box>
-      </s-clickable>
-    );
-  }
-
-
-  function renderGrid(items, renderItem, columns) {
-    var list = items || [];
-    if (list.length === 0) {
-      return null;
-    }
-    var width = tileWidth(columns);
-    return (
-      <s-stack direction="inline" wrap="true" gap="small" alignItems="stretch">
-        {list.map(function (item, index) {
-          var keyBase = item && (item.id || item.name || item.label)
-            ? (item.id || item.name || item.label)
-            : String(index);
-          return (
-            <s-box key={'grid-' + keyBase} inlineSize={width} padding="none">
-              {renderItem(item, columns)}
-            </s-box>
-          );
-        })}
-      </s-stack>
-    );
-  }
-
 
   function renderClubsScreen() {
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          {renderScreenIntro('Club Shop', 'Select a club')}
-          <s-section>
-            <s-stack direction="block" gap="small">
-              <s-text size="small" appearance="subdued">Data source: {dataSource === 'Live data' ? 'Live' : 'Mock'}</s-text>
-              {renderGrid(clubs, function (club) {
-                return renderCollectionTile(
-                  club,
-                  '',
-                  function () { handleClubPress(club); },
-                  4
-                );
-              }, 4)}
+    const visible = (clubs || []).filter(club => matchesSaleSearch(club.name, clubQuery));
+    return <s-page heading="Club shops">
+      <s-scroll-box>
+        <s-stack padding="base" gap="base">
+          <RangeSearch label="Search clubs" value={clubQuery} onChange={setClubQuery} />
+          {loading ? <s-text>Loading clubs…</s-text> : liveFetchFailed ? (
+            <s-stack gap="small">
+              <s-text tone="critical">Couldn’t load club shops.</s-text>
+              <s-button onClick={retryClubs}>Retry</s-button>
             </s-stack>
-          </s-section>
-          <s-box style="margin-top:6px; opacity:0.72;">
-            {renderDiagnosticsToggle()}
-          </s-box>
-          {showDebug ? renderDebugHeader() : null}
-        </ScreenScroll>
-      </s-page>
-    );
+          ) : visible.length ? <CatalogueGrid items={visible} columns={catalogueColumns} onPick={handleClubPress} />
+            : <s-text>{clubQuery.trim() ? 'No matching clubs.' : 'No club shops available.'}</s-text>}
+          {renderDiagnosticsToggle()}
+          {showDebug && renderDebugHeader()}
+        </s-stack>
+      </s-scroll-box>
+    </s-page>;
   }
-
 
   function renderSubsectionsScreen() {
-    if (!selectedClub || !selectedClub.subsections) {
-      return renderClubsScreen();
-    }
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          {renderScreenIntro(selectedClub.name, 'Choose a subsection')}
-          <s-section>
-            <s-stack direction="block" gap="small">
-              {renderGrid(selectedClub.subsections, function (subsection) {
-                return renderCollectionTile(
-                  subsection,
-                  '',
-                  function () { handleSubsectionPress(subsection); },
-                  4
-                );
-              }, 4)}
-            </s-stack>
-          </s-section>
-          <s-box style="margin-top:6px; opacity:0.72;">
-            {renderDiagnosticsToggle()}
-          </s-box>
-          {showDebug ? renderDebugHeader() : null}
-        </ScreenScroll>
-      </s-page>
-    );
+    if (!selectedClub?.subsections) return renderClubsScreen();
+    return <s-page heading={catalogueLabel(selectedClub.name)}>
+      <s-scroll-box>
+        <s-stack padding="base" gap="base">
+          {renderBack('Back to clubs')}
+          <CatalogueGrid items={selectedClub.subsections} columns={catalogueColumns} onPick={handleSubsectionPress} />
+          {renderDiagnosticsToggle()}
+          {showDebug && renderDebugHeader()}
+        </s-stack>
+      </s-scroll-box>
+    </s-page>;
   }
-
-
-  function productsForCurrentSelection() {
-    return currentProducts || [];
-  }
-
 
   function renderProductsScreen() {
-    var products = productsForCurrentSelection();
-    var heading = selectedClub ? selectedClub.name : 'Products';
-    if (selectedSubsection) {
-      heading = selectedClub ? selectedClub.name + ' - ' + selectedSubsection.label : selectedSubsection.label;
-    }
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          {renderScreenIntro(heading, 'Select a product')}
-          <s-section>
-            <s-stack direction="block" gap="small">
-              {productListLoading ? <s-text size="small" appearance="subdued">Loading products…</s-text> : null}
-              {!productListLoading && products.length === 0 ? <s-text>No products found.</s-text> : null}
-              {!productListLoading ? renderGrid(products, function (product) {
-                return renderProductTile(product, function () { handleProductPress(product); }, productTileColumns());
-              }, productTileColumns()) : null}
+    const heading = [selectedClub?.name, selectedSubsection?.label].filter(Boolean).join(' · ') || 'Products';
+    const query = productFilter.collectionId === currentProductsCollectionId ? productFilter.value : '';
+    const visible = (currentProducts || []).filter(product => matchesSaleSearch(product.title, query));
+    return <s-page heading={catalogueLabel(heading)}>
+      <s-scroll-box>
+        <s-stack padding="base" gap="base">
+          {renderBack(selectedClub?.type === 'subsections' ? 'Back to ranges' : 'Back to clubs')}
+          <RangeSearch label="Search this range" value={query}
+            onChange={value => setProductFilter({collectionId: currentProductsCollectionId, value})} />
+          {productListLoading ? <s-text>Loading products…</s-text> : productListError ? (
+            <s-stack gap="small">
+              <s-text tone="critical">Couldn’t load this range.</s-text>
+              <s-button onClick={() => loadProductsForCollection(currentProductsCollectionId)}>Retry</s-button>
             </s-stack>
-          </s-section>
-          <s-box style="margin-top:6px; opacity:0.72;">
-            {renderDiagnosticsToggle()}
-          </s-box>
-          {showDebug ? renderProductDebug() : null}
-          {showDebug ? renderDebugHeader() : null}
-        </ScreenScroll>
-      </s-page>
-    );
-  }
-
-
-  function renderBundleNote(product) {
-    if (!product || !product.bundleMeta || !product.bundleMeta.isBundle) {
-      return null;
-    }
-    return (
-      <s-section heading="Bundle">
-        <s-stack direction="block" gap="micro">
-          <s-text appearance="subdued">Bundle product detected.</s-text>
-          <s-button variant="secondary" onClick={handleBundleBuilderOpen}>
-            Continue to bundle builder
-          </s-button>
+          ) : visible.length ? <CatalogueGrid items={visible} columns={catalogueColumns} onPick={handleProductPress} />
+            : <s-text>{query.trim() ? 'No matching products.' : 'This range has no products.'}</s-text>}
+          {renderDiagnosticsToggle()}
+          {showDebug && renderProductDebug()}
+          {showDebug && renderDebugHeader()}
         </s-stack>
-      </s-section>
-    );
+      </s-scroll-box>
+    </s-page>;
   }
 
-  function renderVariants(product) {
-    if (!product || !product.variants) {
-      return null;
-    }
-    return (
-      <s-stack direction="inline" wrap="true" gap="small">
-        {product.variants.map(function (variant) {
-          var active = selectedVariant && selectedVariant.id === variant.id;
-          return (
-            <s-box key={variant.id} padding="none">
-              <s-button variant={active ? 'primary' : 'secondary'} onClick={function () { handleVariantSelect(variant); }}>
-                {variant.title}
-              </s-button>
-            </s-box>
-          );
-        })}
-      </s-stack>
-    );
-  }
-
-
-  function renderFulfilmentControls(options) {
-    var config = options || {};
-    var hideSplitLineChoice = config.hideSplitLineChoice ? true : false;
-    return (
-      <s-section heading="Fulfilment intent">
-        <s-stack direction="block" gap="small">
-          <s-stack direction="inline" wrap="true" gap="small">
-            <s-button variant={fulfilmentMode === 'take_today' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('take_today'); }}>
-              Take today
-            </s-button>
-            <s-button variant={fulfilmentMode === 'order_in' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('order_in'); }}>
-              Order in
-            </s-button>
-            <s-button variant={fulfilmentMode === 'split' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('split'); }}>
-              Split fulfilment
-            </s-button>
-          </s-stack>
-          {fulfilmentMode === 'split' && !hideSplitLineChoice ? (
-            <s-stack direction="inline" wrap="true" gap="small">
-              <s-text size="small" appearance="subdued">This line:</s-text>
-              <s-button variant={splitTakeNow ? 'primary' : 'secondary'} onClick={function () { setSplitTakeNow(true); }}>
-                Take now
-              </s-button>
-              <s-button variant={!splitTakeNow ? 'primary' : 'secondary'} onClick={function () { setSplitTakeNow(false); }}>
-                Order in
-              </s-button>
-            </s-stack>
-          ) : null}
-        </s-stack>
-      </s-section>
-    );
+  function renderFulfilmentControls() {
+    return <s-section heading="Handover">
+      <OptionButtons columns={catalogueColumns === 3 ? 3 : 2}
+        items={[{id: 'take_today', title: 'Take today'}, {id: 'order_in', title: 'Order in'}, {id: 'split', title: 'Split sale'}]}
+        selected={fulfilmentMode} disabled={cartAddPending} onPick={item => setFulfilmentMode(item.id)} />
+      {fulfilmentMode === 'split' && <s-stack gap="small" paddingBlockStart="small">
+        <s-text>For this item</s-text>
+        <OptionButtons columns={2} items={[{id:'take', title:'Take today'}, {id:'order', title:'Order in'}]}
+          selected={splitTakeNow ? 'take' : 'order'} disabled={cartAddPending} onPick={item => setSplitTakeNow(item.id === 'take')} />
+      </s-stack>}
+    </s-section>;
   }
 
   function renderBundleFulfilmentControls() {
-    return (
-      <s-section heading="Bundle fulfilment">
-        <s-stack direction="block" gap="small">
-          <s-stack direction="inline" wrap="true" gap="small">
-            <s-button variant={fulfilmentMode === 'take_today' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('take_today'); }}>
-              Take today
-            </s-button>
-            <s-button variant={fulfilmentMode === 'order_in' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('order_in'); }}>
-              Order in
-            </s-button>
-            <s-button variant={fulfilmentMode === 'split' ? 'primary' : 'secondary'} onClick={function () { setFulfilmentMode('split'); }}>
-              Split fulfilment
-            </s-button>
-          </s-stack>
-          <s-text size="small" appearance="subdued">
-            {fulfilmentMode === 'take_today' ? 'All components will be marked Take now' : null}
-            {fulfilmentMode === 'order_in' ? 'All components will be marked Order later' : null}
-            {fulfilmentMode === 'split' ? 'Choose fulfilment per component below.' : null}
-          </s-text>
-        </s-stack>
-      </s-section>
-    );
+    return <s-section heading="Bundle handover">
+      <OptionButtons columns={catalogueColumns === 3 ? 3 : 2}
+        items={[{id:'take_today', title:'Take all today'}, {id:'order_in', title:'Order all in'}, {id:'split', title:'Split by item'}]}
+        selected={fulfilmentMode} disabled={cartAddPending} onPick={item => setFulfilmentMode(item.id)} />
+    </s-section>;
   }
 
-  function renderCheckoutReminderPanel() {
-    return (
-      <s-box style="background:#f6f7f8; border:1px solid #dfe3e8; border-radius:10px; padding:12px;">
-        <s-stack direction="block" gap="micro">
-          <s-text emphasis="bold" size="small">Delivery method chosen at checkout</s-text>
-          <s-text size="small" appearance="subdued">
-            After adding this order to cart, use Shopify POS checkout to choose either Ship to customer for delivery or complete it as pickup / in-store.
-          </s-text>
-        </s-stack>
-      </s-box>
-    );
+  function checkoutReminder() {
+    return <s-text type="small" color="subdued">Choose delivery or pickup at Shopify checkout.</s-text>;
   }
-
-  function renderPostAddCheckoutReminder() {
-    return (
-      <s-text size="small" appearance="subdued">
-        Next step after add: choose delivery or pickup in Shopify POS checkout.
-      </s-text>
-    );
-  }
-
 
   function renderProductDetailScreen() {
-    if (!selectedProduct) {
-      return renderProductsScreen();
-    }
-    var meta = selectedProduct.personalisationMeta || {};
-    var hasPersonalisation = hasAnyPersonalisation(meta);
-    var isBundleProduct = selectedProduct.bundleMeta && selectedProduct.bundleMeta.isBundle;
-    var showAddToCart = !hasPersonalisation && !isBundleProduct;
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          <s-section>
-            <s-stack direction="block" gap="base">
-              <s-box style="max-width:360px; margin:0 auto; width:100%;">
-                {renderImageOrFallback(selectedProduct.imageUrl, selectedProduct.title, '232px', 'contain')}
-              </s-box>
-              <s-stack direction="block" gap="micro" alignItems="center">
-                <s-box style="text-align:center; width:100%;">
-                  <s-text emphasis="bold">{selectedProduct.title}</s-text>
-                </s-box>
-              </s-stack>
-              {!selectedProduct.bundleMeta || !selectedProduct.bundleMeta.isBundle ? (
-                <s-text size="small" appearance="subdued">Select size to continue.</s-text>
-              ) : <s-text size="small" appearance="subdued">Bundle options available for this item.</s-text>}
-            </s-stack>
-          </s-section>
-          <s-section heading={productUsesSeparateOptions(selectedProduct) ? 'Options' : 'Size'}>
+    if (!selectedProduct) return renderProductsScreen();
+    const isBundle = selectedProduct.bundleMeta?.isBundle;
+    const personalised = hasAnyPersonalisation(selectedProduct.personalisationMeta || {});
+    return <s-page heading={catalogueLabel(selectedProduct.title)}>
+      <s-scroll-box>
+        <s-stack padding="base" gap="base">
+          {renderBack('Back to products')}
+          {selectedProduct.imageUrl && <s-box inlineSize="88px" blockSize="88px">
+            <s-image src={selectedProduct.imageUrl} alt="" objectFit="contain" />
+          </s-box>}
+          <s-section heading={productUsesSeparateOptions(selectedProduct) ? 'Choose options' : 'Choose size'}>
             {renderVariantSelectors(selectedProduct)}
           </s-section>
-          {renderBundleNote(selectedProduct)}
-          {renderFulfilmentControls()}
-          <s-section heading="Actions">
-            <s-stack direction="block" gap="small">
-              {showAddToCart ? renderCheckoutReminderPanel() : null}
-              {showAddToCart ? (
-                <s-stack direction="block" gap="micro">
-                  <s-button
-                    variant="primary"
-                    onClick={function () {
-                      setLastEnteredPersonalisation(false);
-                      addSelectedProductToCart(selectedProduct, selectedVariant, buildMshIntentProperties(fulfilmentMode, splitTakeNow), null);
-                    }}
-                  >
-                    Add to cart
-                  </s-button>
-                  {renderPostAddCheckoutReminder()}
-                </s-stack>
-              ) : (!isBundleProduct ? (
-                <s-button variant="primary" onClick={function () { setScreen('personalisation'); }}>
-                  Add personalisation
-                </s-button>
-              ) : null)}
-              <s-button variant="secondary" onClick={handleBack}>Back</s-button>
-            </s-stack>
-          </s-section>
-          <s-box style="margin-top:6px; opacity:0.72;">
-            {renderDiagnosticsToggle()}
-          </s-box>
-          {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
-          {showDebug ? renderBundleDebug(selectedProduct) : null}
-          {showDebug ? renderCartDebug() : null}
-          {showDebug ? renderProductDebug() : null}
-          {showDebug ? renderDebugHeader() : null}
-        </ScreenScroll>
-      </s-page>
-    );
+          {isBundle ? <s-button variant="primary" disabled={!selectedVariant || cartAddPending} onClick={handleBundleBuilderOpen}>Choose bundle items</s-button>
+            : personalised ? <s-button variant="primary" disabled={!selectedVariant || cartAddPending}
+              onClick={() => setScreen('personalisation')}>Continue to personalisation</s-button>
+            : selectedVariant && <s-stack gap="small">
+              {renderFulfilmentControls()}
+              <s-button variant="primary" loading={cartAddPending} onClick={() => {
+                setLastEnteredPersonalisation(false);
+                addSelectedProductToCart(selectedProduct, selectedVariant, buildMshIntentProperties(fulfilmentMode, splitTakeNow), null);
+              }}>Add to cart</s-button>
+              {checkoutReminder()}
+            </s-stack>}
+          {renderDiagnosticsToggle()}
+          {showDebug && renderPersonalisationDebug(selectedProduct)}
+          {showDebug && renderBundleDebug(selectedProduct)}
+          {showDebug && renderCartDebug()}
+          {showDebug && renderProductDebug()}
+          {showDebug && renderDebugHeader()}
+        </s-stack>
+      </s-scroll-box>
+    </s-page>;
   }
 
+  function personalisationFields(meta) {
+    const label = (raw, fallback) => {
+      const original = toStr(raw);
+      return ({
+        'Please Enter The Players Name And Age Group': 'Player name and age group',
+        'Please Upload Your Sponsor Logo Here': 'Sponsor logo',
+        'Printed Number To Back Of Shirt': 'Printed number on back of shirt',
+      })[original] || original || fallback;
+    };
+    const fields = [
+      {enabled:meta.enablePersonalisation, label:label(meta.personalisationLabel, 'Personalisation'),
+        required:meta.personalisationRequired, value:primaryFieldValue, set:setPrimaryFieldValue,
+        fee:parseFeeDisplay(meta.personalisationFeeRaw), maxLength:parseMaxChars(meta.personalisationMaxCharsRaw)},
+      {enabled:meta.extraField1Enabled, label:label(meta.extraField1Label, 'Additional information'),
+        required:meta.extraField1Required, value:extraField1Value, set:setExtraField1Value},
+      {enabled:meta.extraField2Enabled, label:label(meta.extraField2Label, 'Additional information 2'),
+        required:meta.extraField2Required, value:extraField2Value, set:setExtraField2Value},
+    ];
+    return <s-section heading="Personalisation">
+      <s-stack gap="base">
+        {fields.map((field, index) => field.enabled && <s-text-field key={index}
+          label={[field.label, field.required ? 'Required' : 'Optional', field.fee].filter(Boolean).join(' · ')}
+          maxLength={field.maxLength ?? undefined} disabled={cartAddPending} value={field.value}
+          onInput={event => field.set(event.currentTarget.value)} />)}
+        {meta.enableFileUpload && <s-stack gap="small">
+          <s-text type="strong">{label(meta.fileUploadLabel, 'File upload')}{meta.fileUploadRequired ? ' · Required' : ''}</s-text>
+          <s-text>Files can’t be uploaded at this till.</s-text>
+          {meta.fileUploadHelpText && <s-text type="small" color="subdued">{meta.fileUploadHelpText}</s-text>}
+        </s-stack>}
+      </s-stack>
+    </s-section>;
+  }
 
   function renderBundleBuilderScreen() {
-    if (!selectedProduct) {
-      return renderProductsScreen();
-    }
-    var meta = selectedProduct.personalisationMeta || {};
-    var feeDisplay = parseFeeDisplay(meta.personalisationFeeRaw);
-    var maxChars = parseMaxChars(meta.personalisationMaxCharsRaw);
-    function polishLabel(label, fallback) {
-      var value = toStr(label);
-      if (value === '') {
-        return fallback;
-      }
-      if (value === 'Please Enter The Players Name And Age Group') {
-        return "Player name and age group";
-      }
-      if (value === 'Please Upload Your Sponsor Logo Here') {
-        return 'Sponsor logo';
-      }
-      return value;
-    }
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          <s-section heading="Build bundle">
-            <s-stack direction="block" gap="base">
-              <s-text>{selectedProduct.title}</s-text>
-              <s-text appearance="subdued">Items to choose: {bundleComponents.length}</s-text>
-              {bundleLoading ? <s-text>Loading bundle components…</s-text> : null}
-              {bundleError !== '' ? <s-text appearance="critical">{bundleError}</s-text> : null}
-              {bundleComponents.map(function (component) {
-                var chosen = bundleSelections[component.key];
-                return (
-                  <s-section key={component.key} heading={component.title}>
-                    <s-box border="base" cornerRadius="large" padding="small">
-                      <s-stack direction="block" gap="small">
-                        <s-text appearance="subdued">{chosen ? ('Selected: ' + chosen.title) : 'Choose one variant'}</s-text>
-                        {component.variants && component.variants.length > 0 ? (
-                          <s-stack direction="inline" wrap="true" gap="small">
-                            {component.variants.map(function (variant) {
-                              var active = chosen && chosen.id === variant.id;
-                              return (
-                                <s-button
-                                  key={variant.id}
-                                  variant={active ? 'primary' : 'secondary'}
-                                  onClick={function () { handleBundleVariantSelect(component.key, variant); }}
-                                >
-                                  {variant.title}
-                                </s-button>
-                              );
-                            })}
-                          </s-stack>
-                        ) : (
-                          <s-text appearance="critical">No variants available for this component</s-text>
-                        )}
-                      </s-stack>
-                    </s-box>
-                  </s-section>
-                );
-              })}
-              {hasAnyPersonalisation(meta) ? (
-                <s-section heading="Bundle personalisation">
-                  <s-stack direction="block" gap="small">
-                    {meta.enablePersonalisation ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(polishLabel(meta.personalisationLabel, 'Personalisation'), meta.personalisationRequired, feeDisplay)}
-                        <s-text-field
-                          value={primaryFieldValue}
-                          maxLength={maxChars === null ? undefined : maxChars}
-                          onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
-
-                    {meta.extraField1Enabled ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(polishLabel(meta.extraField1Label, 'Additional information'), meta.extraField1Required, '')}
-                        <s-text-field
-                          value={extraField1Value}
-                          onInput={function (event) { setExtraField1Value(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
-
-                    {meta.extraField2Enabled ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(polishLabel(meta.extraField2Label, 'Additional information 2'), meta.extraField2Required, '')}
-                        <s-text-field
-                          value={extraField2Value}
-                          onInput={function (event) { setExtraField2Value(event.target.value); }}
-                          placeholder="Enter text"
-                        />
-                      </s-stack>
-                    ) : null}
-
-                    {meta.enableFileUpload ? (
-                      <s-stack direction="block" gap="small">
-                        {fieldLabel(polishLabel(meta.fileUploadLabel, 'Upload file'), meta.fileUploadRequired, '')}
-                        <s-text appearance="critical">File upload is not available in POS V1 for bundle personalisation.</s-text>
-                        <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
-                      </s-stack>
-                    ) : null}
-                  </s-stack>
-                </s-section>
-              ) : null}
-              {renderBundleFulfilmentControls()}
-              {fulfilmentMode === 'split' ? (
-                <s-section heading="Component fulfilment">
-                  <s-stack direction="block" gap="small">
-                    {bundleComponents.map(function (component) {
-                      var componentFulfilmentValue = bundleComponentFulfilment[component.key];
-                      if (componentFulfilmentValue !== 'take_now' && componentFulfilmentValue !== 'order_later') {
-                        componentFulfilmentValue = 'take_now';
-                      }
-                      return (
-                        <s-box key={'fulfilment-' + component.key} border="base" cornerRadius="base" padding="small">
-                          <s-stack direction="block" gap="small">
-                            <s-text emphasis="bold" size="small">{component.title}</s-text>
-                            <s-stack direction="inline" wrap="true" gap="small">
-                              {[
-                                {value: 'take_now', label: 'Take now'},
-                                {value: 'order_later', label: 'Order later'},
-                              ].map(function (option) {
-                                var active = componentFulfilmentValue === option.value;
-                                return (
-                                  <s-button
-                                    key={option.value}
-                                    variant={active ? 'primary' : 'secondary'}
-                                    onClick={function () { handleBundleComponentFulfilmentSelect(component.key, option.value); }}
-                                  >
-                                    {option.label}
-                                  </s-button>
-                                );
-                              })}
-                            </s-stack>
-                          </s-stack>
-                        </s-box>
-                      );
-                    })}
-                  </s-stack>
-                </s-section>
-              ) : null}
-              <s-section heading="Actions">
-                <s-stack direction="block" gap="small">
-                  {renderCheckoutReminderPanel()}
-                  <s-stack direction="block" gap="micro">
-                    <s-button
-                      variant="primary"
-                      onClick={addBundleParentToCart}
-                      disabled={bundleLoading}
-                    >
-                      Add bundle to cart
-                    </s-button>
-                    {renderPostAddCheckoutReminder()}
-                  </s-stack>
-                  <s-button variant="secondary" onClick={handleBack}>Back</s-button>
-                </s-stack>
-              </s-section>
+    if (!selectedProduct) return renderProductsScreen();
+    const meta = selectedProduct.personalisationMeta || {};
+    const titles = bundleComponents.map(component => catalogueLabel(component.title));
+    const titleCounts = new Map();
+    for (const title of titles) titleCounts.set(title, (titleCounts.get(title) || 0) + 1);
+    const rows = bundleComponents.map((component, index) => ({
+      component,
+      label: titleCounts.get(titles[index]) > 1 ? titles[index] + ' (item ' + (index + 1) + ')' : titles[index],
+      variant: bundleSelections[component.key],
+      handover: fulfilmentMode === 'split' ? bundleComponentFulfilment[component.key] : defaultBundleComponentFulfilment(fulfilmentMode),
+    }));
+    const missingSizes = rows.filter(row => !row.variant).length;
+    const ready = rows.length > 0 && missingSizes === 0 && rows.every(row => row.handover) && !bundleError;
+    const handoverOptions = [{id: 'take_now', title: 'Taken today'}, {id: 'order_later', title: 'Owed for collection'}];
+    return <s-page heading={catalogueLabel(selectedProduct.title)}>
+      <s-scroll-box>
+        <s-stack padding="base" gap="base">
+          {renderBack('Back to products')}
+          {selectedProduct.variants?.length > 1 && <s-section heading="Bundle option">
+            {renderVariantSelectors(selectedProduct)}
+          </s-section>}
+          {bundleLoading && <s-text>Loading bundle items…</s-text>}
+          {bundleError && <s-stack gap="small">
+            <s-text tone="critical">{bundleError}</s-text>
+            <s-button disabled={bundleLoading || cartAddPending} onClick={() => loadBundleComponentsForProduct(selectedProduct)}>Retry bundle items</s-button>
+          </s-stack>}
+          {bundleComponents.length > 0 && renderBundleFulfilmentControls()}
+          {rows.map(({component, label, variant, handover}) => <s-section key={component.key} heading={label}>
+            <s-stack gap="small">
+              {component.variants?.length === 1 && variant
+                ? <s-text type="strong">{variant.title === 'Default Title' ? 'Single option' : catalogueLabel(variant.title)}</s-text>
+                : component.variants?.length ? <OptionButtons items={component.variants}
+                columns={catalogueColumns === 3 ? 4 : 2} selected={variant?.id} disabled={cartAddPending}
+                onPick={variant => handleBundleVariantSelect(component.key, variant)} />
+                : <s-text tone="critical">No sizes available for this item.</s-text>}
+              {fulfilmentMode === 'split'
+                ? <OptionButtons columns={2} items={handoverOptions} selected={handover} disabled={cartAddPending}
+                    onPick={item => handleBundleComponentFulfilmentSelect(component.key, item.id)} />
+                : <s-stack alignItems="start"><s-badge tone={handover === 'take_now' ? 'success' : 'caution'}>
+                    {handover === 'take_now' ? 'Taken today' : 'Owed for collection'}
+                  </s-badge></s-stack>}
             </s-stack>
-          </s-section>
-          <s-box style="margin-top:6px; opacity:0.72;">
-            {renderDiagnosticsToggle()}
-          </s-box>
-          {showDebug ? renderBundleDebug(selectedProduct) : null}
-          {showDebug ? renderCartDebug() : null}
-          {showDebug ? renderProductDebug() : null}
-          {showDebug ? renderDebugHeader() : null}
-        </ScreenScroll>
-      </s-page>
-    );
-  }
-
-  function fieldLabel(label, required, feeText) {
-    return (
-      <s-stack direction="block" gap="small">
-        <s-text>{label}</s-text>
-        <s-stack direction="inline" gap="small" wrap="true">
-          {required ? <s-text appearance="critical">Required</s-text> : <s-text appearance="subdued">Optional</s-text>}
-          {feeText ? <s-text appearance="subdued">{feeText}</s-text> : null}
+          </s-section>)}
+          {hasAnyPersonalisation(meta) && personalisationFields(meta)}
+          {ready && <s-section heading="Kit handover">
+            <s-stack gap="base">
+              {handoverOptions.map(option => {
+                const group = rows.filter(row => row.handover === option.id);
+                if (!group.length) return null;
+                return <s-stack key={option.id} gap="small">
+                  <s-stack direction="inline" gap="small" alignItems="center">
+                    <s-badge tone={option.id === 'take_now' ? 'success' : 'caution'}>{option.title}</s-badge>
+                    <s-text type="small">{group.length} {group.length === 1 ? 'item' : 'items'}</s-text>
+                  </s-stack>
+                  {group.map(row => <s-text key={row.component.key}>{row.label}{
+                    row.variant.title === 'Default Title' ? '' : ' — ' + catalogueLabel(row.variant.title)}</s-text>)}
+                </s-stack>;
+              })}
+            </s-stack>
+          </s-section>}
+          {missingSizes > 0 && <s-text>{missingSizes === 1 ? 'Choose a size for 1 more item.' : 'Choose sizes for ' + missingSizes + ' more items.'}</s-text>}
+          <s-button variant="primary" disabled={!ready || bundleLoading} loading={cartAddPending}
+            onClick={addBundleParentToCart}>Add bundle to cart</s-button>
+          {checkoutReminder()}
+          {renderDiagnosticsToggle()}
+          {showDebug && renderBundleDebug(selectedProduct)}
+          {showDebug && renderCartDebug()}
+          {showDebug && renderProductDebug()}
+          {showDebug && renderDebugHeader()}
         </s-stack>
-      </s-stack>
-    );
+      </s-scroll-box>
+    </s-page>;
   }
 
   function renderPersonalisationScreen() {
-    if (!selectedProduct) {
-      return renderProductsScreen();
-    }
-    var meta = selectedProduct.personalisationMeta || {};
-    var feeDisplay = parseFeeDisplay(meta.personalisationFeeRaw);
-    var maxChars = parseMaxChars(meta.personalisationMaxCharsRaw);
-    function polishLabel(label, fallback) {
-      var value = toStr(label);
-      if (value === '') {
-        return fallback;
-      }
-      if (value === 'Please Enter The Players Name And Age Group') {
-        return "Player name and age group";
-      }
-      if (value === 'Please Upload Your Sponsor Logo Here') {
-        return 'Sponsor logo';
-      }
-      if (value === 'Printed Number To Back Of Shirt') {
-        return 'Printed number on back of shirt';
-      }
-      return value;
-    }
+    if (!selectedProduct || !selectedVariant) return renderProductDetailScreen();
+    const meta = selectedProduct.personalisationMeta || {};
 
     function submitPersonalisation() {
       var validation = validatePersonalisationInputs(
@@ -4573,82 +3290,24 @@ function Modal() {
       });
     }
 
-    return (
-      <s-page heading="Macron POS">
-        <ScreenScroll>
-          <s-section heading="Personalisation">
-            <s-stack direction="block" gap="small">
-              <s-text>{selectedProduct.title}</s-text>
-              <s-text appearance="subdued">Variant: {selectedVariant ? selectedVariant.title : ''}</s-text>
-
-              {meta.enablePersonalisation ? (
-                <s-stack direction="block" gap="small">
-                  {fieldLabel(polishLabel(meta.personalisationLabel, 'Personalisation'), meta.personalisationRequired, feeDisplay)}
-                  <s-text-field
-                    value={primaryFieldValue}
-                    maxLength={maxChars === null ? undefined : maxChars}
-                    onInput={function (event) { setPrimaryFieldValue(event.target.value); }}
-                    placeholder="Enter text"
-                  />
-                </s-stack>
-              ) : null}
-
-              {meta.extraField1Enabled ? (
-                <s-stack direction="block" gap="small">
-                  {fieldLabel(polishLabel(meta.extraField1Label, 'Additional information'), meta.extraField1Required, '')}
-                  <s-text-field
-                    value={extraField1Value}
-                    onInput={function (event) { setExtraField1Value(event.target.value); }}
-                    placeholder="Enter text"
-                  />
-                </s-stack>
-              ) : null}
-
-              {meta.extraField2Enabled ? (
-                <s-stack direction="block" gap="small">
-                  {fieldLabel(polishLabel(meta.extraField2Label, 'Additional information 2'), meta.extraField2Required, '')}
-                  <s-text-field
-                    value={extraField2Value}
-                    onInput={function (event) { setExtraField2Value(event.target.value); }}
-                    placeholder="Enter text"
-                  />
-                </s-stack>
-              ) : null}
-
-              {meta.enableFileUpload ? (
-                <s-stack direction="block" gap="small">
-                  {fieldLabel(polishLabel(meta.fileUploadLabel, 'Upload file'), meta.fileUploadRequired, '')}
-                  <s-text appearance="subdued">{meta.fileUploadHelpText || 'File upload not wired in POS V1 yet.'}</s-text>
-                </s-stack>
-              ) : null}
-
-              {renderFulfilmentControls()}
-              <s-section heading="Actions">
-                <s-stack direction="block" gap="small">
-                  {renderCheckoutReminderPanel()}
-                  <s-stack direction="block" gap="micro">
-                    <s-button variant="primary" onClick={submitPersonalisation}>
-                      Add to cart
-                    </s-button>
-                    {renderPostAddCheckoutReminder()}
-                  </s-stack>
-                  <s-button variant="secondary" onClick={handleBack}>
-                    Back
-                  </s-button>
-                </s-stack>
-              </s-section>
-            </s-stack>
-          </s-section>
-          <s-box style="margin-top:6px; opacity:0.72;">{renderDiagnosticsToggle()}</s-box>
-          {showDebug ? renderPersonalisationDebug(selectedProduct) : null}
-          {showDebug ? renderCartDebug() : null}
-          {showDebug ? renderProductDebug() : null}
-          {showDebug ? renderDebugHeader() : null}
-        </ScreenScroll>
-      </s-page>
-    );
+    return <s-page heading={catalogueLabel(selectedProduct.title)}>
+      <s-scroll-box>
+        <s-stack padding="base" gap="base">
+          {renderBack('Back to sizes')}
+          <s-text type="strong">{catalogueLabel(selectedVariant.title)}</s-text>
+          {personalisationFields(meta)}
+          {renderFulfilmentControls()}
+          <s-button variant="primary" loading={cartAddPending} onClick={submitPersonalisation}>Add to cart</s-button>
+          {checkoutReminder()}
+          {renderDiagnosticsToggle()}
+          {showDebug && renderPersonalisationDebug(selectedProduct)}
+          {showDebug && renderCartDebug()}
+          {showDebug && renderProductDebug()}
+          {showDebug && renderDebugHeader()}
+        </s-stack>
+      </s-scroll-box>
+    </s-page>;
   }
-
 
   if (screen === 'subsections') {
     return renderSubsectionsScreen();
